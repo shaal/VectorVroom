@@ -30,17 +30,42 @@ Live at **https://vectorvroom.shaal.dev/** (canonical) and
 on Cloudflare Pages with the WASM vendored in-repo. No build step, no
 backend, no Workers.
 
-To redeploy:
+### Auto-deploy on push (GitHub Actions)
+
+`.github/workflows/deploy.yml` deploys automatically on every push to
+`main` (production) and on every pull request (preview URL at
+`<branch>.vectorvroom.pages.dev`). `workflow_dispatch` is wired too —
+you can redeploy manually from the Actions tab without pushing.
+
+Required repository secrets (Settings → Secrets and variables →
+Actions):
+
+- `CLOUDFLARE_API_TOKEN` — scoped token with **Account → Cloudflare
+  Pages → Edit** (nothing else needed for deploys).
+- `CLOUDFLARE_ACCOUNT_ID` — `376eedb6a8a2b212f869c0bb3683f0f9` for the
+  3Paces account.
+
+Why Actions instead of Cloudflare's native Git integration? The Pages
+project was created direct-upload-first and Cloudflare doesn't support
+attaching a Git source to such projects retroactively. Actions runs
+the exact same `wrangler pages deploy` command the local script uses,
+so behaviour is guaranteed consistent.
+
+### Manual redeploy from your machine
 
 ```sh
 ./scripts/deploy-cloudflare.sh
 ```
 
-The script rsyncs the runtime tree (`AI-Car-Racer/`, `vendor/ruvector/`,
-`_headers`, `_redirects`, root `index.html`) into `$TMPDIR` and uploads
-via `wrangler pages deploy` — the staging step is needed because the
-root `ruvector` dev symlink points at the upstream Rust source tree and
-would otherwise blow through the 25 MiB per-file Pages cap.
+Use this when iterating locally without committing, or when the
+Actions workflow is unavailable. The script rsyncs the runtime tree
+(`AI-Car-Racer/`, `vendor/ruvector/`, `_headers`, `_redirects`, root
+`index.html`) into `$TMPDIR` and uploads via `wrangler pages deploy` —
+the staging step is needed because the root `ruvector` dev symlink
+points at the upstream Rust source tree and would otherwise blow
+through the 25 MiB per-file Pages cap. (The CI workflow skips this
+staging step because the runner's checkout never contains the
+symlink.)
 
 Config files at the repo root control Pages behaviour:
 

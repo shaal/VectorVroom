@@ -1,0 +1,68 @@
+name: Deploy to Cloudflare Pages
+
+# Triggers:
+#   - push to main            → production deploy (vectorvroom.shaal.dev)
+#   - pull_request            → preview deploy at <branch>.vectorvroom.pages.dev
+#   - workflow_dispatch       → manual redeploy button in the Actions tab
+#
+# Uses cloudflare/wrangler-action@v3, which shells out to the same
+# `wrangler pages deploy` command the local scripts/deploy-cloudflare.sh
+# uses. No build step — the WASM is pre-vendored under vendor/ruvector/.
+#
+# Why this workflow instead of Cloudflare's native Git integration?
+# The Pages project was created via `wrangler pages project create`
+# (direct-upload mode); Cloudflare's dashboard doesn't support adding a
+# Git source to direct-upload projects retroactively. This workflow
+# gives us the same push-to-deploy + PR-preview ergonomics without
+# recreating the project.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  deployments: write
+  pull-requests: write  # so wrangler-action can comment preview URLs on PRs
+
+# Only one deploy at a time per branch — if a new push lands while an
+# earlier deploy is still running, cancel the older one. Avoids out-of-
+# order productions landings and redundant uploads.
+concurrency:
+  group: pages-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Publish ${{ github.head_ref || github.ref_name }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # The runner's checkout doesn't contain the root `ruvector`
+          # dev symlink (it's gitignored), so we don't need the rsync
+          # staging step that the local script uses — deploy . directly.
+          command: >-
+            pages deploy .
+            --project-name=vectorvroom
+            --branch=${{ github.head_ref || github.ref_name }}
+            --commit-hash=${{ github.sha }}
+            --commit-message=${{ toJSON(github.event.head_commit.message || github.event.pull_request.title) }}
+
+      - name: Summary
+        run: |
+          echo "### Cloudflare Pages deploy" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Branch: \`${{ github.head_ref || github.ref_name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Deployment URL: ${{ steps.deploy.outputs.deployment-url }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Alias URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}" >> "$GITHUB_STEP_SUMMARY"
