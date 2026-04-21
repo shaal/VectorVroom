@@ -111,6 +111,11 @@ function phaseToLayout(phase){
             <button class='controlButton' onclick='save(); restartBatch();'>Save Best and Restart</button>
             <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
 
+            <div id="trainingPresets" style="display:flex; gap:.35em; margin:.35em 0; flex-wrap:wrap;">
+                <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('fresh')" title="Random brains: N=500, 2×, 10s, variance 0.30">🌱 Fresh</button>
+                <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('grind')" title="Elite drives laps: N=500, 20×, 15s, variance 0.20">🏎️ Grind</button>
+                <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('polish')" title="Refine competent brain: N=1000, 2×, 25s, variance 0.05">✨ Polish</button>
+            </div>
             <div id="inputsContainer">
                 <input min="0" max="2000" id="batchSizeInput" step="50" onkeydown="return false;" type="range" onchange='setN(this.value)' oninput="document.getElementById('batchSizeOutput').value = 'Batch Size: ' + this.value" >
                 <output  id="batchSizeOutput" name="Batch Size"></output>

@@ -184,6 +184,45 @@ function setSeconds(value){
 function setMutateValue(value){
     mutateValue=value;
 }
+// Training-phase presets. Each entry sets the four knobs that dominate
+// training feel: N (population size), simSpeed (stride schedule kicks in
+// above 2×), seconds (per-generation evaluation window), mutateValue
+// (GA variance). Values are step-aligned to the slider granularity so
+// the DOM reflects them exactly.
+//   fresh  — random brains: small population, honest 2× (stride=1), high
+//            variance, short gens. Cheapest path from garbage to "turns".
+//   grind  — elite drives laps consistently: grind raw generation count
+//            via high simSpeed. Fitness noise from stride=3 is tolerated
+//            because elite always survives.
+//   polish — refine a competent brain: wider population, low variance,
+//            longer gens for multi-lap evaluation, honest 2×.
+const TRAINING_PRESETS = {
+    fresh:  { N: 500,  simSpeed: 2,  seconds: 10, mutate: 0.30 },
+    grind:  { N: 500,  simSpeed: 20, seconds: 15, mutate: 0.20 },
+    polish: { N: 1000, simSpeed: 2,  seconds: 25, mutate: 0.05 }
+};
+
+function applyTrainingPreset(name){
+    const p = TRAINING_PRESETS[name];
+    if (!p) return;
+    // Drive the same code paths the sliders use so every downstream
+    // consumer (worker, graphProgress, etc.) sees the change exactly as
+    // if the user had dragged them.
+    setN(p.N);
+    setSeconds(p.seconds);
+    setMutateValue(p.mutate);
+    setSimSpeed(p.simSpeed);
+    // Reflect values in the DOM so the user can see what changed.
+    const bs = document.getElementById('batchSizeInput');
+    if (bs){ bs.value = p.N; document.getElementById('batchSizeOutput').value = 'Batch Size: ' + p.N; }
+    const se = document.getElementById('secondsInput');
+    if (se){ se.value = p.seconds; document.getElementById('secondsOutput').value = 'Round Length: ' + p.seconds; }
+    const mv = document.getElementById('mutateValueInput');
+    if (mv){ mv.value = p.mutate; document.getElementById('mutateValueOutput').value = 'Variance: ' + p.mutate; }
+    const ss = document.getElementById('simSpeedInput');
+    if (ss){ ss.value = String(p.simSpeed); }
+}
+
 function setSimSpeed(value){
     const n = Number(value);
     simSpeed = (Number.isFinite(n) && n > 0) ? n : 1;
