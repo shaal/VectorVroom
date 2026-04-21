@@ -1,0 +1,23 @@
+# Files to skip when uploading to Cloudflare Pages (gitignore-style).
+# Everything the running app needs lives in AI-Car-Racer/ and vendor/;
+# the rest is dev-only scaffolding that would just inflate the deploy.
+
+.git
+.github
+.gitignore
+.claude
+.vscode
+.DS_Store
+
+# Dev-only symlink to the upstream ruvector source tree. Runtime reads
+# only from vendor/ruvector/ (the committed pre-built WASM).
+ruvector
+
+docs
+scripts
+tests
+node_modules
+
+# Editor/OS noise
+*.swp
+Thumbs.db

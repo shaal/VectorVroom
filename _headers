@@ -1,0 +1,16 @@
+# Cloudflare Pages — cache policy
+#
+# Vendored WASM is effectively content-addressable: every rebuild goes
+# through scripts/vendor-ruvector.sh and produces a fresh commit, so the
+# byte content at a given path is stable for the life of that deploy.
+# Safe to cache for a year with `immutable`.
+#
+# App code under AI-Car-Racer/ changes more often; keep a short TTL so
+# iterations land quickly. Pages' default `ETag` + revalidation still
+# protects against stale bundles on top of this.
+
+/vendor/ruvector/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/AI-Car-Racer/*
+  Cache-Control: public, max-age=300

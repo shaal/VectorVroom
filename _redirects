@@ -1,0 +1,9 @@
+# Cloudflare Pages — root redirects
+#
+# The app lives at AI-Car-Racer/index.html because ruvectorBridge.js
+# statically imports `../vendor/ruvector/...` — the server root has to sit
+# one level above AI-Car-Racer/ for that path to resolve. This redirect
+# makes the bare Pages URL land on the game instead of a 404 directory
+# listing. 302 (not 301) so we can move things later without a cached
+# permanent redirect getting in the way.
+/  /AI-Car-Racer/index.html  302

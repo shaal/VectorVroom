@@ -23,6 +23,39 @@ python3 -m http.server 8765
 
 Any static server works (`npx serve`, `caddy file-server`, etc.).
 
+## Deployment (Cloudflare Pages)
+
+Live at **https://vectorvroom.shaal.dev/** (canonical) and
+**https://vectorvroom.pages.dev/** (Pages default) — a pure static deploy
+on Cloudflare Pages with the WASM vendored in-repo. No build step, no
+backend, no Workers.
+
+To redeploy:
+
+```sh
+./scripts/deploy-cloudflare.sh
+```
+
+The script rsyncs the runtime tree (`AI-Car-Racer/`, `vendor/ruvector/`,
+`_headers`, `_redirects`, root `index.html`) into `$TMPDIR` and uploads
+via `wrangler pages deploy` — the staging step is needed because the
+root `ruvector` dev symlink points at the upstream Rust source tree and
+would otherwise blow through the 25 MiB per-file Pages cap.
+
+Config files at the repo root control Pages behaviour:
+
+- `_headers` — year-immutable cache for `vendor/ruvector/*` WASM,
+  5-min TTL for `AI-Car-Racer/*` app code.
+- `_redirects` — reserved for future path rewrites.
+- `index.html` — top-level redirect page that forwards `/` to
+  `/AI-Car-Racer/` (the actual entry point lives one directory down so
+  `ruvectorBridge.js`'s `../vendor/...` imports can resolve).
+- `.assetsignore` — skips dev-only files during upload.
+
+First-time setup: you need a Cloudflare account, a Pages project named
+`vectorvroom` (`wrangler pages project create vectorvroom --production-branch=main`),
+and `wrangler login` completed.
+
 ## New-machine checklist
 
 These are the friction points you may hit on a fresh clone:
