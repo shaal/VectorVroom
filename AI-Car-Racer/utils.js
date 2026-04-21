@@ -46,6 +46,7 @@ function phaseToLayout(phase){
         case 1:
             // rightPanel.innerHTML = "<button onclick='saveTrack()'>Save Track</button><button onclick='deleteTrack()'>Delete Track</button><button onclick='deleteLastPoint()'>Delete Point</button><button onclick='nextPhase()'>Next</button>";
             rightPanel.innerHTML = `
+                <button class='backNext back' disabled aria-disabled='true' title='You are on the first step'>Prev</button>
                 <button class='backNext next' onclick='nextPhase()'>Next</button>
                 <button class='controlButton' onclick='saveTrack()'>Save Track</button>
                 <button class='controlButton' onclick='deleteTrack()'>Delete Track</button>
@@ -104,6 +105,7 @@ function phaseToLayout(phase){
             //                             via the inputCanvas badge wrapper below)
             rightPanel.innerHTML = `
             <button class='backNext back' onclick='backPhase()'>Prev</button>
+            <button class='backNext next' disabled aria-disabled='true' title='Training is the final step'>Next</button>
             <button class='controlButton' id='pause' onclick='pauseGame()'>Pause</button>
             <button class='controlButton' onclick='destroyBrain(); nextBatch();'>Reset Brain</button>
             <button class='controlButton' onclick='resetFastLap();'>Reset Fast Lap</button>

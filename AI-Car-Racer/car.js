@@ -162,26 +162,30 @@ class Car{
     }
 
     #createPolygon(){
-        const points=[];
-        const rad=Math.hypot(this.width,this.height)/2
-        const alpha=Math.atan2(this.width,this.height);
-        points.push({
-            x:this.x-Math.sin(this.angle-alpha)*rad,
-            y:this.y-Math.cos(this.angle-alpha)*rad
-        });
-        points.push({
-            x:this.x-Math.sin(this.angle+alpha)*rad,
-            y:this.y-Math.cos(this.angle+alpha)*rad
-        });
-        points.push({
-            x:this.x-Math.sin(Math.PI+this.angle-alpha)*rad,
-            y:this.y-Math.cos(Math.PI+this.angle-alpha)*rad
-        });
-        points.push({
-            x:this.x-Math.sin(Math.PI+this.angle+alpha)*rad,
-            y:this.y-Math.cos(Math.PI+this.angle+alpha)*rad
-        });
-        return points;
+        // Long isoceles triangle with the tip pointing in the car's forward
+        // direction. Matches the motion convention in update():
+        //   velocity.x += sin(angle);  velocity.y += cos(angle)
+        // so the "forward" unit vector is (sin, cos). The perpendicular used
+        // for the base width is (cos, -sin) — i.e. 90° clockwise from forward.
+        //
+        // Length uses the full car height (tip is h/2 ahead of centre, base
+        // is h/2 behind), base width uses car width. polysIntersect iterates
+        // polygon edges via `(i+1)%poly.length`, so a 3-vertex polygon works
+        // everywhere the previous 4-vertex rectangle did.
+        const halfLen = this.height / 2;
+        const halfWid = this.width / 2;
+        const fx = Math.sin(this.angle);   // forward x
+        const fy = Math.cos(this.angle);   // forward y
+        const rx = Math.cos(this.angle);   // right x (perp to forward)
+        const ry = -Math.sin(this.angle);  // right y
+        return [
+            // tip — forward-most point
+            { x: this.x + fx * halfLen,              y: this.y + fy * halfLen              },
+            // back-right corner
+            { x: this.x - fx * halfLen + rx * halfWid, y: this.y - fy * halfLen + ry * halfWid },
+            // back-left corner
+            { x: this.x - fx * halfLen - rx * halfWid, y: this.y - fy * halfLen - ry * halfWid },
+        ];
     }
     
     #move(){

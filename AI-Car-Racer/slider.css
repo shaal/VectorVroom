@@ -1,102 +1,176 @@
-body {
-    display: flex;
-}
-/* .sliderDiv{
-    width: 100%;
-    display: flex;
-    flex-direction: column; 
-    justify-content: center;
-    align-items: stretch;
-} */
-output{
-    display:block;
-    position: absolute;
-    font-family: Arial;
-    font-size: 1em;
-    color: black;
-    float: left;
-    transform: translate(10%,-1.55em);
+/* =============================================================
+   Range sliders · modern, accessible, amber-themed
+   Replaces the 2010-era `box-shadow: -800px 0 0 800px` fill trick
+   with a CSS-var-driven gradient track (works cross-browser) and
+   a real focusable thumb.
+   ============================================================= */
+
+output {
+    display: inline-block;
+    font-family: var(--font-mono, ui-monospace, monospace);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--ink-700, #403a33);
+    letter-spacing: 0.01em;
+    padding: 0.2em 0.55em;
+    background: var(--surface-1, #fff);
+    border: 1px solid var(--line, #ece2ca);
+    border-radius: var(--r-full, 999px);
+    box-shadow: var(--shadow-xs, 0 1px 2px rgba(58, 39, 10, 0.06));
     pointer-events: none;
-    text-shadow: rgb(131, 131, 131) 1px 1px 3px;
+    user-select: none;
+    margin-top: 0.15em;
+    vertical-align: middle;
+    min-height: 1.5em;
+    line-height: 1.2;
 }
+
 .unselectable {
     user-select: none;
-    -moz-user-select: none;
-    -khtml-user-select: none;
     -webkit-user-select: none;
-    -o-user-select: none;
+    -moz-user-select: none;
 }
 
-input[type="range"] { 
+/* ---------- Base range ---------- */
+input[type="range"] {
     -webkit-appearance: none;
-    overflow: hidden;
-    height: 1.8em;
-    cursor: pointer;
-    border-radius: 100px; /* iOS */
+    appearance: none;
     width: 100%;
-    margin:0;
+    height: 28px;
+    background: transparent;
+    cursor: pointer;
+    margin: 0;
+    padding: 0;
+    display: block;
+
+    /* --fill 0→100 drives the colored portion; default 50% since scripts
+       set .value programmatically right after render. */
+    --fill: 50%;
+    --track-h: 6px;
+    --thumb-d: 18px;
+    --track-fill: linear-gradient(90deg,
+        var(--amber-500, #d38b4b) 0%,
+        var(--amber-500, #d38b4b) var(--fill),
+        var(--ink-200, #d9d2c5) var(--fill),
+        var(--ink-200, #d9d2c5) 100%);
 }
 
-::-webkit-slider-runnable-track {
-    background: #d5d5d5;
+input[type="range"]:focus { outline: none; }
+input[type="range"]:focus-visible {
+    outline: none;
+}
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+    box-shadow:
+        0 0 0 3px rgba(211, 139, 75, 0.35),
+        0 0 0 1px var(--amber-600, #a45a13),
+        var(--shadow-sm, 0 2px 6px rgba(58, 39, 10, 0.07));
+}
+input[type="range"]:focus-visible::-moz-range-thumb {
+    box-shadow:
+        0 0 0 3px rgba(211, 139, 75, 0.35),
+        0 0 0 1px var(--amber-600, #a45a13),
+        var(--shadow-sm, 0 2px 6px rgba(58, 39, 10, 0.07));
 }
 
-/*
- * 1. Set to 0 width and remove border for a slider without a thumb
- * 2. Shadow is negative the full width of the input and has a spread 
- *    of the width of the input.
- */
-::-webkit-slider-thumb {
+input[type="range"]:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* ---------- WebKit / Blink ---------- */
+input[type="range"]::-webkit-slider-runnable-track {
+    height: var(--track-h);
+    border-radius: var(--r-full, 999px);
+    background: var(--track-fill);
+    border: 1px solid var(--line-strong, #d7c9a9);
+}
+
+input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
-    width: 2px; /* 1 */
-    height: 40px;
-    background: #ffdb86;
-    box-shadow: -800px 0 0 800px rgb(227, 138, 15); /* 2 */
-    /* border: 2px solid rgb(109, 58, 0); 1 */
+    appearance: none;
+    width: var(--thumb-d);
+    height: var(--thumb-d);
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 30% 30%,
+            #fff 0%,
+            #fff 38%,
+            var(--amber-300, #f4c691) 100%);
+    border: 2px solid var(--amber-600, #a45a13);
+    box-shadow: var(--shadow-sm, 0 2px 6px rgba(58, 39, 10, 0.07));
+    cursor: grab;
+    margin-top: calc((var(--track-h) - var(--thumb-d)) / 2);
+    transition:
+        transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1),
+        box-shadow 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.08);
+}
+input[type="range"]:active::-webkit-slider-thumb,
+input[type="range"]::-webkit-slider-thumb:active {
+    cursor: grabbing;
+    transform: scale(1.12);
 }
 
-::-moz-range-track {
-    height: 40px;
-    background: #ddd;
+/* ---------- Firefox ---------- */
+input[type="range"]::-moz-range-track {
+    height: var(--track-h);
+    border-radius: 999px;
+    background: var(--ink-200, #d9d2c5);
+    border: 1px solid var(--line-strong, #d7c9a9);
 }
-
-::-moz-range-thumb {
-    background: #fff;
-    height: 40px;
-    width: 20px;
-    border: 3px solid #999;
-    border-radius: 0 !important;
-    box-shadow: -200px 0 0 200px dodgerblue;
-    box-sizing: border-box;
+input[type="range"]::-moz-range-progress {
+    height: var(--track-h);
+    background: var(--amber-500, #d38b4b);
+    border-radius: 999px 0 0 999px;
 }
-
-::-ms-fill-lower { 
-    background: dodgerblue;
+input[type="range"]::-moz-range-thumb {
+    width: var(--thumb-d);
+    height: var(--thumb-d);
+    border-radius: 50%;
+    background:
+        radial-gradient(circle at 30% 30%,
+            #fff 0%,
+            #fff 38%,
+            var(--amber-300, #f4c691) 100%);
+    border: 2px solid var(--amber-600, #a45a13);
+    box-shadow: var(--shadow-sm, 0 2px 6px rgba(58, 39, 10, 0.07));
+    cursor: grab;
+    transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+input[type="range"]::-moz-range-thumb:hover { transform: scale(1.08); }
+input[type="range"]:active::-moz-range-thumb { transform: scale(1.12); cursor: grabbing; }
 
-::-ms-thumb { 
-    background: #fff;
-    border: 2px solid #999;
-    height: 40px;
-    width: 20px;
-    box-sizing: border-box;
-}
-
-::-ms-ticks-after { 
-    display: none; 
-}
-
-::-ms-ticks-before { 
-    display: none; 
-}
-
-::-ms-track { 
-    background: #ddd;
+/* ---------- Legacy Edge (still referenced by dev inspectors) ---------- */
+input[type="range"]::-ms-track {
+    height: var(--track-h);
+    background: transparent;
+    border-color: transparent;
     color: transparent;
-    height: 40px;
-    border: none;
 }
+input[type="range"]::-ms-fill-lower { background: var(--amber-500, #d38b4b); border-radius: 999px; }
+input[type="range"]::-ms-fill-upper { background: var(--ink-200, #d9d2c5); border-radius: 999px; }
+input[type="range"]::-ms-thumb {
+    width: var(--thumb-d);
+    height: var(--thumb-d);
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--amber-600, #a45a13);
+}
+input[type="range"]::-ms-tooltip   { display: none; }
+input[type="range"]::-ms-ticks-after, input[type="range"]::-ms-ticks-before { display: none; }
 
-::-ms-tooltip { 
-    display: none;
+/* Dark-mode tweak: brighten the unfilled portion so it still reads. */
+@media (prefers-color-scheme: dark) {
+    input[type="range"]::-webkit-slider-runnable-track {
+        background:
+            linear-gradient(90deg,
+                var(--amber-500, #d38b4b) 0%,
+                var(--amber-500, #d38b4b) var(--fill),
+                rgba(255, 241, 216, 0.18) var(--fill),
+                rgba(255, 241, 216, 0.18) 100%);
+        border-color: rgba(255, 241, 216, 0.14);
+    }
+    input[type="range"]::-moz-range-track {
+        background: rgba(255, 241, 216, 0.18);
+        border-color: rgba(255, 241, 216, 0.14);
+    }
 }

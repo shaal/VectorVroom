@@ -1,7 +1,14 @@
 <!DOCTYPE html>
 <head>
     <meta charset="utf-8">
-    <title>VRROMMOBILE</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="color-scheme" content="light dark">
+    <meta name="theme-color" content="#fdfaf3" media="(prefers-color-scheme: light)">
+    <meta name="theme-color" content="#141217" media="(prefers-color-scheme: dark)">
+    <title>VectorVroom — train your model</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;0,9..144,700;1,9..144,500&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="slider.css">
     <link rel="stylesheet" href="eli15/eli15.css">
@@ -58,6 +65,49 @@
     <!-- P4.A — guided tour. Depends on ELI15 (above) for drawer access +
          uiPanels (above) so the [data-rv] anchors exist when the tour runs. -->
     <script src="eli15/tour.js"></script>
+    <script>
+      // Drive `--fill` on every <input type="range"> so slider.css can paint
+      // the filled portion of the track with a CSS gradient. The sliders are
+      // rebuilt each phase (utils.js → phaseToLayout) so we both (a) run a
+      // sweep after every mutation under #fullDisplay and (b) listen to input
+      // events via delegation. No-op if the range has no min/max (shouldn't
+      // happen — every slider in utils.js sets both).
+      (() => {
+        const setFill = (el) => {
+          if (!(el instanceof HTMLInputElement) || el.type !== 'range') return;
+          const min = Number(el.min || 0);
+          const max = Number(el.max || 100);
+          const val = Number(el.value);
+          if (!Number.isFinite(min) || !Number.isFinite(max) || max === min) return;
+          const pct = Math.max(0, Math.min(100, ((val - min) / (max - min)) * 100));
+          el.style.setProperty('--fill', pct.toFixed(2) + '%');
+        };
+        const sweep = (root) => {
+          (root || document).querySelectorAll('input[type="range"]').forEach(setFill);
+        };
+        document.addEventListener('input', (e) => setFill(e.target), true);
+        document.addEventListener('change', (e) => setFill(e.target), true);
+        // Initial pass once the DOM settles. phaseToLayout swaps innerHTML so
+        // the MutationObserver below catches every new slider for free.
+        const init = () => {
+          sweep(document);
+          const host = document.getElementById('fullDisplay') || document.body;
+          const mo = new MutationObserver((muts) => {
+            for (const m of muts) {
+              for (const n of m.addedNodes) {
+                if (n.nodeType === 1) sweep(n);
+              }
+            }
+          });
+          mo.observe(host, { childList: true, subtree: true });
+        };
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', init, { once: true });
+        } else {
+          init();
+        }
+      })();
+    </script>
     <script>
       // Preflight + sidecar loader for the ruvector bridge.
       //
