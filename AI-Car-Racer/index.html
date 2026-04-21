@@ -57,19 +57,66 @@
     <!-- P4.A — guided tour. Depends on ELI15 (above) for drawer access +
          uiPanels (above) so the [data-rv] anchors exist when the tour runs. -->
     <script src="eli15/tour.js"></script>
-    <script type="module">
-      // Sidecar module: warms the ruvector bridge and exposes handles on
-      // window.__rvBridge / window.__rvUnflatten / window.__rvDynamics for
-      // classic-script consumers (main.js uses unflatten to turn seed Float32
-      // vectors into NeuralNetwork instances; the bridge itself has no
-      // globalThis access to NeuralNetwork).
-      import * as bridge from './ruvectorBridge.js';
-      import * as dynamics from './dynamicsEmbedder.js';
-      import { unflatten } from './brainCodec.js';
-      window.__rvBridge = bridge;
-      window.__rvDynamics = dynamics;
-      window.__rvUnflatten = unflatten;
-      bridge.ready().catch((e) => console.error('[ruvector] init failed', e));
+    <script>
+      // Preflight + sidecar loader for the ruvector bridge.
+      //
+      // ruvectorBridge.js and its siblings statically import `../vendor/...`
+      // — that path resolves above the server root when the dev server is
+      // launched from inside AI-Car-Racer/ (a common mistake), which 404s
+      // the wasm artifacts and cascades into a silent "bridge not ready"
+      // state across every vector-memory UI panel. Catching static-import
+      // failures from the outside isn't possible, so we probe the vendor
+      // tree with a HEAD request *before* loading any module — if the
+      // probe fails we show a DOM banner explaining the launcher mistake
+      // and don't load the module at all. If the probe succeeds we inject
+      // the sidecar module dynamically with the same body as before.
+      (async () => {
+        const VENDOR_PROBE = '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js';
+        const probeUrl = new URL(VENDOR_PROBE, document.baseURI).href;
+        let reachable = false;
+        try {
+          const resp = await fetch(probeUrl, { method: 'HEAD' });
+          reachable = resp.ok;
+        } catch (_) { reachable = false; }
+
+        if (!reachable) {
+          const b = document.createElement('div');
+          b.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#8b1a1a;color:#fff;padding:14px 20px;z-index:99999;font:13px/1.45 system-ui,-apple-system,sans-serif;box-shadow:0 2px 10px rgba(0,0,0,.4);';
+          b.innerHTML =
+            '<strong>ruvector bridge disabled</strong> — vendored wasm tree not reachable from this origin.<br>' +
+            'Probe returned 404 for <code style="background:#2a0f0f;padding:1px 4px;border-radius:2px">' + probeUrl + '</code><br><br>' +
+            'Most common cause: the static server was launched from <code>AI-Car-Racer/</code>. Launch from the repo root instead:' +
+            '<pre style="background:#2a0f0f;padding:8px;margin:6px 0;border-radius:3px;overflow:auto;white-space:pre-wrap;">./scripts/serve.sh\n# or manually:\n# cd &lt;repo-root&gt; &amp;&amp; python3 -m http.server 8765\n# then open http://localhost:8765/AI-Car-Racer/index.html</pre>' +
+            '<small>Training + physics still work without the bridge; vector-memory panels (archive, lineage, reranker) will stay empty.</small>';
+          document.body.appendChild(b);
+          console.error('[ruvector] preflight failed — vendor tree unreachable at', probeUrl);
+          return;
+        }
+
+        const s = document.createElement('script');
+        s.type = 'module';
+        // Sidecar module: warms the ruvector bridge and exposes handles on
+        // window.__rvBridge / window.__rvUnflatten / window.__rvDynamics for
+        // classic-script consumers (main.js uses unflatten to turn seed
+        // Float32 vectors into NeuralNetwork instances; the bridge itself has
+        // no globalThis access to NeuralNetwork).
+        s.textContent = [
+          "import * as bridge from './ruvectorBridge.js';",
+          "import * as dynamics from './dynamicsEmbedder.js';",
+          "import { unflatten } from './brainCodec.js';",
+          "window.__rvBridge = bridge;",
+          "window.__rvDynamics = dynamics;",
+          "window.__rvUnflatten = unflatten;",
+          "bridge.ready().catch((e) => {",
+          "  console.error('[ruvector] init failed after preflight:', e);",
+          "  const b = document.createElement('div');",
+          "  b.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#8b4a1a;color:#fff;padding:12px 20px;z-index:99999;font:13px/1.45 system-ui,-apple-system,sans-serif';",
+          "  b.innerHTML = '<strong>ruvector init failed after preflight:</strong> ' + ((e && e.message) || String(e)) + ' — see console for details';",
+          "  document.body.appendChild(b);",
+          "});",
+        ].join('\n');
+        document.body.appendChild(s);
+      })();
     </script>
 </body>
 </html>
