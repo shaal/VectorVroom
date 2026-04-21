@@ -39,6 +39,19 @@ if (localStorage.getItem("maxSpeed")){
 if (localStorage.getItem("fastLap")){
     fastLap = JSON.parse(localStorage.getItem("fastLap"));
 }
+// Vector-memory integration (P4.C). `?rv=0` disables the bridge entirely;
+// `currentSeedIds` carries the retrieval set across begin()→nextBatch() so
+// archiveBrain can record parent lineage and observe() can credit the seeds.
+var rvDisabled = new URLSearchParams(location.search).get('rv') === '0';
+var currentSeedIds = [];
+var generation = 0;
+
+function bridgeReady(){
+    if (rvDisabled) return false;
+    var b = window.__rvBridge;
+    return !!(b && b.info && b.info().ready && window.__rvUnflatten);
+}
+
 function begin(){
     seconds = nextSeconds;
     pause=false;
@@ -47,14 +60,64 @@ function begin(){
     cars=generateCars(batchSize);
     // cars[0].update(road.borders, road.checkPointList);//create polygon
     frameCount=0;
-    if(localStorage.getItem("bestBrain")){
+    currentSeedIds = [];
+
+    var seededFromBridge = false;
+    if (bridgeReady()){
+        try {
+            var bridge = window.__rvBridge;
+            var trackVec = window.currentTrackVec || null;
+            var seeds = bridge.recommendSeeds(trackVec, 10);
+            if (seeds && seeds.length > 0){
+                currentSeedIds = seeds.map(function(s){ return s.id; });
+                // PRD seeding: elitism + light mutation + heavy mutation + novelty.
+                // Generalised from N=10 to the user's configurable batchSize:
+                //   - 1 elite (unmutated top retrieval)
+                //   - ~half of the remainder: light mutation, cycling through seeds
+                //   - ~half of the remainder: heavy mutation, cycling through seeds
+                //   - at least 1 novelty slot: random init (leave Car's default brain)
+                var N = cars.length;
+                var nElite = Math.min(1, N);
+                var nNovel = Math.max(1, Math.floor(N * 0.1));
+                var remaining = N - nElite - nNovel;
+                var nLight = Math.max(0, Math.floor(remaining / 2));
+                var nHeavy = Math.max(0, remaining - nLight);
+                var lightAmt = mutateValue * 0.5;
+                var heavyAmt = Math.min(1, mutateValue * 1.8);
+                for (var i = 0; i < N; i++){
+                    if (i < nElite){
+                        cars[i].brain = window.__rvUnflatten(seeds[0].vector);
+                    } else if (i < nElite + nLight){
+                        var s1 = seeds[(i - nElite) % seeds.length];
+                        cars[i].brain = window.__rvUnflatten(s1.vector);
+                        NeuralNetwork.mutate(cars[i].brain, lightAmt);
+                    } else if (i < nElite + nLight + nHeavy){
+                        var s2 = seeds[(i - nElite - nLight) % seeds.length];
+                        cars[i].brain = window.__rvUnflatten(s2.vector);
+                        NeuralNetwork.mutate(cars[i].brain, heavyAmt);
+                    }
+                    // else: novelty slot — keep the random brain from `new Car(...)`
+                }
+                console.log('[ruvector] seeded ' + N + ' cars from ' + seeds.length +
+                    ' retrievals (elite=' + nElite + ', light=' + nLight +
+                    ', heavy=' + nHeavy + ', novel=' + nNovel + ')');
+                seededFromBridge = true;
+            }
+        } catch (e) {
+            console.warn('[ruvector] seeding failed — falling back to stock', e);
+        }
+    }
+
+    // Stock path: used for ?rv=0, for "bridge not ready yet" (e.g. phase-1 boot),
+    // and as graceful fallback when the vector archive is empty but the user
+    // already has a localStorage.bestBrain from a prior run.
+    if (!seededFromBridge && localStorage.getItem("bestBrain")){
         for(let i = 0; i<cars.length;i++){
             cars[i].brain=JSON.parse(localStorage.getItem("bestBrain"));
             if(i!=0){
                 NeuralNetwork.mutate(cars[i].brain,mutateValue);
             }
         }
-        // bestCar.brain=JSON.parse(localStorage.getItem("bestBrain"));
     }
     bestCar = cars[0];
 }
@@ -95,6 +158,29 @@ function nextBatch(){
         fastLap = Math.min(...bestCar.lapTimes);
         localStorage.setItem('fastLap', JSON.stringify(fastLap));
     }
+
+    // Vector-memory archive + GNN-fallback feedback. Fitness matches the
+    // `testBestCar` tiebreaker used in animate(): total checkpoints passed
+    // across completed laps + progress on the current lap.
+    if (bridgeReady() && bestCar){
+        try {
+            var fitness = bestCar.checkPointsCount +
+                (bestCar.laps || 0) * (road.checkPointList ? road.checkPointList.length : 0);
+            var trackVec = window.currentTrackVec || null;
+            window.__rvBridge.archiveBrain(
+                bestCar.brain, fitness, trackVec, generation, currentSeedIds.slice()
+            );
+            if (currentSeedIds.length){
+                window.__rvBridge.observe(currentSeedIds, fitness);
+            }
+            console.log('[ruvector] gen=' + generation + ' archived best fitness=' + fitness +
+                (currentSeedIds.length ? ' (observed ' + currentSeedIds.length + ' seeds)' : ''));
+        } catch (e){
+            console.warn('[ruvector] archive/observe failed', e);
+        }
+    }
+    generation += 1;
+
     begin();
     // location.reload();
 }

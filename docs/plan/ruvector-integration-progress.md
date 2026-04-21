@@ -35,9 +35,9 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** `P4.C` (`main.js`: seed from `recommendSeeds`, archive in `nextBatch`, honor `?rv=0`). Consume the bridge via `window.__rvBridge` (see working note 2026-04-20 · sess-ship-task-b) — `main.js` is still a classic script, so `import` is not an option inside it. If P4.C's author decides `main.js` *should* become a module, that refactor is in-scope for P4.C and must re-expose `begin`/`phase`/`pause`/etc. on `window` or rewrite all classic-script consumers.
+> **Now ready to claim:** `P4.D` (`roadEditor.js` + `buttonResponse.js`: rasterize canvas at track-finalize, call `bridge.embedTrack(imageData)`, store result on `window.currentTrackVec`). Main.js already reads `window.currentTrackVec` on every `begin()`/`nextBatch()` — just set it and the seeding/archival picks up the track embedding automatically with no further main.js changes.
 >
-> **Phase 4 heads-up (still relevant for P4.D/E):** `window.NeuralNetwork` and `window.Level` bridges are now present in `index.html` after `network.js` loads — don't duplicate them.
+> **Phase 4 heads-up (still relevant for P4.D/E):** (a) `window.NeuralNetwork` and `window.Level` bridges are in `index.html` after `network.js` loads — don't duplicate them. (b) The sidecar now also exposes `window.__rvUnflatten` (for classic-script consumers that need to turn a seed `Float32Array` into a `NeuralNetwork`). (c) `main.js` uses `window.currentTrackVec` as the sole track-embedding source — that's the one variable P4.D needs to own.
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
@@ -100,7 +100,7 @@ P4.A is the only one that has zero deps on the bridge — claim it first if you 
 |---|---|---|---|---|---|---|
 | P4.A | Delete `AI-Car-Racer/networkArchive.js` (orphan dead code, not loaded by `index.html`). | `[x]` | sess-2026-04-20-ship-task | P1.1 | `networkArchive.js` removed | Verified 2026-04-20: game boots at `http://localhost:8766/AI-Car-Racer/index.html`, track-editor buttons (Next/Save Track/Delete Track/Delete Point) render correctly. |
 | P4.B | `AI-Car-Racer/index.html`: sidecar `<script type="module">` imports bridge and exposes `window.__rvBridge`; `main.js` left classic to preserve globals (see 2026-04-20 working note for rationale). Added `NeuralNetwork`/`Level` globalThis bridge and `<div id="rv-panel">`. | `[x]` | sess-2026-04-20-ship-task-b | P3.B | edited `index.html` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8765/AI-Car-Racer/index.html`: boot renders track editor, `[ruvector] ready — brains=0 tracks=0 obs=0` logs, `#rv-panel` present, `window.__rvBridge.info().ready === true`, classic globals (`phase`, `begin`, `road`, etc.) intact. |
-| P4.C | `AI-Car-Racer/main.js`: in `begin()`, replace the `localStorage.bestBrain` block (lines 50-58) with `bridge.recommendSeeds(currentTrackVec, k=10)` and seed cars per the PRD (elitism + light/heavy mutation + novelty). In `nextBatch()`, call `bridge.archiveBrain(bestCar.brain, fitness, currentTrackVec, gen, parents)` and `bridge.observe(...)`. Keep cold-start fallback (random init when archive empty). Honor `?rv=0` URL flag to disable bridge. | `[ ]` |  | P3.A, P3.B, P4.B | edited `main.js` | Cold start (empty archive) is behaviorally identical to stock. Refresh after one generation → `recommendSeeds` returns prior winner. `?rv=0` falls back to stock behavior. |
+| P4.C | `AI-Car-Racer/main.js`: in `begin()`, replace the `localStorage.bestBrain` block (lines 50-58) with `bridge.recommendSeeds(currentTrackVec, k=10)` and seed cars per the PRD (elitism + light/heavy mutation + novelty). In `nextBatch()`, call `bridge.archiveBrain(bestCar.brain, fitness, currentTrackVec, gen, parents)` and `bridge.observe(...)`. Keep cold-start fallback (random init when archive empty). Honor `?rv=0` URL flag to disable bridge. | `[x]` | sess-2026-04-20-ship-task-c | P3.A, P3.B, P4.B | edited `main.js`; added `window.__rvUnflatten` to `index.html` sidecar | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8765/AI-Car-Racer/index.html`: cold start shows `brains=0`, `archiveBrain`→reload→`brains=1` (IDB round-trip), `recommendSeeds(null,10)` returns the archived `vec_0` as 92-dim vector, `begin()` on hydrated archive logs `[ruvector] seeded 10 cars from 1 retrievals (elite=1, light=4, heavy=4, novel=1)` — matches PRD split. `?rv=0` → `rvDisabled=true`, `bridgeReady()` false, `currentSeedIds=[]`, no seeded-log. |
 | P4.D | `AI-Car-Racer/roadEditor.js`: at track-finalize (the transition from `phase=2` track-editing into `phase=3/4` — find the exact hook in `buttonResponse.js`), rasterize the canvas to ~224×224, call `bridge.embedTrack(imageData)`, store the result on a module-level `currentTrackVec`. | `[ ]` |  | P3.B, P4.B | edited `roadEditor.js` (and likely `buttonResponse.js`) | Drawing two near-identical tracks → cosine sim of the resulting vectors > 0.9. Wildly different track → sim drops. |
 | P4.E | Add `AI-Car-Racer/uiPanels.js`: render the "similar past brains" sidebar and "this track resembles…" badge into `#rv-panel`. Add styles in `style.css` (or a new `rv-panel.css`). | `[ ]` |  | P4.B | `uiPanels.js`, css edits | Panel renders; badge appears on track-finalize when archive is non-empty |
 
@@ -126,7 +126,7 @@ These items are independent of each other — each touches a different UI afford
 The PRD's *Verification* section lists six gates. Re-run the relevant ones whenever a phase closes.
 
 - [x] **Boot**: page loads, no console errors, bridge logs `[ruvector] ready` — verified 2026-04-20 in full game context at `http://127.0.0.1:8765/AI-Car-Racer/index.html` (after P4.B sidecar-module wiring). The two HNSW-warning lines are upstream `vector_db.rs:93` stylised warnings, expected on wasm-web builds using the flat index.
-- [ ] **Cold start**: empty archive → behaves identically to stock AI-Car-Racer (after P4.C)
+- [x] **Cold start**: empty archive → behaves identically to stock AI-Car-Racer (after P4.C) — verified 2026-04-20: with empty archive, `begin()` falls through the bridge branch (`seededFromBridge=false`) and uses the original `localStorage.bestBrain` path unchanged (or random init if no bestBrain). On first-ever boot, `begin()` runs before the async `bridge.ready()` resolves, so `bridgeReady()` returns false and the stock path runs regardless of archive state — this is what preserves the "identical to stock" property at the phase-1 welcome screen.
 - [x] **Archive round-trip**: `archiveBrain` → refresh → `recommendSeeds` returns the same vector (after P3.B) — verified 2026-04-20 via `docs/validation/phase3-verify.html`. Bridge owns persistence directly via native IndexedDB; upstream `VectorDB.saveToIndexedDB/loadFromIndexedDB` are stubs.
 - [x] **Codec**: `unflatten(flatten(b))` is structurally equal to `b`; `feedForward` outputs match (after P3.A) — verified 2026-04-21 via `docs/validation/phase2-verify.html`, `feedForward` output `[1,0,1,1]` matches on both brains.
 - [ ] **Track similarity**: similar tracks → cosine sim > 0.9 (after P4.D)
@@ -315,4 +315,72 @@ Sessions: append a dated entry below — don't edit prior entries.
       resolves fine because index.html is served from
       `AI-Car-Racer/index.html`. If you move the bridge loader elsewhere,
       fix the path.
+
+2026-04-20 · sess-ship-task-c · P4.C complete.
+  Work:
+    - main.js begin(): introduced bridgeReady() gate that checks `?rv=0`,
+      bridge readiness, AND window.__rvUnflatten presence. Seeding runs
+      when all three pass AND recommendSeeds returns ≥1 hit. Seeding split
+      is PRD-compliant for N=10 (elite=1, light=4, heavy=4, novel=1) and
+      generalises via Math.floor to any batchSize ≥ 3. Lightly-mutated
+      uses `mutateValue * 0.5`, heavy uses `min(1, mutateValue * 1.8)`.
+      The "novelty" slot leaves the random brain created by `new Car(...)`
+      untouched — that's the simplest way to get a fresh random policy
+      without allocating another NeuralNetwork.
+    - main.js nextBatch(): archiveBrain + observe wired in after the
+      existing `save()` call (localStorage.bestBrain path preserved, per
+      PRD "keep for one version as a fallback"). Fitness = checkPointsCount
+      + laps * checkPointList.length — matches the `testBestCar` tiebreaker
+      in animate() so archived and in-flight fitness are on the same scale.
+      `generation` increments per batch; `currentSeedIds` is carried across
+      begin→nextBatch so parentIds + observe() both reference the correct
+      retrieval set.
+    - index.html sidecar: added `import { unflatten } from './brainCodec.js';
+      window.__rvUnflatten = unflatten;`. Classic-script main.js couldn't
+      call the bridge's unflatten directly because the bridge never
+      re-exports it (the bridge was designed to push unflatten out to the
+      caller — see the comment at `recommendSeeds`). Exposing it via
+      window.* is the minimal bridge that keeps main.js classic.
+
+  Fallback-chain design (one-line summary):
+    begin() takes the FIRST of these that applies, in order:
+      1. bridge seeding (if bridgeReady() AND seeds.length > 0)
+      2. localStorage.bestBrain mutation (stock path; survives ?rv=0 AND
+         "bridge ready but archive empty but user has a prior stock brain")
+      3. nothing — Car's constructor already produced random brains
+    #2 preserves the stock-regression bar from the PRD Verification section
+    AND provides a graceful migration path for users coming from pre-P4.C
+    runs that only had localStorage.bestBrain.
+
+  Verification (via agent-browser, headless Chromium at
+  http://127.0.0.1:8765/AI-Car-Racer/index.html):
+    - Cold start: IDB cleared → `[ruvector] ready — brains=0 tracks=0 obs=0`
+    - Archive → reload: `[ruvector] ready — brains=1 tracks=0 obs=0`
+    - recommendSeeds(null, 10) → 1 hit, id=vec_0, vector.length=92
+    - begin() on hydrated archive → `[ruvector] seeded 10 cars from 1
+      retrievals (elite=1, light=4, heavy=4, novel=1)`
+    - cars[0].brain instanceof NeuralNetwork === true (unflatten produced
+      a real class instance, not a plain object)
+    - ?rv=0: rvDisabled=true, bridgeReady()=false, currentSeedIds=[], no
+      seeded-log. Bridge still loads (sidecar unconditional) — that's the
+      intentional design: the flag gates *consumption*, not init.
+
+  Notes for P4.D:
+    - main.js reads `window.currentTrackVec` on every begin() and
+      nextBatch(). Just set it in roadEditor.js after calling
+      bridge.embedTrack(imageData) and seeding/archival will pick up the
+      track embedding automatically — no further main.js changes needed.
+    - embedTrack expects Uint8Array of RGB bytes (length=w*h*3, NO alpha)
+      per the bridge signature `embedTrack(imageData, width, height)`. If
+      you start from ImageData (RGBA), strip the alpha: every 4th byte
+      discarded. Canonical size per PRD is 224×224 (CnnEmbedder default).
+
+  Notes for P4.E (uiPanels.js):
+    - `recommendSeeds` returns `[{id, vector, meta, score, trackSim}]`.
+      trackSim ∈ [-1, 1] (cosine). meta has {fitness, trackId, generation,
+      parentIds, timestamp}. Render trackSim as "This track is N% similar"
+      via `Math.round(50 + 50 * trackSim)`.
+    - P4.C stores lineage in archived brains (parentIds = currentSeedIds),
+      so the sparkline from P5.B can walk meta.parentIds backwards through
+      _brainMirror without touching the bridge.
 ```
