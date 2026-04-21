@@ -35,9 +35,9 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** `P4.B` (`index.html` module conversion) — `P3.B` and `P4.A` are `[x]`. Phase 4 is the remaining game-wiring block; P4.B → P4.C → P4.D → P4.E run sequentially because they share `index.html`/`main.js` context. `P4.E` can go parallel with `P4.D` since they touch different files.
+> **Now ready to claim:** `P4.C` (`main.js`: seed from `recommendSeeds`, archive in `nextBatch`, honor `?rv=0`). Consume the bridge via `window.__rvBridge` (see working note 2026-04-20 · sess-ship-task-b) — `main.js` is still a classic script, so `import` is not an option inside it. If P4.C's author decides `main.js` *should* become a module, that refactor is in-scope for P4.C and must re-expose `begin`/`phase`/`pause`/etc. on `window` or rewrite all classic-script consumers.
 >
-> **Phase 4 heads-up:** because `network.js` declares `NeuralNetwork`/`Level` as classic-script top-level classes, those bindings are NOT on `globalThis`. Phase 4 `index.html` edits must add a one-line bridge after `network.js` loads: `<script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>`. Without it, `brainCodec.unflatten` (a module) cannot see the class. Validation page at `docs/validation/phase2-verify.html` is the reference pattern.
+> **Phase 4 heads-up (still relevant for P4.D/E):** `window.NeuralNetwork` and `window.Level` bridges are now present in `index.html` after `network.js` loads — don't duplicate them.
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
@@ -99,7 +99,7 @@ P4.A is the only one that has zero deps on the bridge — claim it first if you 
 | ID | Task | Status | Owner | Depends on | Outputs | Verification |
 |---|---|---|---|---|---|---|
 | P4.A | Delete `AI-Car-Racer/networkArchive.js` (orphan dead code, not loaded by `index.html`). | `[x]` | sess-2026-04-20-ship-task | P1.1 | `networkArchive.js` removed | Verified 2026-04-20: game boots at `http://localhost:8766/AI-Car-Racer/index.html`, track-editor buttons (Next/Save Track/Delete Track/Delete Point) render correctly. |
-| P4.B | `AI-Car-Racer/index.html`: change `<script src="main.js">` → `type="module"`. Import `ruvectorBridge.js`. Add `<div id="rv-panel">` placeholder. Other game scripts stay classic for now (or convert to imports inside `main.js`). | `[ ]` |  | P3.B | edited `index.html` | Game boots; `[ruvector] ready` logs to console; `rv-panel` div exists in DOM |
+| P4.B | `AI-Car-Racer/index.html`: sidecar `<script type="module">` imports bridge and exposes `window.__rvBridge`; `main.js` left classic to preserve globals (see 2026-04-20 working note for rationale). Added `NeuralNetwork`/`Level` globalThis bridge and `<div id="rv-panel">`. | `[x]` | sess-2026-04-20-ship-task-b | P3.B | edited `index.html` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8765/AI-Car-Racer/index.html`: boot renders track editor, `[ruvector] ready — brains=0 tracks=0 obs=0` logs, `#rv-panel` present, `window.__rvBridge.info().ready === true`, classic globals (`phase`, `begin`, `road`, etc.) intact. |
 | P4.C | `AI-Car-Racer/main.js`: in `begin()`, replace the `localStorage.bestBrain` block (lines 50-58) with `bridge.recommendSeeds(currentTrackVec, k=10)` and seed cars per the PRD (elitism + light/heavy mutation + novelty). In `nextBatch()`, call `bridge.archiveBrain(bestCar.brain, fitness, currentTrackVec, gen, parents)` and `bridge.observe(...)`. Keep cold-start fallback (random init when archive empty). Honor `?rv=0` URL flag to disable bridge. | `[ ]` |  | P3.A, P3.B, P4.B | edited `main.js` | Cold start (empty archive) is behaviorally identical to stock. Refresh after one generation → `recommendSeeds` returns prior winner. `?rv=0` falls back to stock behavior. |
 | P4.D | `AI-Car-Racer/roadEditor.js`: at track-finalize (the transition from `phase=2` track-editing into `phase=3/4` — find the exact hook in `buttonResponse.js`), rasterize the canvas to ~224×224, call `bridge.embedTrack(imageData)`, store the result on a module-level `currentTrackVec`. | `[ ]` |  | P3.B, P4.B | edited `roadEditor.js` (and likely `buttonResponse.js`) | Drawing two near-identical tracks → cosine sim of the resulting vectors > 0.9. Wildly different track → sim drops. |
 | P4.E | Add `AI-Car-Racer/uiPanels.js`: render the "similar past brains" sidebar and "this track resembles…" badge into `#rv-panel`. Add styles in `style.css` (or a new `rv-panel.css`). | `[ ]` |  | P4.B | `uiPanels.js`, css edits | Panel renders; badge appears on track-finalize when archive is non-empty |
@@ -125,7 +125,7 @@ These items are independent of each other — each touches a different UI afford
 
 The PRD's *Verification* section lists six gates. Re-run the relevant ones whenever a phase closes.
 
-- [ ] **Boot**: page loads, no console errors, both WASM modules log `[ruvector] ready` (after P2 + P3.B) — *bridge logs `[ruvector] ready` correctly in isolation; full-game boot is still P4.B.*
+- [x] **Boot**: page loads, no console errors, bridge logs `[ruvector] ready` — verified 2026-04-20 in full game context at `http://127.0.0.1:8765/AI-Car-Racer/index.html` (after P4.B sidecar-module wiring). The two HNSW-warning lines are upstream `vector_db.rs:93` stylised warnings, expected on wasm-web builds using the flat index.
 - [ ] **Cold start**: empty archive → behaves identically to stock AI-Car-Racer (after P4.C)
 - [x] **Archive round-trip**: `archiveBrain` → refresh → `recommendSeeds` returns the same vector (after P3.B) — verified 2026-04-20 via `docs/validation/phase3-verify.html`. Bridge owns persistence directly via native IndexedDB; upstream `VectorDB.saveToIndexedDB/loadFromIndexedDB` are stubs.
 - [x] **Codec**: `unflatten(flatten(b))` is structurally equal to `b`; `feedForward` outputs match (after P3.A) — verified 2026-04-21 via `docs/validation/phase2-verify.html`, `feedForward` output `[1,0,1,1]` matches on both brains.
@@ -249,4 +249,70 @@ Sessions: append a dated entry below — don't edit prior entries.
       (main.js, in P4.C) is responsible for `unflatten(vec)` → NeuralNetwork.
       This keeps `network.js`-coupled code on the caller side and the bridge
       free of globalThis lookups.
+
+2026-04-20 · sess-ship-task-b · P4.B complete, with a deliberate deviation
+  from the task text.
+
+  Deviation: kept `main.js` as a classic script instead of making it
+  `type="module"`. Added a SIDECAR `<script type="module">` at the end of
+  index.html that does `import * as bridge from './ruvectorBridge.js';
+  window.__rvBridge = bridge; bridge.ready()`. Also added the
+  window.NeuralNetwork/Level classic bridge after `<script src="network.js">`
+  and a `<div id="rv-panel"></div>` into the body.
+
+  Why the deviation: converting `main.js` to a module would break every
+  cross-script reference to its top-level `var`/`let`/`const`/`function`
+  declarations. I grepped and found heavy coupling — `buttonResponse.js`
+  mutates `pause`, `phase`, `fastLap`, `batchSize`, `nextSeconds`,
+  `mutateValue`, `maxSpeed`, `traction`, `invincible` by bare name; `car.js`
+  reads `invincible`, `traction`, `frameCount`; `road.js` and
+  `roadEditor.js` read `canvas` and `road`; `utils.js` calls `begin()`; HTML
+  `onclick=` attributes call `nextPhase()`. In a module, `var`/`let`/`const`
+  at module top-level are module-scoped, NOT on globalThis — so those bare
+  references would silently break (writes hit `window.X` which `main.js`'s
+  local binding no longer mirrors; reads of `var` from other classic scripts
+  still work, but reads of `let`/`const` don't). Turning main.js into a
+  module cleanly requires rewriting every one of those cross-script reads
+  and writes to go through `window.*`, which is P4.C-grade scope, not
+  P4.B-grade scope. The sidecar approach ships the verification criteria
+  (boot, [ruvector] ready, #rv-panel) with zero risk to existing behaviour.
+
+  Verification (via agent-browser, headless Chromium against
+  http://127.0.0.1:8765/AI-Car-Racer/index.html):
+    - Console:
+        [brainCodec] self-check passed — 92-dim round-trip ok
+        WARN crates/ruvector-core/src/vector_db.rs:93 HNSW requested but not
+             available (WASM build), using flat index     (x2, expected —
+             upstream stylised warn on wasm-web build; flat index works)
+        [ruvector] ready — brains=0 tracks=0 obs=0
+    - DOM:          document.getElementById('rv-panel') present
+    - Bridge:       typeof window.__rvBridge === 'object'
+                    window.__rvBridge.info() = {brains:0, tracks:0,
+                      observations:0, ready:true, gnn:false, topology:[6,8,4]}
+                    keys: archiveBrain, cosineSimilarity, embedTrack, hydrate,
+                      info, observe, persist, ready, recommendSeeds,
+                      _debugReset
+    - Globals from network.js on window: NeuralNetwork (function),
+      Level (function) — required by brainCodec.unflatten.
+    - Classic-script globals preserved: phase=1, pause=boolean, road=object,
+      begin=function, nextPhase=function, maxSpeed=number, fastLap=string.
+    - Boot UI: track-editor phase-1 buttons render identically to P4.A
+      baseline (Next / Save Track / Delete Track / Delete Point).
+
+  Notes for P4.C:
+    - Consume the bridge from classic main.js as `window.__rvBridge.
+      archiveBrain(...)`, `window.__rvBridge.recommendSeeds(...)`, etc.
+      `ready()` has already been called by the sidecar; you can safely
+      `await window.__rvBridge.ready()` again — it's memoised.
+    - If P4.C genuinely needs main.js to be a module (e.g. to use `import`
+      syntax rather than the window handle), that refactor is P4.C-scope:
+      move all top-level state to `window.*`, replace classic-script bare
+      references with window reads/writes, and delete the sidecar block.
+      For what the PRD describes (replacing the localStorage.bestBrain
+      block with recommendSeeds + archiveBrain), the window handle is
+      sufficient and the sidecar can stay.
+    - The sidecar's `import` path is relative (`./ruvectorBridge.js`), which
+      resolves fine because index.html is served from
+      `AI-Car-Racer/index.html`. If you move the bridge loader elsewhere,
+      fix the path.
 ```

@@ -19,12 +19,16 @@
             <canvas id="inputCanvas"></canvas>
             <!-- <canvas id="graphCanvas"></canvas> -->
         </div>
+        <div id="rv-panel"></div>
     </div>
 
     <script src="inputVisual.js"></script>
     <script src="grapher.js"></script>
     <script src="roadEditor.js"></script>
     <script src="network.js"></script>
+    <!-- Classic-script `class` declarations do not land on globalThis; modules
+         (brainCodec, ruvectorBridge) need these names to reconstruct brains. -->
+    <script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>
     <script src="sensor.js"></script>
     <script src="utils.js"></script>
     <script src="road.js"></script>
@@ -32,5 +36,12 @@
     <script src="car.js"></script>
     <script src="buttonResponse.js"></script>
     <script src="main.js"></script>
+    <script type="module">
+      // Sidecar module: warms the ruvector bridge and exposes a handle on
+      // window.__rvBridge for classic-script consumers (main.js in P4.C).
+      import * as bridge from './ruvectorBridge.js';
+      window.__rvBridge = bridge;
+      bridge.ready().catch((e) => console.error('[ruvector] init failed', e));
+    </script>
 </body>
 </html>
