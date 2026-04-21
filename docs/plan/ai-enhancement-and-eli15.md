@@ -406,9 +406,22 @@ each layer.
   added in previous phases).
 - Landing-page copy updated to mention ELI15.
 
----
-
-## Out of scope (documented rejections)
+**Shipped notes.** Guided tour is `AI-Car-Racer/eli15/tour.js`, exposed as
+`window.ELI15Tour` and launched from the 🚗 FAB (stacks above the existing
+🎓 FAB). The playlist is 17 chapters in teaching order; 15 steps resolve a
+live DOM anchor (`[data-eli15]` badges + `[data-rv]` panel rows), 2 are
+conceptual-only (`genetic-algorithm`, `fitness-function`). Tour navigation:
+→ / Next, ← / Back, progress dots (clickable jumps), × / Esc to exit.
+The A/B toggle strip lives in the Vector Memory panel
+(`[data-rv="abstrip"]`): reranker (`auto|none|ema|gnn`) and adapter
+(`off|micro-lora|sona`) both round-trip through new bridge setters
+`setRerankerMode()` / `setAdapterMode()`, observed via `info().policy`.
+The dynamics row is a pass-through to the existing `setUseDynamics`;
+the index control is locked to `euclidean` with a 🔒 `hyperbolic` affordance
+that previews P3.A. Verified: 17/17 chapter titles match, reranker modes
+produce 9/15 position differences on the peer-pressure fixture, `?rv=0`
+still hides the bridge-driven UI while leaving ELI15 + tour FABs usable.
+GNN-replay + lineage-DAG-equivalence regressions still pass.
 
 These ruvector crates were considered and explicitly *not* included. If
 scope later changes, start here.
@@ -440,5 +453,5 @@ Fill in as phases ship. `ship-task` writes back here on completion.
 | P1.C | ✅ shipped | claude-opus-4-7 | (see git log) | `dynamics-embedding` |
 | P2.A | ✅ shipped | claude-opus-4-7 | (this commit) | `sona-trajectory`, `reasoningbank`, `ewc` |
 | P3.A | ☐ | — | — | — |
-| P3.B | ✅ shipped | claude-opus-4-7 | (this commit) | `lineage-dag` |
-| P4.A | ☐ | — | — | — |
+| P3.B | ✅ shipped | claude-opus-4-7 | 271245f | `lineage-dag` |
+| P4.A | ✅ shipped | claude-opus-4-7 | (this commit) | tour playlist covers all 17 chapters; no new chapters authored |

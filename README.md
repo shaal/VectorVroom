@@ -52,6 +52,13 @@ These are the friction points you may hit on a fresh clone:
   lineage, cross-track similarity, the GNN reranker, the LoRA track adapter,
   SONA trajectories / ReasoningBank / EWC, and the lineage DAG viewer
   (🌳 Lineage DAG section in the Vector Memory panel).
+- **Learning mode (P4.A).** The 🚗 button above the 🎓 button starts a
+  guided tour that walks through every ELI15 chapter in teaching order,
+  highlighting the matching UI element on each step (←/→ arrow keys navigate;
+  `ESC` exits). The Vector Memory panel also shows an **A/B toggle strip** —
+  flip *reranker* (auto/none/ema/gnn), *track adapter* (off/micro-lora/sona),
+  and *dynamics key* (off/on) to feel how each layer contributes. The *index*
+  control is locked to euclidean; hyperbolic HNSW ships with P3.A.
 - **Track preset picker** appears top-left during phase 1 (editor phase);
   pick one of 5 pre-authored tracks or draw your own with left/right click.
   Loading a preset clears `bestBrain`/`progress` (the old brain is bound to

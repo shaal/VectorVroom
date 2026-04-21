@@ -54,6 +54,9 @@
     <!-- ELI15 teaching drawer — uses dynamic import() to lazy-load chapters,
          so it has to run from an http(s) origin (not file://). -->
     <script src="eli15/index.js"></script>
+    <!-- P4.A — guided tour. Depends on ELI15 (above) for drawer access +
+         uiPanels (above) so the [data-rv] anchors exist when the tour runs. -->
+    <script src="eli15/tour.js"></script>
     <script type="module">
       // Sidecar module: warms the ruvector bridge and exposes handles on
       // window.__rvBridge / window.__rvUnflatten / window.__rvDynamics for

@@ -517,4 +517,208 @@ h1{
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
 }
 .rv-lineage-tooltip[hidden] { display: none; }
+
+/* P4.A — A/B toggle strip. Segmented controls with a compact active state;
+ * sits between the SONA/circuit panels and the dynamics row. */
+.rv-abstrip {
+    margin-top: .4em;
+    padding: .35em .45em .45em .45em;
+    border: 1px dashed rgba(211, 139, 75, 0.45);
+    border-radius: 4px;
+    background: rgba(211, 139, 75, 0.06);
+    font-size: .7rem;
+}
+.rv-abstrip[hidden] { display: none; }
+.rv-abstrip-title {
+    color: #d38b4b;
+    font-weight: bold;
+    font-size: .72rem;
+    margin-bottom: .35em;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+.rv-abstrip-hint {
+    display: inline;
+    margin-left: .45em;
+    color: #9a8773;
+    font-weight: normal;
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: .65rem;
+    font-style: italic;
+}
+.rv-abrow {
+    display: grid;
+    grid-template-columns: 6.5em 1fr auto;
+    align-items: center;
+    gap: .4em;
+    padding: .15em 0;
+}
+.rv-ablabel {
+    color: #cfd;
+    font-size: .68rem;
+    text-align: right;
+    padding-right: .35em;
+}
+.rv-abseg {
+    display: inline-flex;
+    gap: 2px;
+    background: rgba(255, 255, 255, 0.04);
+    padding: 2px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    flex-wrap: wrap;
+}
+.rv-abbtn {
+    background: transparent;
+    color: #cfd;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font: inherit;
+    font-size: .68rem;
+    padding: .15em .45em;
+    cursor: pointer;
+    line-height: 1.1;
+}
+.rv-abbtn:hover {
+    background: rgba(211, 139, 75, 0.18);
+    color: #fff;
+}
+.rv-abbtn-active {
+    background: #d38b4b;
+    color: #1c2028;
+    font-weight: bold;
+    border-color: #824006;
+}
+.rv-abbtn-active:hover {
+    background: #eaa05f;
+    color: #1c2028;
+}
+.rv-abbtn-unavailable {
+    opacity: 0.5;
+    cursor: help;
+}
+.rv-abbtn-locked {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+.rv-abbtn[disabled] {
+    cursor: not-allowed;
+}
+
+/* P4.A — guided tour overlay. Floating coach-mark style: a rounded card
+ * anchored near the highlighted element, with prev/next controls and a
+ * progress dot line. A translucent ring marks the current anchor. */
+.eli15-tour-fab {
+    position: fixed;
+    right: 1em;
+    bottom: 4em; /* stack above the 🎓 ELI15 FAB */
+    z-index: 1200;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 2px solid #3a7bd5;
+    background: #fff;
+    color: #1a4f9c;
+    font-size: 22px;
+    line-height: 40px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    padding: 0;
+}
+.eli15-tour-fab:hover {
+    background: #e6efff;
+    transform: translateY(-1px);
+}
+.eli15-tour-ring {
+    position: absolute;
+    pointer-events: none;
+    z-index: 1150;
+    border: 3px solid #3a7bd5;
+    border-radius: 8px;
+    box-shadow: 0 0 0 4px rgba(58, 123, 213, 0.25), 0 0 22px rgba(58, 123, 213, 0.5);
+    transition: all 180ms ease-out;
+}
+.eli15-tour-card {
+    position: fixed;
+    z-index: 1400;
+    max-width: 320px;
+    background: #fff;
+    color: #222;
+    border: 2px solid #3a7bd5;
+    border-radius: 8px;
+    padding: .75em .9em;
+    font: .85rem/1.4 Verdana, -apple-system, system-ui, sans-serif;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
+}
+.eli15-tour-card[hidden] { display: none; }
+.eli15-tour-progress {
+    display: flex;
+    gap: 3px;
+    margin-bottom: .4em;
+}
+.eli15-tour-dot {
+    flex: 1;
+    height: 3px;
+    background: #e0e6ef;
+    border-radius: 2px;
+}
+.eli15-tour-dot.eli15-tour-dot-done { background: #3a7bd5; }
+.eli15-tour-dot.eli15-tour-dot-current { background: #1a4f9c; }
+.eli15-tour-title {
+    font-weight: bold;
+    color: #1a4f9c;
+    font-size: .95rem;
+    margin: 0 0 .25em 0;
+}
+.eli15-tour-step {
+    color: #666;
+    font-size: .7rem;
+    margin-bottom: .4em;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+.eli15-tour-oneliner {
+    margin: 0 0 .6em 0;
+    color: #333;
+    font-size: .82rem;
+    line-height: 1.45;
+}
+.eli15-tour-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: .5em;
+}
+.eli15-tour-btn {
+    background: #3a7bd5;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: .3em .8em;
+    font: inherit;
+    cursor: pointer;
+    font-size: .8rem;
+}
+.eli15-tour-btn:hover { background: #1a4f9c; }
+.eli15-tour-btn-ghost {
+    background: transparent;
+    color: #3a7bd5;
+    border: 1px solid #3a7bd5;
+}
+.eli15-tour-btn-ghost:hover {
+    background: #e6efff;
+    color: #1a4f9c;
+}
+.eli15-tour-close {
+    background: transparent;
+    color: #888;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: 0 .2em;
+    line-height: 1;
+}
+.eli15-tour-close:hover { color: #333; }
 .rv-circuit-members, .rv-circuit-quality { color: #bcd; }

@@ -92,6 +92,54 @@
     '  </div>',
     '  <div class="rv-circuits-list" data-rv="circuits-list"></div>',
     '</div>',
+    // P4.A — A/B toggle strip. Four segmented controls let a learner feel
+    // the contribution of each layer in isolation: reranker / track adapter
+    // / dynamics / index. Each control has an ELI15 badge that opens the
+    // responsible chapter, and the currently-selected option is echoed back
+    // from bridge.info().policy so manual console calls or a tour advance
+    // repaint the control automatically.
+    '<div class="rv-abstrip" data-rv="abstrip" hidden>',
+    '  <div class="rv-abstrip-title">A/B toggles',
+    '    <span class="rv-abstrip-hint">feel each layer by flipping it off</span>',
+    '  </div>',
+    '  <div class="rv-abrow">',
+    '    <span class="rv-ablabel">reranker</span>',
+    '    <div class="rv-abseg" role="radiogroup" aria-label="Reranker mode" data-rv="ab-reranker">',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-reranker-opt" data-value="auto" role="radio" aria-checked="false">auto</button>',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-reranker-opt" data-value="none" role="radio" aria-checked="false">none</button>',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-reranker-opt" data-value="ema" role="radio" aria-checked="false">ema</button>',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-reranker-opt" data-value="gnn" role="radio" aria-checked="false">gnn</button>',
+    '    </div>',
+    '    <span data-eli15="ema-reranker" role="button" tabindex="0" aria-label="Learn: reranker modes"></span>',
+    '    <span data-eli15="gnn" role="button" tabindex="0" aria-label="Learn: GNN reranker"></span>',
+    '  </div>',
+    '  <div class="rv-abrow">',
+    '    <span class="rv-ablabel">track adapter</span>',
+    '    <div class="rv-abseg" role="radiogroup" aria-label="Track adapter mode" data-rv="ab-adapter">',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-adapter-opt" data-value="off" role="radio" aria-checked="false">off</button>',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-adapter-opt" data-value="micro-lora" role="radio" aria-checked="false">micro-lora</button>',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-adapter-opt" data-value="sona" role="radio" aria-checked="false">sona</button>',
+    '    </div>',
+    '    <span data-eli15="lora" role="button" tabindex="0" aria-label="Learn: LoRA track adapter"></span>',
+    '    <span data-eli15="sona-trajectory" role="button" tabindex="0" aria-label="Learn: SONA trajectory adapter"></span>',
+    '  </div>',
+    '  <div class="rv-abrow">',
+    '    <span class="rv-ablabel">dynamics key</span>',
+    '    <div class="rv-abseg" role="radiogroup" aria-label="Dynamics key" data-rv="ab-dynamics">',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-dynamics-opt" data-value="off" role="radio" aria-checked="false">off</button>',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-dynamics-opt" data-value="on" role="radio" aria-checked="false">on</button>',
+    '    </div>',
+    '    <span data-eli15="dynamics-embedding" role="button" tabindex="0" aria-label="Learn: dynamics embedding"></span>',
+    '  </div>',
+    '  <div class="rv-abrow">',
+    '    <span class="rv-ablabel">index</span>',
+    '    <div class="rv-abseg" role="radiogroup" aria-label="Vector index geometry" data-rv="ab-index">',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-index-opt" data-value="euclidean" role="radio" aria-checked="true">euclidean</button>',
+    '      <button type="button" class="rv-abbtn rv-abbtn-locked" data-rv="ab-index-opt" data-value="hyperbolic" role="radio" aria-checked="false" disabled title="ships with P3.A (hyperbolic HNSW)">hyperbolic 🔒</button>',
+    '    </div>',
+    '    <span data-eli15="vectordb-hnsw" role="button" tabindex="0" aria-label="Learn: HNSW index (hyperbolic variant planned for P3.A)"></span>',
+    '  </div>',
+    '</div>',
     // Dynamics trajectory toggle (P1.C). Off by default — the plan keeps
     // this opt-in because it changes retrieval ordering. The count next to
     // the label shows how many archived brains have a dynamics vector
@@ -147,6 +195,11 @@
     lineageBody: root.querySelector('[data-rv="lineage-body"]'),
     lineageCanvas: root.querySelector('[data-rv="lineage-canvas"]'),
     lineageTooltip: root.querySelector('[data-rv="lineage-tooltip"]'),
+    abstrip: root.querySelector('[data-rv="abstrip"]'),
+    abRerankerBtns: root.querySelectorAll('[data-rv="ab-reranker-opt"]'),
+    abAdapterBtns: root.querySelectorAll('[data-rv="ab-adapter-opt"]'),
+    abDynamicsBtns: root.querySelectorAll('[data-rv="ab-dynamics-opt"]'),
+    abIndexBtns: root.querySelectorAll('[data-rv="ab-index-opt"]'),
   };
 
   // P3.B — mount the lineage viewer once; rendering is driven from tick().
@@ -171,6 +224,48 @@
       if (lineageExpanded && window.LineageViewer) window.LineageViewer.render();
     });
   }
+
+  // P4.A — A/B toggle strip wiring. Each segmented control calls through to
+  // the bridge setter; rendering is handled by renderAbstrip on the next tick
+  // (reads the round-tripped policy from info()).
+  function attachAbGroup(nodeList, setter, afterChange) {
+    nodeList.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const value = btn.getAttribute('data-value');
+        const b = window.__rvBridge;
+        if (!b || typeof b[setter] !== 'function') return;
+        try { b[setter](value); } catch (e) { console.warn('[rv-panel] ' + setter + ' failed', e); }
+        if (afterChange) afterChange(value);
+        // Force renderAbstrip next tick.
+        last.rerankerPolicy = null;
+        last.adapterPolicy = null;
+        last.dynamicsPolicy = null;
+        last.indexPolicy = null;
+      });
+    });
+  }
+  attachAbGroup(el.abRerankerBtns, 'setRerankerMode');
+  attachAbGroup(el.abAdapterBtns, 'setAdapterMode');
+  // Dynamics is a boolean on the bridge — wrap the setter so the A/B strip
+  // can pass 'on'|'off' like the other groups.
+  el.abDynamicsBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      const on = btn.getAttribute('data-value') === 'on';
+      const b = window.__rvBridge;
+      if (b && typeof b.setUseDynamics === 'function') b.setUseDynamics(on);
+      if (el.dynamicsToggle) el.dynamicsToggle.checked = on;
+      last.dynamicsPolicy = null;
+      last.dynamicsEnabled = !on; // invalidate existing dynamics-row memo
+    });
+  });
+  // Index buttons: only 'euclidean' is clickable today. The locked
+  // 'hyperbolic' button is disabled in HTML — this listener is defensive.
+  el.abIndexBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      last.indexPolicy = null;
+    });
+  });
 
   // Dynamics toggle wiring (P1.C). The checkbox owns UI state; the bridge
   // stores the flag so recommendSeeds() can read it without a round-trip
@@ -222,6 +317,12 @@
     sonaPatterns: -1,
     sonaMicroUpdates: -1,
     sonaTrajectoryOpen: null,
+    // P4.A — A/B strip memo keys. null forces the strip to repaint on the
+    // next tick (e.g. after a click inverts any of these).
+    rerankerPolicy: null,
+    adapterPolicy: null,
+    dynamicsPolicy: null,
+    indexPolicy: null,
   };
 
   // Reranker indicator state (P5.C). Track the previous top-K ordering so we
@@ -520,6 +621,54 @@
     el.circuitsList.innerHTML = html;
   }
 
+  // P4.A — paint the A/B toggle strip. Reads policy from info() so manual
+  // console calls (e.g. `window.__rvBridge.setRerankerMode('none')`) are
+  // reflected in the UI without the click handler having to mirror state.
+  function renderAbstrip(info) {
+    if (!el.abstrip) return;
+    if (window.rvDisabled) { el.abstrip.hidden = true; return; }
+    if (!info || !info.ready) { el.abstrip.hidden = true; return; }
+    el.abstrip.hidden = false;
+    const pol = info.policy || {};
+    const reranker = pol.reranker || 'auto';
+    const adapter = pol.adapter || 'sona';
+    const dynamicsOn = !!pol.dynamics;
+    const indexKind = pol.index || 'euclidean';
+    paintSegment(el.abRerankerBtns, reranker);
+    paintSegment(el.abAdapterBtns, adapter);
+    paintSegment(el.abDynamicsBtns, dynamicsOn ? 'on' : 'off');
+    paintSegment(el.abIndexBtns, indexKind);
+    // Gray out the GNN option when the wasm hasn't loaded — clicking it
+    // still flips the policy, but recommendSeeds will fall back to EMA and
+    // the user would see no reranker actually fire. The title attribute
+    // explains why.
+    const gnnLoaded = !!info.gnnLoaded;
+    el.abRerankerBtns.forEach(function (btn) {
+      if (btn.getAttribute('data-value') === 'gnn') {
+        btn.classList.toggle('rv-abbtn-unavailable', !gnnLoaded);
+        btn.title = gnnLoaded ? '' : 'GNN wasm did not load — this option falls back to EMA';
+      }
+    });
+    // Sona availability mirror: if sonaReady is false, mark the sona adapter
+    // option as unavailable (setAdapterMode still accepts it but step
+    // recording will no-op).
+    const sonaReadyFlag = info.sona && info.sona.ready;
+    el.abAdapterBtns.forEach(function (btn) {
+      if (btn.getAttribute('data-value') === 'sona') {
+        btn.classList.toggle('rv-abbtn-unavailable', !sonaReadyFlag);
+        btn.title = sonaReadyFlag ? '' : 'SONA wasm did not load — micro-lora behaviour will be used';
+      }
+    });
+  }
+
+  function paintSegment(btnList, selectedValue) {
+    btnList.forEach(function (btn) {
+      const isSelected = btn.getAttribute('data-value') === selectedValue;
+      btn.classList.toggle('rv-abbtn-active', isSelected);
+      btn.setAttribute('aria-checked', String(isSelected));
+    });
+  }
+
   function renderLineage(info) {
     if (!el.lineage) return;
     if (window.rvDisabled) { el.lineage.hidden = true; return; }
@@ -669,6 +818,11 @@
     const sonaPatterns = info && info.sona ? (info.sona.patterns | 0) : -1;
     const sonaMicroUpdates = info && info.sona ? (info.sona.microUpdates | 0) : -1;
     const sonaTrajectoryOpen = info && info.sona ? !!info.sona.trajectoryOpen : null;
+    const policy = info && info.policy ? info.policy : null;
+    const rerankerPolicy = policy ? policy.reranker : null;
+    const adapterPolicy = policy ? policy.adapter : null;
+    const dynamicsPolicy = policy ? !!policy.dynamics : null;
+    const indexPolicy = policy ? policy.index : null;
 
     // Fast-path: nothing changed → no DOM writes, no recommendSeeds call.
     if (
@@ -689,7 +843,11 @@
       last.sonaTrajectories === sonaTrajectories &&
       last.sonaPatterns === sonaPatterns &&
       last.sonaMicroUpdates === sonaMicroUpdates &&
-      last.sonaTrajectoryOpen === sonaTrajectoryOpen
+      last.sonaTrajectoryOpen === sonaTrajectoryOpen &&
+      last.rerankerPolicy === rerankerPolicy &&
+      last.adapterPolicy === adapterPolicy &&
+      last.dynamicsPolicy === dynamicsPolicy &&
+      last.indexPolicy === indexPolicy
     ) return;
 
     // Stage the current dynamics query vector so recommendSeeds can mix it
@@ -740,6 +898,7 @@
     renderSona(info);
     renderCircuits(trackVec, info);
     renderDynamics(info);
+    renderAbstrip(info);
     renderBadge(trackVec, seeds);
     renderList(seeds, info || { ready: false, brains: 0 });
     renderLineage(info);
@@ -762,6 +921,10 @@
       sonaPatterns: sonaPatterns,
       sonaMicroUpdates: sonaMicroUpdates,
       sonaTrajectoryOpen: sonaTrajectoryOpen,
+      rerankerPolicy: rerankerPolicy,
+      adapterPolicy: adapterPolicy,
+      dynamicsPolicy: dynamicsPolicy,
+      indexPolicy: indexPolicy,
     };
   }
 

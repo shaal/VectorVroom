@@ -74,13 +74,49 @@ const PERSIST_DEBOUNCE_MS = 250;
 // is typically a chain of 1–2 nodes and message passing degenerates to identity.
 const GNN_MIN_ARCHIVE = 10;
 
-let _rerankerMode = 'none'; // 'gnn' | 'ema' | 'none'
+let _rerankerMode = 'none'; // 'gnn' | 'ema' | 'none' — most recent path actually taken
+
+// P4.A — UI-facing policy switches. The A/B toggle strip sets these; the
+// test harnesses can still reach the low-level boolean overrides (setForceEma,
+// setBypassLora) for backwards compatibility.
+//
+// Reranker policy (what the toggle picks, vs. what recommendSeeds ends up doing):
+//   'auto' — original behaviour: gnn if wasm loaded AND archive ≥ GNN_MIN_ARCHIVE, else ema
+//   'none' — skip the reranker term entirely (rerankTerm = 1, pure trackSim × fitness)
+//   'ema'  — force EMA path
+//   'gnn'  — force GNN path when wasm loaded (ignores archive-size threshold)
+let _rerankerPolicy = 'auto';
+const VALID_RERANKER_MODES = ['auto', 'none', 'ema', 'gnn'];
+export function setRerankerMode(mode) {
+  if (!VALID_RERANKER_MODES.includes(mode)) return false;
+  _rerankerPolicy = mode;
+  return true;
+}
+export function getRerankerMode() { return _rerankerPolicy; }
+
 let _forceEma = false;      // test-only override; see setForceEma()
 
 // Test-only: forces the EMA path regardless of GNN availability. Used by
 // the scripted replay harness in tests/gnn-replay.html to get an
 // apples-to-apples EMA-vs-GNN comparison from a single archive snapshot.
 export function setForceEma(on) { _forceEma = !!on; }
+
+// Adapter policy. The toggle strip picks one of these; `_bypassLora` and
+// `_sonaPaused` are the two low-level flags the rest of the bridge reads.
+//   'sona'       — P2.A default: LoRA adapts query vectors, SONA records trajectories
+//   'micro-lora' — P1.B-era behaviour: LoRA active, SONA trajectory recording paused
+//   'off'        — ablate the adapter entirely: raw track vector, no SONA trajectories
+let _adapterMode = 'sona';
+let _sonaPaused = false;
+const VALID_ADAPTER_MODES = ['off', 'micro-lora', 'sona'];
+export function setAdapterMode(mode) {
+  if (!VALID_ADAPTER_MODES.includes(mode)) return false;
+  _adapterMode = mode;
+  _bypassLora = (mode === 'off');
+  _sonaPaused = (mode !== 'sona');
+  return true;
+}
+export function getAdapterMode() { return _adapterMode; }
 
 // Test-only: when true, recommendSeeds() searches with the *raw* track vector
 // instead of the LoRA-adapted one. Lets the lora-replay harness compare
@@ -225,7 +261,7 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   try {
     const stepActs = (dynamicsVec instanceof Float32Array) ? dynamicsVec
                     : (trackVec instanceof Float32Array) ? trackVec : null;
-    if (stepActs) sonaAddStep(stepActs, null, meta.fitness);
+    if (stepActs && !_sonaPaused) sonaAddStep(stepActs, null, meta.fitness);
   } catch (e) { console.warn('[sona] step failed', e); }
   schedulePersist();
   return id;
@@ -291,12 +327,30 @@ export function recommendSeeds(trackVec, k = 5) {
     for (const bid of _brainMirror.keys()) candidates.set(bid, 0);
   }
 
-  // Decide reranker: GNN when it's loaded AND the archive has ≥ GNN_MIN_ARCHIVE
-  // (10) brains — smaller lineage graphs carry no useful signal for message
-  // passing. Otherwise fall back to the EMA observation weight automatically.
-  const useGnn = !_forceEma && gnnIsReady() && _brainMirror.size >= GNN_MIN_ARCHIVE;
+  // Decide reranker. The toggle policy (P4.A) takes precedence over
+  // auto-mode thresholds, and the legacy _forceEma test override still pins
+  // the decision to 'ema' when set (keeps gnn-replay.html deterministic).
+  let useGnn = false;
+  let skipRerank = false;
+  if (_forceEma) {
+    useGnn = false;
+  } else if (_rerankerPolicy === 'none') {
+    skipRerank = true;
+  } else if (_rerankerPolicy === 'ema') {
+    useGnn = false;
+  } else if (_rerankerPolicy === 'gnn') {
+    useGnn = gnnIsReady();
+  } else { // 'auto'
+    useGnn = gnnIsReady() && _brainMirror.size >= GNN_MIN_ARCHIVE;
+  }
   const gnnMap = useGnn ? gnnScore(_brainMirror, candidates) : null;
-  _rerankerMode = useGnn && gnnMap ? 'gnn' : (candidates.size > 0 ? 'ema' : 'none');
+  if (skipRerank) {
+    _rerankerMode = 'none';
+  } else if (useGnn && gnnMap) {
+    _rerankerMode = 'gnn';
+  } else {
+    _rerankerMode = candidates.size > 0 ? 'ema' : 'none';
+  }
 
   // P1.C — precompute dynamics similarity per brain when the toggle is on,
   // we have a staged query vector, and the dynamics archive is non-empty.
@@ -325,7 +379,12 @@ export function recommendSeeds(trackVec, k = 5) {
     const trackTerm = 0.5 + 0.5 * trackSim;
     const fitTerm = 0.5 + 0.5 * normFit;
     let rerankTerm;
-    if (gnnMap && gnnMap.has(bid)) {
+    if (skipRerank) {
+      // P4.A — 'none' policy: no reranker term. Ordering falls back to pure
+      // trackSim × fitness, useful for A/B comparisons that isolate the
+      // retrieval geometry from the peer-pressure / EMA-boost terms.
+      rerankTerm = 1;
+    } else if (gnnMap && gnnMap.has(bid)) {
       rerankTerm = gnnMap.get(bid);
     } else {
       const obs = _observations.get(bid);
@@ -433,6 +492,15 @@ export function info() {
     // straight from the wasm side; `droppedEdges` is >0 only if malformed
     // parent ids somehow produced a cycle.
     lineageDag: dagInfo(),
+    // P4.A — A/B policy snapshot so uiPanels can reflect + round-trip the
+    // toggle strip state. `rerankerPolicy` is what the user picked;
+    // `reranker` above is what recommendSeeds actually did on the last call.
+    policy: {
+      reranker: _rerankerPolicy,
+      adapter: _adapterMode,
+      dynamics: !!_useDynamics,
+      index: 'euclidean', // locked — P3.A (hyperbolic) not yet shipped
+    },
   };
 }
 
@@ -444,12 +512,15 @@ export function info() {
 // When SONA isn't ready, they no-op silently — callers can fire-and-forget.
 
 export function beginPhase4Trajectory(trackVec) {
+  if (_sonaPaused) return null;
   try { return sonaBeginTrajectory(trackVec); } catch (e) { console.warn('[sona] begin failed', e); return null; }
 }
 export function addPhase4Step(activations, attention, stepReward) {
+  if (_sonaPaused) return;
   try { sonaAddStep(activations, attention, stepReward); } catch (e) { console.warn('[sona] addStep failed', e); }
 }
 export function endPhase4Trajectory(finalFitness) {
+  if (_sonaPaused) return null;
   try { return sonaEndTrajectory(finalFitness); } catch (e) { console.warn('[sona] endTrajectory failed', e); return null; }
 }
 export function findSimilarCircuits(trackVec, k = 5) {
