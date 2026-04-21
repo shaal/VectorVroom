@@ -1,0 +1,244 @@
+/* eli15/eli15.css — teaching drawer styling.
+ *
+ * Colour palette matches the rv-panel (#d38b4b accent, #824006 dark-accent,
+ * #fff / #fafafa surfaces). The drawer docks to the right edge so it doesn't
+ * cover the driving canvas; on narrow screens it becomes full-width.
+ */
+
+/* ─── floating action button ───────────────────────────────────────────── */
+.eli15-fab {
+    position: fixed;
+    right: 1em;
+    bottom: 1em;
+    z-index: 1200;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 2px solid #d38b4b;
+    background: #fff;
+    color: #824006;
+    font-size: 22px;
+    line-height: 40px;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    cursor: pointer;
+    padding: 0;
+    transition: transform 120ms ease-out, background-color 120ms ease-out;
+}
+.eli15-fab:hover {
+    background: #fff4e2;
+    transform: translateY(-1px);
+}
+.eli15-fab:focus-visible {
+    outline: 3px solid #d38b4b;
+    outline-offset: 2px;
+}
+
+/* ─── badges (anywhere [data-eli15] appears) ───────────────────────────── */
+[data-eli15] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.1em;
+    height: 1.1em;
+    padding: 0 0.3em;
+    margin-left: 0.35em;
+    border-radius: 999px;
+    background: #fff4e2;
+    color: #824006;
+    border: 1px solid #d38b4b;
+    font-size: 0.7rem;
+    font-weight: bold;
+    line-height: 1;
+    cursor: pointer;
+    vertical-align: baseline;
+    user-select: none;
+    transition: background-color 100ms ease-out;
+}
+[data-eli15]::before { content: '?'; }
+[data-eli15]:empty::before { content: '?'; }
+[data-eli15]:hover { background: #ffe1b8; }
+[data-eli15]:focus-visible {
+    outline: 2px solid #d38b4b;
+    outline-offset: 1px;
+}
+
+/* Hide the child text "?" we may have placed in HTML — the ::before covers
+ * it — but keep the element accessible-text-wise via aria-label if set. */
+[data-eli15] > * { display: none; }
+
+/* ─── drawer surface ───────────────────────────────────────────────────── */
+.eli15-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(18, 18, 22, 0.0);
+    z-index: 1100;
+    pointer-events: none;
+    transition: background-color 180ms ease-out;
+}
+.eli15-backdrop.eli15-backdrop-open {
+    background: rgba(18, 18, 22, 0.35);
+    pointer-events: auto;
+}
+
+.eli15-drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 1101;
+    width: min(460px, 92vw);
+    height: 100vh;
+    background: #fff;
+    color: #222;
+    box-shadow: -4px 0 18px rgba(0, 0, 0, 0.25);
+    transform: translateX(100%);
+    transition: transform 220ms ease-out;
+    display: flex;
+    flex-direction: column;
+    font-family: Verdana, -apple-system, system-ui, sans-serif;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    overflow: hidden;
+}
+.eli15-drawer.eli15-drawer-open {
+    transform: translateX(0);
+}
+/* Defensive: style.css has a global `p { line-height: .2em; }` that leaks
+ * into anything we render. Scope every text element inside the drawer so
+ * that cascade rule can't crush our paragraphs into illegible slivers. */
+.eli15-drawer p {
+    line-height: 1.5;
+    margin: 0 0 0.7em 0;
+}
+.eli15-drawer h2, .eli15-drawer h3 { line-height: 1.25; }
+@media (prefers-reduced-motion: reduce) {
+    .eli15-drawer { transition: none; }
+    .eli15-backdrop { transition: none; }
+    .eli15-fab { transition: none; }
+}
+
+/* ─── drawer header ────────────────────────────────────────────────────── */
+.eli15-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5em;
+    padding: 0.9em 1em 0.75em 1em;
+    background: #fff4e2;
+    border-bottom: 2px solid #d38b4b;
+    flex-shrink: 0;
+}
+.eli15-header-text { flex: 1; min-width: 0; }
+.eli15-kicker {
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #a07e5a;
+    margin-bottom: 0.2em;
+}
+.eli15-title {
+    font-size: 1.05rem;
+    margin: 0 0 0.25em 0;
+    color: #824006;
+    line-height: 1.25;
+}
+.eli15-oneliner {
+    font-size: 0.82rem;
+    margin: 0;
+    color: #555;
+    font-style: italic;
+}
+.eli15-close {
+    flex-shrink: 0;
+    border: none;
+    background: transparent;
+    color: #824006;
+    font-size: 1.6rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.1em 0.35em;
+    border-radius: 0.2em;
+}
+.eli15-close:hover { background: rgba(131, 64, 6, 0.08); }
+.eli15-close:focus-visible {
+    outline: 2px solid #d38b4b;
+    outline-offset: 1px;
+}
+
+/* ─── drawer body ──────────────────────────────────────────────────────── */
+.eli15-body {
+    padding: 0.8em 1em 0.4em 1em;
+    overflow-y: auto;
+    flex: 1 1 auto;
+}
+.eli15-body p {
+    line-height: 1.5;
+    margin: 0 0 0.7em 0;
+}
+.eli15-body h3 {
+    font-size: 0.95rem;
+    color: #824006;
+    margin: 0.8em 0 0.25em 0;
+}
+.eli15-body code {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.85em;
+    background: #f4ead9;
+    padding: 0 0.25em;
+    border-radius: 0.2em;
+}
+.eli15-body strong { color: #222; }
+
+.eli15-loading { color: #888; font-style: italic; }
+.eli15-error { color: #933; }
+.eli15-error-detail {
+    background: #fff0f0;
+    color: #933;
+    padding: 0.4em 0.6em;
+    border-radius: 0.25em;
+    font-size: 0.75rem;
+    white-space: pre-wrap;
+}
+
+.eli15-diagram {
+    padding: 0.4em 1em 0.6em 1em;
+    background: #faf5ec;
+    border-top: 1px dashed #e0d3bd;
+    flex-shrink: 0;
+}
+.eli15-ascii {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: #333;
+    margin: 0;
+    white-space: pre;
+    overflow-x: auto;
+}
+
+.eli15-related {
+    padding: 0.5em 1em 0.9em 1em;
+    border-top: 1px solid #eee;
+    flex-shrink: 0;
+}
+.eli15-related-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #888;
+    margin-bottom: 0.3em;
+}
+.eli15-related-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15em;
+}
+.eli15-related-link {
+    color: #824006;
+    text-decoration: none;
+    font-size: 0.82rem;
+}
+.eli15-related-link:hover { text-decoration: underline; }

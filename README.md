@@ -42,6 +42,10 @@ These are the friction points you may hit on a fresh clone:
 - **Optional `?rv=0` URL flag** disables the vector-memory bridge and forces
   stock random brain init. Useful for A/B comparisons or when debugging the
   base GA without ruvector in the loop.
+- **ELI15 teaching drawer.** Press `?` or click the floating 🎓 button (bottom-right)
+  to open a drawer that explains what each piece of the app is doing, in
+  plain language. Widgets with a small `?` badge open the matching chapter
+  directly. Closes with `ESC` or by clicking the backdrop.
 - **Track preset picker** appears top-left during phase 1 (editor phase);
   pick one of 5 pre-authored tracks or draw your own with left/right click.
   Loading a preset clears `bestBrain`/`progress` (the old brain is bound to
@@ -57,9 +61,11 @@ AI-Car-Racer/              # the playable app (serve index.html from here)
 ├── ruvectorBridge.js      # ES module: warms the CNN embedder + VectorDB
 ├── brainCodec.js          # NeuralNetwork <-> Float32Array(92) [6,8,4] topology
 ├── trackPresets.js        # 5 loadable tracks + floating picker UI
+├── eli15/                 # teaching drawer (? / 🎓 button) — one file per chapter
 └── ...                    # canvas, car physics, sensors, GA logic
 vendor/ruvector/           # pre-built WASM, committed so no toolchain needed
 └── ruvector_{cnn_,}wasm/  # CNN embedder + VectorDB flavours
+scripts/vendor-ruvector.sh # maintainer-only: rebuild + recommit a WASM crate
 docs/plan/                 # design notes and phase-by-phase progress
 ```
 

@@ -22,7 +22,13 @@
 
   root.innerHTML = [
     '<div class="rv-header">',
-    '  <span class="rv-title">Vector Memory</span>',
+    '  <span class="rv-title">Vector Memory',
+    // ELI15 badge — clicking opens the framing chapter. Placed in the panel
+    // title so it's discoverable without hunting. Later phases (P0.B, P1.*)
+    // replace this chapter id with topic-specific ones next to the relevant
+    // widget (reranker row, adapter drift sparkline, etc.).
+    '    <span data-eli15="what-is-this-project" role="button" tabindex="0" aria-label="Learn: what is this project doing?"></span>',
+    '  </span>',
     '  <span class="rv-info" data-rv="info"></span>',
     '</div>',
     '<div class="rv-reranker" data-rv="reranker" hidden></div>',

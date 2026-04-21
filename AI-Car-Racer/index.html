@@ -1,8 +1,10 @@
 <!DOCTYPE html>
 <head>
+    <meta charset="utf-8">
     <title>VRROMMOBILE</title>
     <link rel="stylesheet" href="style.css">
     <link rel="stylesheet" href="slider.css">
+    <link rel="stylesheet" href="eli15/eli15.css">
 
 </head>
 
@@ -46,6 +48,9 @@
     <script src="main.js"></script>
     <script src="uiPanels.js"></script>
     <script src="trackPresets.js"></script>
+    <!-- ELI15 teaching drawer — uses dynamic import() to lazy-load chapters,
+         so it has to run from an http(s) origin (not file://). -->
+    <script src="eli15/index.js"></script>
     <script type="module">
       // Sidecar module: warms the ruvector bridge and exposes handles on
       // window.__rvBridge / window.__rvUnflatten for classic-script consumers
