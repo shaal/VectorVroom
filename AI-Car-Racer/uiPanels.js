@@ -36,6 +36,18 @@
     list: root.querySelector('[data-rv="list"]'),
   };
 
+  // Track-match badge auto-fade (P5.A). When `currentTrackVec` identity changes
+  // (a new track was finalised), we restart a one-shot CSS animation that fades
+  // in, holds ~4s, then fades out. Memo key is the Float32Array identity, not
+  // value — buttonResponse.js allocates a fresh array per finalize, so identity
+  // is a free + reliable change signal.
+  let badgeShownForTrackId = null;
+  el.badge.addEventListener('animationend', function (ev) {
+    if (ev.animationName !== 'rv-badge-pulse' && ev.animationName !== 'rv-badge-pulse-flat') return;
+    el.badge.classList.remove('rv-badge-showing');
+    el.badge.hidden = true;
+  });
+
   // Render-input memoisation. We hash the cheap identity keys; if nothing moved,
   // we skip the DOM writes entirely. This keeps the 500ms tick free.
   let last = {
@@ -81,9 +93,17 @@
     const wantBadge = currentPhase >= 3 && trackVec && seeds && seeds.length > 0;
     if (!wantBadge) {
       el.badge.hidden = true;
+      el.badge.classList.remove('rv-badge-showing');
       el.badge.textContent = '';
+      badgeShownForTrackId = null;
       return;
     }
+    // Only (re)trigger the show-and-fade animation on a genuinely new track.
+    // Without this guard, every tick that flips some *other* input (e.g. an
+    // `observations` increment) would restart the fade.
+    if (badgeShownForTrackId === trackVec) return;
+    badgeShownForTrackId = trackVec;
+
     // trackSim ∈ [-1, 1]; map the best match into a 0–100% "similarity" display.
     const bestSim = seeds[0].trackSim;
     const pct = Math.max(0, Math.min(100, Math.round(50 + 50 * bestSim)));
@@ -92,6 +112,13 @@
       'loading ' + seeds.length + ' candidate brain' +
       (seeds.length === 1 ? '' : 's') + ' as seeds.';
     el.badge.hidden = false;
+
+    // Restart the CSS @keyframes from frame 0: remove, force reflow, re-add.
+    // Without the reflow, the browser coalesces the remove+add and the
+    // animation state never resets.
+    el.badge.classList.remove('rv-badge-showing');
+    void el.badge.offsetWidth;
+    el.badge.classList.add('rv-badge-showing');
   }
 
   function renderList(seeds, info) {

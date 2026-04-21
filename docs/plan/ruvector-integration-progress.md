@@ -35,9 +35,9 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** any of `P5.A`–`P5.D` — all four are parallelizable. Suggested starting point is **P5.A** (badge animation + 4s fade) because the P4.E badge it refines is already visible in the panel and easy to iterate on visually. P4.E is done — `uiPanels.js` renders the panel (empty-state copy, info header, badge, sidebar) and polls the bridge at 500 ms, so P5 tasks only need to edit `uiPanels.js` + `style.css`.
+> **Now ready to claim:** any of `P5.B`, `P5.C`, `P5.D` — all three are parallelizable. **P5.A is done** (badge auto-fades after 4s via CSS `@keyframes rv-badge-pulse` + JS `animationend` handler in `uiPanels.js`). Suggested starting point is **P5.B** (sidebar lineage sparkline): the sidebar rows already render in `uiPanels.js`, and `meta.parentIds` is stored on each archived brain, so the sparkline is a pure SVG add per row.
 >
-> **Phase 5 heads-up:** (a) The panel's render loop in `uiPanels.js` is memoised against `{ready, brains, tracks, observations, phase, trackVecId, seedIdsKey}` — if you add a new input (e.g., a "last-reranked-at" timestamp for P5.C's GNN/EMA indicator), extend both the `last` struct and the fast-path comparison. (b) `recommendSeeds` returns `{id, vector, meta, score, trackSim}` per hit; `meta.parentIds` is already a list, so the P5.B sparkline can walk lineage without touching the bridge. (c) `window.NeuralNetwork`/`Level` + `window.__rvUnflatten` are still exposed on the window for any classic-script needs — don't duplicate those bridges.
+> **Phase 5 heads-up:** (a) The panel's render loop in `uiPanels.js` is memoised against `{ready, brains, tracks, observations, phase, trackVecId, seedIdsKey}` — if you add a new input (e.g., a "last-reranked-at" timestamp for P5.C's GNN/EMA indicator), extend both the `last` struct and the fast-path comparison. (b) `recommendSeeds` returns `{id, vector, meta, score, trackSim}` per hit; `meta.parentIds` is already a list, so the P5.B sparkline can walk lineage without touching the bridge. (c) `window.NeuralNetwork`/`Level` + `window.__rvUnflatten` are still exposed on the window for any classic-script needs — don't duplicate those bridges. (d) **P5.A pattern for one-shot CSS animations:** uiPanels.js now uses `remove-class → force reflow (`void el.offsetWidth`) → re-add class` to restart `@keyframes` from frame 0, and listens for `animationend` to flip state after. Reuse this if P5.C wants the GNN/EMA indicator to pulse on observations tick.
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
@@ -115,7 +115,7 @@ These items are independent of each other — each touches a different UI afford
 
 | ID | Task | Status | Owner | Depends on | Outputs | Verification |
 |---|---|---|---|---|---|---|
-| P5.A | Track-match badge text & animation: *"This track is N% similar to one you've trained on — loading K best candidate brains as seeds."* Numbers come from the cosine similarity returned by `embedTrack` + `recommendSeeds`. | `[ ]` |  | P4.D, P4.E | edits in `uiPanels.js`, `style.css` | Badge appears on track-finalize, shows correct % and K, fades after 4s |
+| P5.A | Track-match badge text & animation: *"This track is N% similar to one you've trained on — loading K best candidate brains as seeds."* Numbers come from the cosine similarity returned by `embedTrack` + `recommendSeeds`. | `[x]` | sess-2026-04-20-ship-task-5a | P4.D, P4.E | edits in `uiPanels.js`, `style.css` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8780/AI-Car-Racer/index.html`: driven to phase=3, badge shows correct 55% + "1 candidate brain" (singular). Sampled opacity at 200ms resolution across full animation: fade-in 0→1 in ~500ms, holds at 1.000 for ~3.8s, fades 1→0 in ~400ms, `animationend` sets `hidden=true` at ~4966ms. Observations-tick mid-hold (0→1) does NOT restart animation — identity guard works. Screenshot: `docs/validation/screenshots/p5a-badge-holding.png`. |
 | P5.B | "Similar past brains" sidebar: per seed, show fitness, fastest lap, generation, and a tiny sparkline of its lineage. | `[ ]` |  | P4.C, P4.E | edits in `uiPanels.js`, `style.css` | Sidebar populates after `begin()`; updates on `nextBatch()` |
 | P5.C | GNN-observations indicator (or EMA-reranker indicator if P2.C was skipped): "GNN observations: N · last reranking shifted top-K by M positions." | `[ ]` |  | P4.C | edits in `uiPanels.js` | Indicator increments each generation; visible during phase=4 |
 | P5.D | Annotated fitness-over-generations graph in `grapher.js`: mark generations where `recommendSeeds` returned a non-empty result, and where the GNN reranker promoted/demoted a seed. | `[ ]` |  | P4.C | edits in `grapher.js` | Graph shows annotations on the right generations |
@@ -532,4 +532,71 @@ Sessions: append a dated entry below — don't edit prior entries.
     - P5.D (grapher.js annotations): unrelated to uiPanels.js. Use
       main.js's `generation` global + currentSeedIds to flag the
       seeded generations in the fitness-over-time plot.
+
+2026-04-20 · sess-ship-task-5a · P5.A complete.
+  Work:
+    - uiPanels.js: renderBadge() now gates on trackVec identity via
+      `badgeShownForTrackId`. When a new Float32Array arrives (every
+      phase=3 finalize allocates fresh, per P4.D's embedCurrentTrack),
+      we remove the `rv-badge-showing` class, force a reflow with
+      `void el.badge.offsetWidth`, and re-add — this is the canonical
+      pattern to restart a CSS @keyframes from frame 0. An
+      `animationend` listener installed once at init sets `hidden=true`
+      and strips the class after the fade-out completes. When
+      wantBadge flips false (phase drops below 3 or archive empties),
+      the identity memo resets to null so the next phase=3 entry
+      still animates.
+    - style.css: added @keyframes rv-badge-pulse (0% op=0/ty=-6px →
+      8% op=1/ty=0 → 92% op=1/ty=0 → 100% op=0/ty=-2px) over 4800ms
+      ease-out forwards. Base .rv-badge now has `opacity: 0;
+      transform: translateY(-4px)` so the element is invisible even
+      before the first `rv-badge-showing` application — without this,
+      a fresh badge would flash at full opacity between `hidden=false`
+      and the first animation frame. Added a
+      prefers-reduced-motion branch that swaps in a transform-free
+      keyframe with identical timing.
+    - No changes to index.html, buttonResponse.js, main.js, or the
+      bridge. P5.A was purely a uiPanels.js + style.css refinement
+      as the task row anticipated.
+
+  Timing budget (plan vs. measured):
+                        plan (ms)    measured (ms, 200ms resolution)
+    fade-in (0→1):      ~384         ~500 (slightly slow due to ease-out
+                                     curve; acceptable)
+    hold (op=1):        ~4032        ~3830
+    fade-out (1→0):     ~384         ~400
+    total until hidden: ~4800        ~4966
+
+  Verification (agent-browser, :8780):
+    - Driven to phase=3 via UI click path (set points + checkpoints
+      programmatically, then click Next → Next). `currentTrackVec`
+      became Float32Array(512).
+    - Opacity sampled across 27 ticks at 200ms each: smooth
+      monotonic fade-in → plateau at 1.000 → smooth fade-out → 0 at
+      animationend, at which point `hidden=true` and the class was
+      removed. Copy: "This track is 55% similar to one you've trained
+      on — loading 1 candidate brain as seeds." (singular brain ✓).
+    - Non-regression: bridge.observe(['vec_0'], 99) mid-hold bumped
+      observations 0→1, which invalidates the panel's fast-path memo
+      and re-calls renderBadge; the identity guard short-circuited
+      and opacity stayed at 1.000 (class stayed applied, hidden=false).
+      Without the guard, the animation would have restarted every
+      time the EMA reranker ticked — which for P5.C's indicator
+      would visibly strobe the badge. Guard is load-bearing.
+    - Screenshot during hold: docs/validation/screenshots/
+      p5a-badge-holding.png.
+
+  Gotchas for P5.B–P5.D:
+    - The `animationend` listener is keyed on `animationName in
+      {'rv-badge-pulse', 'rv-badge-pulse-flat'}`. If you add a second
+      animation on .rv-badge (e.g. a hover pulse), pick a distinct
+      animation-name or the listener will try to dismiss the badge
+      after the hover ends.
+    - `void el.offsetWidth;` is the classic "force reflow" trick. ESLint
+      may flag it as a useless expression — suppress locally or use
+      `el.offsetWidth && 0;` if linting becomes strict.
+    - Only the NEW Float32Array identity restarts the animation. If
+      P5.B wants to animate sidebar rows when seeds change, it needs
+      its own memo key (e.g. seedIdsKey or a seeds[].id.join(',')),
+      since trackVec identity doesn't change when only seeds reshuffle.
 ```
