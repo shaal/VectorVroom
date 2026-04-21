@@ -350,21 +350,39 @@ panel (now unlocked). `info().policy.index` reports the live kind;
 `policy.hyperbolicLoaded` gates UI affordances when the wasm fails to
 initialise.
 
-The confidence gate's **recall leg failed honestly**: on a 500-vector,
-512-dimensional seeded synthetic archive
-(`tests/bench-hnsw.html`, seed `2026_04_21`), Euclidean HNSW hit recall@5
-= 100.00% while Hyperbolic HNSW hit 85.20% (p50 0.20 ms vs 0.10 ms, p99
-1.10 ms vs 0.50 ms — latency leg passes at 0.45× of baseline). This is
-expected for L2-normalised spherical data, which is the cosine-HNSW sweet
-spot; hyperbolic embeddings' advantage is tree-like structure. Per the
-plan's escape hatch, the default stays Euclidean and the feature ships
-as a toggle + teaching chapter + benchmark harness rather than the new
-baseline. Existing regressions (`gnn-replay.html`, `lineage-dag-equivalence.html`)
+The confidence gate's **recall leg failed honestly on the production
+workload, and the bench was extended to explain why.** On a 500-vector,
+512-dimensional seeded synthetic archive (`tests/bench-hnsw.html`, seed
+`2026_04_21`), Euclidean HNSW hit recall@5 = 100.00% while Hyperbolic
+HNSW hit 84.80% on L2-normalised *spherical* vectors (CnnEmbedder-shape).
+A second scenario added post-ship runs the same cluster structure but
+with varying radii *inside* the Poincaré ball — the distribution
+hyperbolic HNSW was designed for — and there hyperbolic recovers to
+99.80%, a 0.2 pp gap versus Euclidean's 100%. The ~15 pp spherical loss
+is therefore a manifold mismatch, not an index bug. Latency actually
+favours hyperbolic across both scenarios (p99 0.4 ms vs Euclidean's
+1.4 ms on spherical — 3.5× faster), so the adopt-or-not decision is
+pure recall-vs-geometry, not a speed trade-off. Per the plan's escape
+hatch, the default stays Euclidean; the feature ships as a toggle +
+teaching chapter + two-scenario benchmark that makes the trade-off
+legible rather than hidden.
+
+Existing regressions (`gnn-replay.html`, `lineage-dag-equivalence.html`)
 still pass. Browser smoke tested with agent-browser: default boot
 reports `policy.index = "euclidean"`, `?hhnsw=1` boots to `"hyperbolic"`,
 toggle click flips the policy in both directions, archive contents
 (13 brains / 1 track) survive the swap, and the ELI15 registry now has
 18 chapters with the tour playlist extended to match.
+
+**Follow-up fix (same phase).** The adapter's `hb_N` id counter used to
+restart at 0 on every instantiation, so an archive → index-kind flip →
+flip-back → archive sequence could mint a duplicate id and silently
+alias two mirror entries. The `hb_N` branch in `insert()` now bumps the
+counter past any explicit id it sees during `rebuildIndicesFromMirror`
+replay, so post-rebuild null-id inserts always get a fresh id. Verified
+in-browser: archive → Euclidean → Hyperbolic → two new archives produced
+`hb_3` + `hb_4` (no collision with the pre-existing `hb_0`…`hb_2` in
+the mirror).
 
 ---
 

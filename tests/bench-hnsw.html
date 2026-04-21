@@ -12,12 +12,24 @@
     • recall@5 vs exact top-5 under each index's native metric
     • median + p99 .search() latency
 
-  PASS gate (from docs/plan/ai-enhancement-and-eli15.md §P3.A):
+  Runs the comparison on TWO data distributions to show when each
+  geometry wins:
+
+    1. SPHERICAL — L2-normalised unit vectors (matches the CnnEmbedder
+       output distribution, so this is the production workload). This
+       is what drives the PASS gate.
+    2. BALL-NATIVE — random points with varying norms inside the
+       Poincaré ball (the distribution hyperbolic HNSW was designed
+       for). Diagnostic only; not part of the gate.
+
+  PASS gate (from docs/plan/ai-enhancement-and-eli15.md §P3.A), applied
+  to the SPHERICAL scenario only:
     Hyperbolic recall@5  ≥  Euclidean recall@5
     Hyperbolic p99        ≤  1.5 × Euclidean p99
 
   A machine-readable marker is written to window.__hnswBenchResult for
-  agent-browser automation.
+  agent-browser automation; full per-scenario numbers live in
+  window.__hnswBenchDetail.
 -->
 <html>
 <head>
@@ -49,6 +61,16 @@
     a brute-force top-5 under each index's own metric. Latency is per
     <code>.search()</code> call. Both indices use the crate default
     <code>ef_search = 50</code>.
+  </p>
+  <p>
+    <strong>Two scenarios, one gate.</strong> The PASS/FAIL summary below
+    reflects only the <em>spherical</em> run (L2-normalised unit vectors,
+    matching our actual CnnEmbedder output). The <em>ball-native</em> run
+    uses random points inside the Poincaré ball — the distribution
+    hyperbolic HNSW was designed for — and is shown alongside to make
+    the geometry-vs-data-manifold trade-off concrete. If hyperbolic loses
+    on spherical but wins (or closes the gap) on ball-native, the takeaway
+    is "we're feeding the wrong manifold," not "the index is broken."
   </p>
   <div id="summary" class="pending">Running…</div>
   <div id="results"></div>
@@ -109,7 +131,7 @@
     // random cluster centres; each archive vector is centre + small gaussian
     // noise, re-normalised. Recall@5 against a uniform archive would be
     // dominated by noise.
-    function generateArchive(rand) {
+    function generateSphericalArchive(rand) {
       const centres = [];
       for (let i = 0; i < 16; i++) centres.push(randomUnitVector(rand));
       const archive = [];
@@ -130,11 +152,50 @@
       return archive;
     }
 
+    // Ball-native: same cluster structure, but instead of projecting onto
+    // the unit sphere, scale each vector to a random radius ∈ [0.2, 0.9].
+    // The full norm range sits strictly *inside* the c=1 Poincaré ball (the
+    // boundary is norm=1 and distances blow up there), so hyperbolic geometry
+    // can actually separate points by their hierarchical "depth from origin."
+    // Cosine-based Euclidean search sees only angular structure and ignores
+    // the radius axis entirely; that's the whole point of the contrast.
+    function generateBallArchive(rand) {
+      const centres = [];
+      for (let i = 0; i < 16; i++) centres.push(randomUnitVector(rand));
+      const archive = [];
+      for (let i = 0; i < N; i++) {
+        const c = centres[i % centres.length];
+        const radius = 0.2 + rand() * 0.7;
+        const v = new Float32Array(DIM);
+        let s = 0;
+        for (let d = 0; d < DIM; d++) {
+          const g = (rand() - 0.5) * 0.3;
+          v[d] = c[d] + g;
+          s += v[d] * v[d];
+        }
+        const scale = radius / Math.sqrt(s);
+        for (let d = 0; d < DIM; d++) v[d] *= scale;
+        archive.push(v);
+      }
+      return archive;
+    }
+
     function cosineDistance(a, b) {
-      let dot = 0;
-      for (let i = 0; i < DIM; i++) dot += a[i] * b[i];
-      // a, b are unit vectors → cosine distance in [0, 2]
-      return 1 - dot;
+      // Handles non-unit inputs too — the ball-native scenario has vectors
+      // with varying norms, so we can't rely on 1 - dot giving the true
+      // cosine distance. Normalising here keeps the brute-force "gold" in
+      // the same metric space the VectorDB uses internally with metric
+      // 'cosine'. Unit-vector inputs short-circuit to the same answer as
+      // the simple form.
+      let dot = 0, na = 0, nb = 0;
+      for (let i = 0; i < DIM; i++) {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+      }
+      const denom = Math.sqrt(na * nb);
+      if (denom < 1e-12) return 1;
+      return 1 - dot / denom;
     }
 
     function bruteTopKCosine(archive, q, k) {
@@ -164,38 +225,11 @@
     const summaryEl = document.getElementById('summary');
     const resultsEl = document.getElementById('results');
 
-    (async () => {
-      try {
-        await Promise.all([initVec(), initHyp()]);
-      } catch (e) {
-        summaryEl.className = 'fail';
-        summaryEl.textContent = 'wasm init failed: ' + String(e);
-        window.__hnswBenchResult = 'FAIL';
-        return;
-      }
-
-      const rand = mulberry32(SEED);
-      const archive = generateArchive(rand);
-      const queries = [];
-      // Queries drawn from a mixture: 60 perturbed-archive vectors (so they
-      // have real neighbours), 40 fully-random unit vectors (to probe the
-      // "far from data" regime). Random mixing ratio is deliberate — the
-      // common case for trackDB is "new track shape is somewhat-like a
-      // saved one", not "identical" or "alien".
-      for (let i = 0; i < 60; i++) {
-        const src = archive[i * 7 % N];
-        const v = new Float32Array(DIM);
-        let s = 0;
-        for (let d = 0; d < DIM; d++) { v[d] = src[d] + (rand() - 0.5) * 0.2; s += v[d]*v[d]; }
-        s = 1 / Math.sqrt(s);
-        for (let d = 0; d < DIM; d++) v[d] *= s;
-        queries.push(v);
-      }
-      for (let i = 0; i < 40; i++) queries.push(randomUnitVector(rand));
-
-      // ── Euclidean side ───────────────────────────────────────────
+    // Single scenario run. Returns the stats dict used to populate both
+    // the HTML table and the window.__hnswBenchDetail summary.
+    function runScenario(label, archive, queries) {
       const eucDB = new VectorDB(DIM, 'cosine');
-      for (let i = 0; i < N; i++) eucDB.insert(archive[i], String(i), null);
+      for (let i = 0; i < archive.length; i++) eucDB.insert(archive[i], String(i), null);
 
       const eucLatencies = [];
       let eucRecallSum = 0;
@@ -210,10 +244,9 @@
       }
       const eucRecall = eucRecallSum / queries.length;
 
-      // ── Hyperbolic side ──────────────────────────────────────────
       const hypIdx = new HyperbolicIndex(EF_SEARCH, CURVATURE);
-      const projectedArchive = new Array(N);
-      for (let i = 0; i < N; i++) {
+      const projectedArchive = new Array(archive.length);
+      for (let i = 0; i < archive.length; i++) {
         const p = projectToBall(archive[i], CURVATURE);
         projectedArchive[i] = p;
         hypIdx.insert(p);
@@ -234,48 +267,130 @@
 
       eucLatencies.sort((a, b) => a - b);
       hypLatencies.sort((a, b) => a - b);
-      const eucP50 = median(eucLatencies);
-      const eucP99 = percentile(eucLatencies, 0.99);
-      const hypP50 = median(hypLatencies);
-      const hypP99 = percentile(hypLatencies, 0.99);
+      return {
+        label,
+        eucRecall, hypRecall,
+        eucP50: median(eucLatencies), eucP99: percentile(eucLatencies, 0.99),
+        hypP50: median(hypLatencies), hypP99: percentile(hypLatencies, 0.99),
+      };
+    }
 
-      const recallGatePass = hypRecall >= eucRecall - 1e-6;
-      const latencyGatePass = hypP99 <= eucP99 * 1.5 + 1e-6;
-      const allPass = recallGatePass && latencyGatePass;
-
-      const table = `
+    function resultTable(stats) {
+      const r = stats;
+      return `
         <table>
-          <thead><tr><th>metric</th><th>euclidean</th><th>hyperbolic</th><th>ratio H/E</th></tr></thead>
+          <thead><tr><th>${stats.label} metric</th><th>euclidean</th><th>hyperbolic</th><th>ratio H/E</th></tr></thead>
           <tbody>
-            <tr><td class="label">recall@5 (↑ better)</td><td>${(eucRecall*100).toFixed(2)}%</td><td>${(hypRecall*100).toFixed(2)}%</td><td>${(hypRecall/Math.max(1e-9,eucRecall)).toFixed(3)}</td></tr>
-            <tr><td class="label">p50 latency (ms)</td><td>${eucP50.toFixed(3)}</td><td>${hypP50.toFixed(3)}</td><td>${(hypP50/Math.max(1e-9,eucP50)).toFixed(2)}×</td></tr>
-            <tr><td class="label">p99 latency (ms)</td><td>${eucP99.toFixed(3)}</td><td>${hypP99.toFixed(3)}</td><td>${(hypP99/Math.max(1e-9,eucP99)).toFixed(2)}×</td></tr>
+            <tr><td class="label">recall@5 (↑ better)</td><td>${(r.eucRecall*100).toFixed(2)}%</td><td>${(r.hypRecall*100).toFixed(2)}%</td><td>${(r.hypRecall/Math.max(1e-9,r.eucRecall)).toFixed(3)}</td></tr>
+            <tr><td class="label">p50 latency (ms)</td><td>${r.eucP50.toFixed(3)}</td><td>${r.hypP50.toFixed(3)}</td><td>${(r.hypP50/Math.max(1e-9,r.eucP50)).toFixed(2)}×</td></tr>
+            <tr><td class="label">p99 latency (ms)</td><td>${r.eucP99.toFixed(3)}</td><td>${r.hypP99.toFixed(3)}</td><td>${(r.hypP99/Math.max(1e-9,r.eucP99)).toFixed(2)}×</td></tr>
           </tbody>
         </table>`;
+    }
+
+    (async () => {
+      try {
+        await Promise.all([initVec(), initHyp()]);
+      } catch (e) {
+        summaryEl.className = 'fail';
+        summaryEl.textContent = 'wasm init failed: ' + String(e);
+        window.__hnswBenchResult = 'FAIL';
+        return;
+      }
+
+      const rand = mulberry32(SEED);
+
+      // ── Scenario 1: SPHERICAL (production-realistic — drives the gate) ──
+      const sphericalArchive = generateSphericalArchive(rand);
+      const sphericalQueries = [];
+      // Queries drawn from a mixture: 60 perturbed-archive vectors (so they
+      // have real neighbours), 40 fully-random unit vectors (to probe the
+      // "far from data" regime). Matches the common-case trackDB workload.
+      for (let i = 0; i < 60; i++) {
+        const src = sphericalArchive[i * 7 % N];
+        const v = new Float32Array(DIM);
+        let s = 0;
+        for (let d = 0; d < DIM; d++) { v[d] = src[d] + (rand() - 0.5) * 0.2; s += v[d]*v[d]; }
+        s = 1 / Math.sqrt(s);
+        for (let d = 0; d < DIM; d++) v[d] *= s;
+        sphericalQueries.push(v);
+      }
+      for (let i = 0; i < 40; i++) sphericalQueries.push(randomUnitVector(rand));
+
+      // ── Scenario 2: BALL-NATIVE (diagnostic — the distribution hyperbolic
+      // HNSW was designed for: points inside the ball with meaningful radius).
+      const ballArchive = generateBallArchive(rand);
+      const ballQueries = [];
+      for (let i = 0; i < 60; i++) {
+        const src = ballArchive[i * 7 % N];
+        const radius = 0.2 + rand() * 0.7;
+        const v = new Float32Array(DIM);
+        let s = 0;
+        for (let d = 0; d < DIM; d++) { v[d] = src[d] + (rand() - 0.5) * 0.2; s += v[d]*v[d]; }
+        const scale = radius / Math.sqrt(s);
+        for (let d = 0; d < DIM; d++) v[d] *= scale;
+        ballQueries.push(v);
+      }
+      for (let i = 0; i < 40; i++) {
+        const u = randomUnitVector(rand);
+        const r = 0.2 + rand() * 0.7;
+        const v = new Float32Array(DIM);
+        for (let d = 0; d < DIM; d++) v[d] = u[d] * r;
+        ballQueries.push(v);
+      }
+
+      const spherical = runScenario('SPHERICAL (unit sphere, CnnEmbedder-shape)', sphericalArchive, sphericalQueries);
+      const ball = runScenario('BALL-NATIVE (varying radii inside Poincaré ball)', ballArchive, ballQueries);
+
+      // PASS gate applies to the spherical scenario only — that's the
+      // production-representative workload.
+      const recallGatePass = spherical.hypRecall >= spherical.eucRecall - 1e-6;
+      const latencyGatePass = spherical.hypP99 <= spherical.eucP99 * 1.5 + 1e-6;
+      const allPass = recallGatePass && latencyGatePass;
+
+      // Interpretation line: how much of the spherical gap does ball-native
+      // recover? If hyperbolic's recall gap versus Euclidean *shrinks* in
+      // ball-native vs spherical, the bench has evidence that the spherical
+      // loss is data/manifold mismatch, not index correctness.
+      const sphericalGap = spherical.eucRecall - spherical.hypRecall;
+      const ballGap = ball.eucRecall - ball.hypRecall;
+      let interpretation;
+      if (sphericalGap > 0.02 && ballGap < sphericalGap - 0.02) {
+        interpretation = `The recall gap shrinks from ${(sphericalGap*100).toFixed(1)} pp on spherical to ${(ballGap*100).toFixed(1)} pp on ball-native — evidence that the spherical loss is a manifold mismatch (L2-normalised CNN vectors sit on the sphere, which isn't where Poincaré distance discriminates well), not a bug in the hyperbolic index.`;
+      } else if (ballGap <= 0) {
+        interpretation = `Hyperbolic matches or beats Euclidean on ball-native data (gap = ${(ballGap*100).toFixed(1)} pp) but loses on spherical data (gap = ${(sphericalGap*100).toFixed(1)} pp) — clean demonstration of the data-manifold trade-off.`;
+      } else {
+        interpretation = `Both scenarios show Euclidean ≥ Hyperbolic at recall@5. The index isn't wrong for our data; it's just not the right choice at our scale and metric.`;
+      }
 
       resultsEl.innerHTML = `
-        <h2>Results</h2>
-        ${table}
-        <h2>Gate</h2>
+        <h2>Scenario 1: Spherical (drives the gate)</h2>
+        ${resultTable(spherical)}
+        <h2>Scenario 2: Ball-native (diagnostic)</h2>
+        ${resultTable(ball)}
+        <h2>Interpretation</h2>
+        <p>${interpretation}</p>
+        <h2>Gate (applied to Spherical scenario only)</h2>
         <div class="gate ${recallGatePass ? 'pass' : 'fail'}">
-          ${recallGatePass ? 'PASS' : 'FAIL'} — hyperbolic recall@5 (${(hypRecall*100).toFixed(2)}%) ${recallGatePass ? '≥' : '&lt;'} euclidean recall@5 (${(eucRecall*100).toFixed(2)}%)
+          ${recallGatePass ? 'PASS' : 'FAIL'} — hyperbolic recall@5 (${(spherical.hypRecall*100).toFixed(2)}%) ${recallGatePass ? '≥' : '&lt;'} euclidean recall@5 (${(spherical.eucRecall*100).toFixed(2)}%)
         </div>
         <div class="gate ${latencyGatePass ? 'pass' : 'fail'}">
-          ${latencyGatePass ? 'PASS' : 'FAIL'} — hyperbolic p99 (${hypP99.toFixed(3)} ms) ${latencyGatePass ? '≤' : '&gt;'} 1.5 × euclidean p99 (${(eucP99*1.5).toFixed(3)} ms)
+          ${latencyGatePass ? 'PASS' : 'FAIL'} — hyperbolic p99 (${spherical.hypP99.toFixed(3)} ms) ${latencyGatePass ? '≤' : '&gt;'} 1.5 × euclidean p99 (${(spherical.eucP99*1.5).toFixed(3)} ms)
         </div>
         <h2>Harness config</h2>
-        <pre>N = ${N} vectors   DIM = ${DIM}   Q = ${Q} queries   K = ${K}
+        <pre>N = ${N} vectors per scenario   DIM = ${DIM}   Q = ${Q} queries per scenario   K = ${K}
 seed = ${SEED}   ef_search = ${EF_SEARCH}   curvature = ${CURVATURE}</pre>`;
 
       summaryEl.className = allPass ? 'pass' : 'fail';
       summaryEl.textContent = allPass
-        ? 'BOTH GATES PASS — hyperbolic recall ≥ euclidean, p99 within 1.5×.'
-        : 'FAIL — one or both gates failed; see table.';
+        ? 'BOTH GATES PASS on spherical — hyperbolic recall ≥ euclidean, p99 within 1.5×.'
+        : 'GATE FAIL on spherical (expected — see interpretation for why ball-native tells the fuller story).';
       window.__hnswBenchResult = allPass ? 'PASS' : 'FAIL';
       window.__hnswBenchDetail = {
-        eucRecall, hypRecall,
-        eucP99, hypP99, eucP50, hypP50,
+        spherical, ball,
         recallGatePass, latencyGatePass,
+        sphericalGap, ballGap,
+        interpretation,
       };
     })().catch((e) => {
       summaryEl.className = 'fail';
