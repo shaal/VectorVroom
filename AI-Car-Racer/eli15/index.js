@@ -28,6 +28,11 @@
       oneLiner: 'A browser-based genetic-algorithm racer with a vector-memory bridge.',
       loader: function () { return import('./chapters/what-is-this-project.js'); },
     },
+    'gnn': {
+      title: 'GNN reranker — like EMA, but with peer pressure',
+      oneLiner: 'A tiny graph neural network that lets parent brains\' scores nudge their children\'s.',
+      loader: function () { return import('./chapters/gnn.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.

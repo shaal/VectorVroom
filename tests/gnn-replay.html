@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<!--
+  gnn-replay.html
+  Scripted replay of the P1.A GNN-reranker confidence gate.
+
+  How to run:
+    python3 -m http.server 8767    # from repo root
+    open http://localhost:8767/tests/gnn-replay.html
+
+  For each fixture in tests/fixtures/*.json this loads the archive into the
+  bridge, runs recommendSeeds() once forced to EMA and once with GNN
+  available, and asserts top1_fitness(gnn) >= top1_fitness(ema). Results
+  render in the page (pass/fail per fixture) and a summary verdict.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>GNN reranker replay</title>
+  <style>
+    body { font: 14px/1.5 system-ui, -apple-system, sans-serif; max-width: 820px; margin: 2em auto; padding: 0 1em; color: #222; }
+    h1 { font-size: 1.25rem; margin: 0 0 .5em; }
+    .fixture { border: 1px solid #ddd; border-radius: 6px; padding: .8em 1em; margin: .8em 0; }
+    .fixture.pass { border-left: 4px solid #2b8a3e; background: #f4fbf5; }
+    .fixture.fail { border-left: 4px solid #c92a2a; background: #fff5f5; }
+    .verdict { font-weight: 600; margin-top: .3em; }
+    .verdict.pass { color: #2b8a3e; }
+    .verdict.fail { color: #c92a2a; }
+    table { border-collapse: collapse; margin-top: .4em; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 2px 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    pre { background: #f4f4f4; padding: .4em .6em; border-radius: 3px; overflow-x: auto; font-size: 12px; }
+    #summary { padding: .8em 1em; border-radius: 6px; margin-top: 1em; font-weight: 600; }
+    #summary.pass { background: #d3f9d8; color: #2b8a3e; }
+    #summary.fail { background: #ffe3e3; color: #c92a2a; }
+    #summary.pending { background: #fff3bf; color: #5c3c00; }
+  </style>
+</head>
+<body>
+  <h1>GNN-reranker replay gate</h1>
+  <p>
+    Confidence gate for P1.A: for each saved archive, top-1 retrieved seed's
+    fitness under <strong>GNN</strong> is ≥ the same under <strong>EMA</strong>.
+  </p>
+  <div id="summary" class="pending">Running…</div>
+  <div id="results"></div>
+
+  <script type="module">
+    import * as bridge from '../AI-Car-Racer/ruvectorBridge.js';
+    // brainCodec exports force TOPOLOGY shape checks; the bridge's own module
+    // already imports them, so we don't need to re-import here.
+
+    const FIXTURES = ['baseline', 'peer-pressure', 'adversarial'];
+
+    const resultsEl = document.getElementById('results');
+    const summaryEl = document.getElementById('summary');
+
+    function renderFixture(name, { pass, ema, gnn, fixtureDoc, error }) {
+      const card = document.createElement('div');
+      card.className = 'fixture ' + (pass ? 'pass' : 'fail');
+      const emaFit = ema ? ema.meta.fitness.toFixed(1) : '—';
+      const gnnFit = gnn ? gnn.meta.fitness.toFixed(1) : '—';
+      const emaId = ema ? ema.id : '—';
+      const gnnId = gnn ? gnn.id : '—';
+      card.innerHTML = `
+        <div><strong>${name}.json</strong></div>
+        <div style="color:#555;">${fixtureDoc ? fixtureDoc.description : '(no _doc)'}</div>
+        ${error ? `<pre class="fail">${error}</pre>` : ''}
+        <table>
+          <thead><tr><th>ranker</th><th>top-1 id</th><th>top-1 fitness</th></tr></thead>
+          <tbody>
+            <tr><td>EMA (forced)</td><td>${emaId}</td><td>${emaFit}</td></tr>
+            <tr><td>GNN (available)</td><td>${gnnId}</td><td>${gnnFit}</td></tr>
+          </tbody>
+        </table>
+        <div class="verdict ${pass ? 'pass' : 'fail'}">${
+          pass
+            ? 'PASS  — top1_fitness(GNN) ≥ top1_fitness(EMA)'
+            : 'FAIL  — top1_fitness(GNN) < top1_fitness(EMA)'
+        }</div>
+      `;
+      resultsEl.appendChild(card);
+    }
+
+    async function runOne(name) {
+      const fixture = await fetch('./fixtures/' + name + '.json').then((r) => r.json());
+      const trackVec = Float32Array.from(fixture.tracks[0].vec);
+
+      // Force-EMA pass.
+      bridge.setForceEma(true);
+      bridge.hydrateFromFixture(fixture);
+      const emaSeeds = bridge.recommendSeeds(trackVec, 5);
+
+      // GNN-available pass (resets the archive so the EMA run has no lingering
+      // state effect; the bridge is stateless beyond mirrors which we replace).
+      bridge.setForceEma(false);
+      bridge.hydrateFromFixture(fixture);
+      const gnnSeeds = bridge.recommendSeeds(trackVec, 5);
+
+      const infoAfterGnn = bridge.info();
+
+      const ema = emaSeeds[0] || null;
+      const gnn = gnnSeeds[0] || null;
+      if (!ema || !gnn) {
+        return { pass: false, ema, gnn, fixtureDoc: fixture._doc,
+          error: 'recommendSeeds() returned empty for one of the passes' };
+      }
+
+      const pass = gnn.meta.fitness >= ema.meta.fitness;
+      return { pass, ema, gnn, fixtureDoc: fixture._doc,
+        error: null, infoAfterGnn };
+    }
+
+    (async () => {
+      try {
+        await bridge.ready();
+      } catch (e) {
+        summaryEl.className = 'fail';
+        summaryEl.textContent = 'bridge.ready() failed: ' + String(e);
+        return;
+      }
+
+      const info0 = bridge.info();
+      const loadedNote = document.createElement('div');
+      loadedNote.style.color = '#666';
+      loadedNote.style.marginBottom = '.6em';
+      loadedNote.textContent =
+        'bridge ready — gnnLoaded=' + !!info0.gnnLoaded +
+        ', rerankerThreshold=' + info0.rerankerThreshold;
+      resultsEl.appendChild(loadedNote);
+
+      let allPass = true;
+      for (const name of FIXTURES) {
+        try {
+          const result = await runOne(name);
+          if (!result.pass) allPass = false;
+          renderFixture(name, result);
+        } catch (e) {
+          allPass = false;
+          renderFixture(name, {
+            pass: false, ema: null, gnn: null,
+            fixtureDoc: null, error: String(e && e.stack || e),
+          });
+        }
+      }
+
+      summaryEl.className = allPass ? 'pass' : 'fail';
+      summaryEl.textContent = allPass
+        ? 'ALL ' + FIXTURES.length + ' FIXTURES PASSED — GNN never beaten by EMA.'
+        : 'FAIL — one or more fixtures regressed.';
+      // Machine-readable marker for browser automation (agent-browser grepping).
+      window.__gnnReplayResult = allPass ? 'PASS' : 'FAIL';
+    })();
+  </script>
+</body>
+</html>

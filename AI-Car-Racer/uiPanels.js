@@ -31,6 +31,14 @@
     '  </span>',
     '  <span class="rv-info" data-rv="info"></span>',
     '</div>',
+    '<div class="rv-reranker-mode" data-rv="reranker-mode" hidden>',
+    '  <span class="rv-reranker-mode-label">reranker:</span>',
+    '  <span class="rv-reranker-mode-value" data-rv="reranker-mode-value">—</span>',
+    // ELI15 badge — clicking opens the GNN chapter with the message-passing
+    // explanation. Placed beside the value so the question-mark reads as
+    // "why is it gnn vs ema?".
+    '  <span data-eli15="gnn" role="button" tabindex="0" aria-label="Learn: how the GNN reranker works"></span>',
+    '</div>',
     '<div class="rv-reranker" data-rv="reranker" hidden></div>',
     '<div class="rv-badge" data-rv="badge" hidden></div>',
     '<div class="rv-list-title">Seeded from archive</div>',
@@ -39,6 +47,8 @@
 
   const el = {
     info: root.querySelector('[data-rv="info"]'),
+    rerankerMode: root.querySelector('[data-rv="reranker-mode"]'),
+    rerankerModeValue: root.querySelector('[data-rv="reranker-mode-value"]'),
     reranker: root.querySelector('[data-rv="reranker"]'),
     badge: root.querySelector('[data-rv="badge"]'),
     list: root.querySelector('[data-rv="list"]'),
@@ -101,7 +111,7 @@
       info.brains + ' brain' + (info.brains === 1 ? '' : 's') +
       ' · ' + info.tracks + ' track' + (info.tracks === 1 ? '' : 's') +
       ' · ' + info.observations + ' obs' +
-      (info.gnn ? ' · gnn' : ' · ema');
+      ' · ' + (info.reranker || (info.gnn ? 'gnn' : 'ema'));
     el.info.className = 'rv-info';
   }
 
@@ -127,6 +137,25 @@
       sum += Math.abs(pi - ci);
     }
     return sum;
+  }
+
+  function renderRerankerMode(info) {
+    // The `reranker: gnn | ema | none` one-liner row. Hidden when the bridge
+    // is disabled via ?rv=0 (everything about the bridge is silenced then) or
+    // before the first recommendSeeds() call populates info.reranker.
+    if (window.rvDisabled) {
+      el.rerankerMode.hidden = true;
+      return;
+    }
+    if (!info || !info.ready) {
+      el.rerankerMode.hidden = true;
+      return;
+    }
+    const mode = (info.reranker === 'gnn' || info.reranker === 'ema' || info.reranker === 'none')
+      ? info.reranker : 'none';
+    el.rerankerMode.hidden = false;
+    el.rerankerModeValue.textContent = mode;
+    el.rerankerModeValue.className = 'rv-reranker-mode-value rv-reranker-mode-' + mode;
   }
 
   function renderReranker(info) {
@@ -348,6 +377,7 @@
     }
 
     renderInfo(info);
+    renderRerankerMode(info);
     renderReranker(info);
     renderBadge(trackVec, seeds);
     renderList(seeds, info || { ready: false, brains: 0 });

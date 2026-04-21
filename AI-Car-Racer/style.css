@@ -217,6 +217,29 @@ h1{
 }
 .rv-info-muted { color: #a07e5a; font-style: italic; }
 
+.rv-reranker-mode {
+    font-size: .72rem;
+    color: #555;
+    margin: 0 0 .25em 0;
+    display: flex;
+    align-items: center;
+    gap: .35em;
+    letter-spacing: .01em;
+}
+.rv-reranker-mode[hidden] { display: none; }
+.rv-reranker-mode-label { color: #777; }
+.rv-reranker-mode-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 600;
+    padding: 0 .3em;
+    border-radius: 3px;
+    background: #f3e7cf;
+    color: #6b4a1a;
+}
+.rv-reranker-mode-gnn { background: #d7ecdc; color: #1c6b3a; }
+.rv-reranker-mode-ema { background: #f3e7cf; color: #6b4a1a; }
+.rv-reranker-mode-none { background: #ece7e0; color: #7a6b5a; }
+
 .rv-reranker {
     font-size: .72rem;
     color: #555;
