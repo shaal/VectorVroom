@@ -32,10 +32,10 @@ These are the friction points you may hit on a fresh clone:
 - **Modern browser required.** Chrome/Firefox/Safari from 2020 onward —
   anything that supports ES modules + WebAssembly + IndexedDB.
 - **No build step, no `npm install`.** The ruvector WASM packages are
-  pre-built under `vendor/ruvector/ruvector_wasm/` and `vendor/ruvector/ruvector_cnn_wasm/`
-  (both include `.wasm` binaries + JS glue + `.d.ts`). If you want to rebuild
-  them from source, see the upstream ruvector repo; otherwise the vendored
-  artifacts are authoritative.
+  pre-built under `vendor/ruvector/ruvector_wasm/`, `vendor/ruvector/ruvector_cnn_wasm/`,
+  and `vendor/ruvector/ruvector_gnn_wasm/` (all three include `.wasm` binaries
+  + JS glue + `.d.ts`). If you want to rebuild them from source, see the upstream
+  ruvector repo; otherwise the vendored artifacts are authoritative.
 - **IndexedDB is per-origin.** Opening the game at `localhost:8765` and
   `127.0.0.1:8765` gives you two *separate* archives — stick with one host
   if you want seed recall to survive across sessions.
@@ -67,7 +67,7 @@ AI-Car-Racer/              # the playable app (serve index.html from here)
 ├── eli15/                 # teaching drawer (? / 🎓 button) — one file per chapter
 └── ...                    # canvas, car physics, sensors, GA logic
 vendor/ruvector/           # pre-built WASM, committed so no toolchain needed
-└── ruvector_{cnn_,}wasm/  # CNN embedder + VectorDB flavours
+└── ruvector_{cnn_,gnn_,}wasm/  # CNN embedder + GNN reranker + VectorDB flavours
 scripts/vendor-ruvector.sh # maintainer-only: rebuild + recommit a WASM crate
 docs/plan/                 # design notes and phase-by-phase progress
 ```

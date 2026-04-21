@@ -1,16 +1,14 @@
 // ruvectorBridge.js
 // Vector-memory integration surface for AI-Car-Racer.
 // Wraps @ruvector/wasm (VectorDB + HNSW) and @ruvector/cnn (image embedder),
-// adds native-IndexedDB persistence, and provides an EMA-weighted reranker as
-// the GNN-fallback path (P2.C is [!] — no pre-built GNN crate).
-//
-// Persistence note: upstream VectorDB.saveToIndexedDB / static loadFromIndexedDB
-// are stubs (save no-ops, load rejects). We persist the entry mirror ourselves
-// via window.indexedDB and rebuild VectorDB in-memory on hydrate().
+// adds native-IndexedDB persistence, and — as of P1.A — reranks retrieval with
+// a GNN over the lineage DAG when enough archived brains are present, falling
+// back to the EMA-weighted path otherwise.
 
 import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js';
 import initCnn, { CnnEmbedder } from '../vendor/ruvector/ruvector_cnn_wasm/index.js';
 import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY } from './brainCodec.js';
+import { loadGnn, isReady as gnnIsReady, gnnScore } from './gnnReranker.js';
 
 const IDB_NAME = 'rv_car_learning';
 const IDB_VERSION = 1;
@@ -24,6 +22,19 @@ const TRACK_DIM = 512;
 const TRACK_DEDUPE_MAX_DIST = 0.005; // ≈ 0.9975 cosine similarity
 const EMA_ALPHA = 0.3;
 const PERSIST_DEBOUNCE_MS = 250;
+
+// Minimum archive size before we switch from EMA to GNN. Rationale: a GNN
+// needs a non-trivial graph to be meaningful — with <10 brains the lineage DAG
+// is typically a chain of 1–2 nodes and message passing degenerates to identity.
+const GNN_MIN_ARCHIVE = 10;
+
+let _rerankerMode = 'none'; // 'gnn' | 'ema' | 'none'
+let _forceEma = false;      // test-only override; see setForceEma()
+
+// Test-only: forces the EMA path regardless of GNN availability. Used by
+// the scripted replay harness in tests/gnn-replay.html to get an
+// apples-to-apples EMA-vs-GNN comparison from a single archive snapshot.
+export function setForceEma(on) { _forceEma = !!on; }
 
 let _ready = null;
 let _brainDB = null;
@@ -46,7 +57,11 @@ export function ready() {
     _brainDB = new VectorDB(FLAT_LENGTH, 'cosine');
     _trackDB = new VectorDB(TRACK_DIM, 'cosine');
     _cnn = new CnnEmbedder(); // default 224×224, 512-dim, L2-normalized
+    // Kick off GNN load in parallel with hydrate(). Best-effort: if loadGnn()
+    // resolves to null, recommendSeeds() silently falls back to the EMA path.
+    const gnnPromise = loadGnn();
     await hydrate();
+    try { await gnnPromise; } catch (_) { /* already logged inside loadGnn */ }
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => { try { flushPersist(); } catch (_) {} });
     }
@@ -124,21 +139,33 @@ export function recommendSeeds(trackVec, k = 5) {
     for (const bid of _brainMirror.keys()) candidates.set(bid, 0);
   }
 
+  // Decide reranker: GNN when it's loaded AND the archive has ≥ GNN_MIN_ARCHIVE
+  // (10) brains — smaller lineage graphs carry no useful signal for message
+  // passing. Otherwise fall back to the EMA observation weight automatically.
+  const useGnn = !_forceEma && gnnIsReady() && _brainMirror.size >= GNN_MIN_ARCHIVE;
+  const gnnMap = useGnn ? gnnScore(_brainMirror, candidates) : null;
+  _rerankerMode = useGnn && gnnMap ? 'gnn' : (candidates.size > 0 ? 'ema' : 'none');
+
   const scored = [];
   for (const [bid, trackSim] of candidates) {
     const entry = _brainMirror.get(bid);
     const normFit = Math.tanh(((entry.meta && entry.meta.fitness) || 0) / 100);
-    const obs = _observations.get(bid);
-    const emaBoost = obs ? obs.weight : 0;
     // Map cosine [-1,1] → [0,1] so negative sims don't flip sign of product.
     const trackTerm = 0.5 + 0.5 * trackSim;
     const fitTerm = 0.5 + 0.5 * normFit;
-    const obsTerm = 1 + 0.3 * emaBoost;
+    let rerankTerm;
+    if (gnnMap && gnnMap.has(bid)) {
+      rerankTerm = gnnMap.get(bid);
+    } else {
+      const obs = _observations.get(bid);
+      const emaBoost = obs ? obs.weight : 0;
+      rerankTerm = 1 + 0.3 * emaBoost;
+    }
     scored.push({
       id: bid,
       vector: entry.vector,
       meta: entry.meta,
-      score: trackTerm * fitTerm * obsTerm,
+      score: trackTerm * fitTerm * rerankTerm,
       trackSim,
     });
   }
@@ -181,13 +208,20 @@ export function info() {
   // the EMA and can reshuffle the ordering.
   let events = 0;
   for (const o of _observations.values()) events += (o.count | 0);
+  // `reranker` reflects the mode used on the most recent recommendSeeds() call
+  // ('gnn' | 'ema' | 'none'). `gnn` is a derived convenience flag for legacy
+  // callers. `gnnLoaded` is "is the GNN wasm module actually available"; we
+  // still fall back to EMA if the archive is below GNN_MIN_ARCHIVE.
   return {
     brains: _brainMirror.size,
     tracks: _trackMirror.size,
     observations: _observations.size,
     observationEvents: events,
     ready: !!_brainDB,
-    gnn: false, // P2.C skipped; EMA fallback active
+    gnn: _rerankerMode === 'gnn',
+    gnnLoaded: gnnIsReady(),
+    reranker: _rerankerMode,
+    rerankerThreshold: GNN_MIN_ARCHIVE,
     topology: TOPOLOGY.slice(),
   };
 }
@@ -351,6 +385,38 @@ export async function persist() {
     }
   })();
   try { await _persistInFlight; } finally { _persistInFlight = null; }
+}
+
+// Test-only: load a fixture archive directly into the in-memory state,
+// bypassing IndexedDB. The fixture shape mirrors persist()'s output:
+//   { brains:  [{ id, vec, meta }],
+//     tracks:  [{ id, vec, meta }],
+//     observations: [{ id, weight, count }] }
+// Used by tests/gnn-replay.html for deterministic archive replay.
+export function hydrateFromFixture(fixture) {
+  requireReady();
+  _brainMirror.clear();
+  _trackMirror.clear();
+  _observations.clear();
+  _brainDB = new VectorDB(FLAT_LENGTH, 'cosine');
+  _trackDB = new VectorDB(TRACK_DIM, 'cosine');
+  const toF32 = (v) => (v instanceof Float32Array) ? v : new Float32Array(v);
+  for (const row of (fixture.tracks || [])) {
+    const vec = toF32(row.vec);
+    if (vec.length !== TRACK_DIM) continue;
+    _trackDB.insert(vec, row.id, row.meta || {});
+    _trackMirror.set(row.id, { vector: vec, meta: row.meta || {} });
+  }
+  for (const row of (fixture.brains || [])) {
+    const vec = toF32(row.vec);
+    if (vec.length !== FLAT_LENGTH) continue;
+    _brainDB.insert(vec, row.id, row.meta || {});
+    _brainMirror.set(row.id, { vector: vec, meta: row.meta || {} });
+  }
+  for (const row of (fixture.observations || [])) {
+    _observations.set(row.id, { weight: row.weight || 0, count: row.count | 0 });
+  }
+  _rerankerMode = 'none';
 }
 
 // Danger-knob: purge everything. Exposed for the verifier + dev console; the

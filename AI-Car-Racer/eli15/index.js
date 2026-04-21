@@ -73,6 +73,11 @@
       oneLiner: 'Use brains that did well on similar-shaped past tracks as starting seeds.',
       loader: function () { return import('./chapters/track-similarity.js'); },
     },
+    'gnn': {
+      title: 'GNN reranker — like EMA, but with peer pressure',
+      oneLiner: 'A tiny graph neural network that lets parent brains\' scores nudge their children\'s.',
+      loader: function () { return import('./chapters/gnn.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.
