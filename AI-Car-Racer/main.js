@@ -18,7 +18,7 @@ var playerCar;
 var playerCar2;
 let bestCar;
 var invincible=false;
-var traction=1;
+var traction=0.5;
 
 var frameCount = 0;
 var fastLap = '--';
@@ -42,7 +42,7 @@ var breakAccel = .05;
 // cars[0].update(road.borders, road.checkPointList);//create polygon
 let pause=true;
 var phase = 0; //0 welcome, 1 track, 2 checkpoints, 3 physics, 4 training
-var maxSpeed = 8;
+var maxSpeed = 15;
 nextPhase();
 if (localStorage.getItem("traction")){
     traction=JSON.parse(localStorage.getItem("traction"));
