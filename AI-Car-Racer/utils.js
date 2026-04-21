@@ -94,6 +94,14 @@ function phaseToLayout(phase){
             }
             break;
         case 4:
+            // ELI15 badges (P0.B): each "?" badge sits next to the UI element
+            // whose concept it explains. Clicking opens the matching chapter.
+            //   - Variance slider       → genetic-algorithm
+            //   - Round Length slider   → fitness-function (scoring window)
+            //   - timer (#timer)        → fitness-function + sensors (rays
+            //                             appear on the canvas during phase 4)
+            //   - inputCanvas (NN out)  → neural-network (see uiPanels/indexed
+            //                             via the inputCanvas badge wrapper below)
             rightPanel.innerHTML = `
             <button class='backNext back' onclick='backPhase()'>Prev</button>
             <button class='controlButton' id='pause' onclick='pauseGame()'>Pause</button>
@@ -110,8 +118,16 @@ function phaseToLayout(phase){
                 <output id="secondsOutput" name="Round Length"></output>
                 <input min=".001" max=".3" id="mutateValueInput" onkeydown="return false;" step=".001" type="range" onchange='setMutateValue(this.value)' oninput="document.getElementById('mutateValueOutput').value = 'Variance: ' + this.value" >
                 <output id="mutateValueOutput" name="Variance"></output>
+                <span data-eli15="genetic-algorithm" role="button" tabindex="0" aria-label="Learn: genetic algorithm + variance"></span>
             </div>
             <div id="timer"></div>
+            <div id="timer-eli15" style="margin-top:.25em;">
+                <!-- Fast Lap = fitness-function display; rays are drawn on the
+                     canvas when training, so the sensors badge lives here too. -->
+                <span data-eli15="fitness-function" role="button" tabindex="0" aria-label="Learn: fitness function"></span>
+                <span data-eli15="sensors" role="button" tabindex="0" aria-label="Learn: ray-cast sensors"></span>
+                <span data-eli15="neural-network" role="button" tabindex="0" aria-label="Learn: neural network"></span>
+            </div>
             `;
             bottomText.innerHTML = `
                 <h1>Train your model!</h1>

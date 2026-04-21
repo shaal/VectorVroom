@@ -28,6 +28,51 @@
       oneLiner: 'A browser-based genetic-algorithm racer with a vector-memory bridge.',
       loader: function () { return import('./chapters/what-is-this-project.js'); },
     },
+    'sensors': {
+      title: 'The car\'s eyes are five invisible rays',
+      oneLiner: 'Ray-cast sensors feed a number per ray into the neural network.',
+      loader: function () { return import('./chapters/sensors.js'); },
+    },
+    'neural-network': {
+      title: 'A brain made of 92 numbers',
+      oneLiner: 'Six sensor inputs → eight hidden neurons → four pedal/steer outputs.',
+      loader: function () { return import('./chapters/neural-network.js'); },
+    },
+    'genetic-algorithm': {
+      title: 'Breeding brains instead of training them',
+      oneLiner: 'Copy the winners, nudge their weights, discard the losers. Repeat.',
+      loader: function () { return import('./chapters/genetic-algorithm.js'); },
+    },
+    'fitness-function': {
+      title: 'How we decide which car is "best"',
+      oneLiner: 'Checkpoints passed + completed laps × track length.',
+      loader: function () { return import('./chapters/fitness-function.js'); },
+    },
+    'cnn-embedder': {
+      title: 'Turning a track picture into 512 numbers',
+      oneLiner: 'A tiny CNN squashes a track drawing into a fixed-length vector we can compare.',
+      loader: function () { return import('./chapters/cnn-embedder.js'); },
+    },
+    'vectordb-hnsw': {
+      title: 'Nearest-neighbour search that doesn\'t scan everything',
+      oneLiner: 'HNSW builds a multi-layer graph so queries only touch log(N) vectors.',
+      loader: function () { return import('./chapters/vectordb-hnsw.js'); },
+    },
+    'ema-reranker': {
+      title: 'Learning which recommendations actually help',
+      oneLiner: 'An EMA per retrieved brain nudges future rankings toward ones that paid off.',
+      loader: function () { return import('./chapters/ema-reranker.js'); },
+    },
+    'lineage': {
+      title: 'Every brain has parents',
+      oneLiner: 'parentIds + getLineage() reconstruct a brain\'s family tree on demand.',
+      loader: function () { return import('./chapters/lineage.js'); },
+    },
+    'track-similarity': {
+      title: 'Not starting from scratch on every new track',
+      oneLiner: 'Use brains that did well on similar-shaped past tracks as starting seeds.',
+      loader: function () { return import('./chapters/track-similarity.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.

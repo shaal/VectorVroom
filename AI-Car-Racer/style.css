@@ -227,6 +227,11 @@ h1{
 }
 .rv-reranker[hidden] { display: none; }
 .rv-reranker-muted { color: #a07e5a; font-style: italic; }
+.rv-badge-row {
+    display: flex;
+    align-items: flex-start;
+    gap: .25em;
+}
 
 .rv-badge {
     margin: .3em 0 .5em 0;

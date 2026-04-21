@@ -45,7 +45,10 @@ These are the friction points you may hit on a fresh clone:
 - **ELI15 teaching drawer.** Press `?` or click the floating 🎓 button (bottom-right)
   to open a drawer that explains what each piece of the app is doing, in
   plain language. Widgets with a small `?` badge open the matching chapter
-  directly. Closes with `ESC` or by clicking the backdrop.
+  directly. Closes with `ESC` or by clicking the backdrop. Chapters now cover
+  every existing AI feature — sensors, neural network, genetic algorithm,
+  fitness function, CNN embedder, HNSW vector DB, EMA reranker, brain
+  lineage, and cross-track similarity.
 - **Track preset picker** appears top-left during phase 1 (editor phase);
   pick one of 5 pre-authored tracks or draw your own with left/right click.
   Loading a preset clears `bestBrain`/`progress` (the old brain is bound to

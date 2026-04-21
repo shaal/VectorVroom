@@ -24,23 +24,44 @@
     '<div class="rv-header">',
     '  <span class="rv-title">Vector Memory',
     // ELI15 badge — clicking opens the framing chapter. Placed in the panel
-    // title so it's discoverable without hunting. Later phases (P0.B, P1.*)
-    // replace this chapter id with topic-specific ones next to the relevant
-    // widget (reranker row, adapter drift sparkline, etc.).
+    // title so it's discoverable without hunting. Per-widget badges below
+    // point at the specific chapter for that row.
     '    <span data-eli15="what-is-this-project" role="button" tabindex="0" aria-label="Learn: what is this project doing?"></span>',
     '  </span>',
+    // rv-info is the brains/tracks/obs line — it's populated by VectorDB
+    // counts, so the HNSW chapter is the right anchor. A neighbouring
+    // cnn-embedder badge gives learners a jumping-off point for the "tracks"
+    // half of that line.
     '  <span class="rv-info" data-rv="info"></span>',
+    '  <span data-eli15="vectordb-hnsw" role="button" tabindex="0" aria-label="Learn: nearest-neighbour search via HNSW"></span>',
+    '  <span data-eli15="cnn-embedder" role="button" tabindex="0" aria-label="Learn: CNN track embedder"></span>',
     '</div>',
-    '<div class="rv-reranker" data-rv="reranker" hidden></div>',
-    '<div class="rv-badge" data-rv="badge" hidden></div>',
-    '<div class="rv-list-title">Seeded from archive</div>',
+    // The reranker line, when visible, gets a badge pointing at the EMA chapter.
+    // The badge is a sibling of reranker text in the same line.
+    '<div class="rv-reranker" data-rv="reranker" hidden>',
+    '  <span data-rv="reranker-text"></span>',
+    '  <span data-eli15="ema-reranker" role="button" tabindex="0" aria-label="Learn: EMA reranker"></span>',
+    '</div>',
+    // The similarity-% banner (shown when a warm-start retrieval lands) →
+    // track-similarity chapter.
+    '<div class="rv-badge-row">',
+    '  <div class="rv-badge" data-rv="badge" hidden></div>',
+    '  <span class="rv-badge-eli15" data-eli15="track-similarity" role="button" tabindex="0" aria-label="Learn: track similarity warm-start" hidden></span>',
+    '</div>',
+    '<div class="rv-list-title">Seeded from archive',
+    // The lineage sparkline sits on every row; the list-title badge is the
+    // discoverable entry point for the lineage concept.
+    '  <span data-eli15="lineage" role="button" tabindex="0" aria-label="Learn: brain lineage"></span>',
+    '</div>',
     '<div class="rv-list" data-rv="list"></div>',
   ].join('');
 
   const el = {
     info: root.querySelector('[data-rv="info"]'),
     reranker: root.querySelector('[data-rv="reranker"]'),
+    rerankerText: root.querySelector('[data-rv="reranker-text"]'),
     badge: root.querySelector('[data-rv="badge"]'),
+    badgeEli15: root.querySelector('.rv-badge-eli15'),
     list: root.querySelector('[data-rv="list"]'),
   };
 
@@ -54,6 +75,7 @@
     if (ev.animationName !== 'rv-badge-pulse' && ev.animationName !== 'rv-badge-pulse-flat') return;
     el.badge.classList.remove('rv-badge-showing');
     el.badge.hidden = true;
+    if (el.badgeEli15) el.badgeEli15.hidden = true;
   });
 
   // Render-input memoisation. We hash the cheap identity keys; if nothing moved,
@@ -132,7 +154,7 @@
   function renderReranker(info) {
     if (window.rvDisabled) {
       el.reranker.hidden = true;
-      el.reranker.textContent = '';
+      if (el.rerankerText) el.rerankerText.textContent = '';
       return;
     }
     if (!info || !info.ready) {
@@ -146,14 +168,14 @@
     const events = (info.observationEvents | 0);
     const distinct = (info.observations | 0);
     if (events === 0) {
-      el.reranker.textContent = engine + ' reranker: idle (awaiting first observation)';
+      if (el.rerankerText) el.rerankerText.textContent = engine + ' reranker: idle (awaiting first observation)';
       el.reranker.className = 'rv-reranker rv-reranker-muted';
       return;
     }
     const shiftText = rerankState.lastShift === null
       ? '—'
       : (rerankState.lastShift + ' position' + (rerankState.lastShift === 1 ? '' : 's'));
-    el.reranker.textContent =
+    if (el.rerankerText) el.rerankerText.textContent =
       engine + ' reranker: ' + events + ' observation' + (events === 1 ? '' : 's') +
       ' (' + distinct + ' brain' + (distinct === 1 ? '' : 's') + ')' +
       ' · last shift ' + shiftText;
@@ -170,6 +192,7 @@
       el.badge.hidden = true;
       el.badge.classList.remove('rv-badge-showing');
       el.badge.textContent = '';
+      if (el.badgeEli15) el.badgeEli15.hidden = true;
       badgeShownForTrackId = null;
       return;
     }
@@ -187,6 +210,7 @@
       'loading ' + seeds.length + ' candidate brain' +
       (seeds.length === 1 ? '' : 's') + ' as seeds.';
     el.badge.hidden = false;
+    if (el.badgeEli15) el.badgeEli15.hidden = false;
 
     // Restart the CSS @keyframes from frame 0: remove, force reflow, re-add.
     // Without the reflow, the browser coalesces the remove+add and the
