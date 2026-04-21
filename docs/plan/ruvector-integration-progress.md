@@ -41,6 +41,15 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
+### Known gotchas (survive across sessions)
+
+Short, high-leverage list — read before you touch these areas:
+
+1. **Vendored `@ruvector/cnn/index.js` carries two local patches** (ESM conversion + ctor field-read order). There's a banner comment at the top of the file, but if you re-run `cp ruvector/npm/packages/ruvector-cnn/* vendor/ruvector/ruvector_cnn_wasm/`, **both patches will be clobbered silently**. After any re-vendor, diff against `HEAD` and re-apply, or use `git checkout vendor/ruvector/ruvector_cnn_wasm/index.js` to restore.
+2. **`wasm-pack` writes `pkg/.gitignore` = `*`** — it assumes `pkg/` is ephemeral. For vendoring workflows (`P2.A`, any future WASM re-build), `rm -f pkg/.gitignore` before `git add`, or `git add -f`.
+3. **Classic-script `class` declarations aren't on `globalThis`.** `NeuralNetwork` and `Level` in `network.js` are visible to other classic scripts by bare name but invisible to ES modules. `brainCodec.unflatten` depends on `globalThis.NeuralNetwork`, so `index.html` (after Phase 4) needs `<script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>` right after `<script src="network.js">`.
+4. **Re-run the verifier after any vendor change:** `python3 -m http.server 8765` from repo root, then open `http://localhost:8765/docs/validation/phase2-verify.html`. All three checks should read `OK`.
+
 ---
 
 ## Phase 1 — Replace base (DONE)

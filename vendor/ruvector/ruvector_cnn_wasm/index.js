@@ -1,3 +1,11 @@
+// ─── LOCAL PATCHES (do not lose on re-vendor) ────────────────────────────────
+//   1. Bottom of file: `module.exports = {...}` → `export { ... }; export default init;`
+//      (upstream ships CJS for Node+bundler; we serve this file to a browser as ESM)
+//   2. CnnEmbedder ctor: read `wasmConfig.embedding_dim` BEFORE `new WasmCnnEmbedder(wasmConfig)`
+//      (the ctor consumes the config ptr; reading after panics "null pointer passed to rust")
+//   Rationale lives in docs/plan/ruvector-integration-progress.md (Phase 2.B Working notes)
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * @ruvector/cnn - CNN feature extraction for image embeddings
  *

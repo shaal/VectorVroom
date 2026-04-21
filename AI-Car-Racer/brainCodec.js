@@ -33,6 +33,8 @@ export function unflatten(float32, topology = TOPOLOGY) {
   if (float32.length !== expected) {
     throw new Error(`brainCodec.unflatten: expected ${expected} dims, got ${float32.length}`);
   }
+  // index.html must bridge the classic-script class: `window.NeuralNetwork = NeuralNetwork;`
+  // right after network.js loads, otherwise this throws in module scope.
   const net = new globalThis.NeuralNetwork(topology);
   let k = 0;
   for (let L = 0; L < net.levels.length; L++) {
