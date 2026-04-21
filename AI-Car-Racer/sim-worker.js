@@ -180,8 +180,15 @@ function computeStride(ss) {
     return 4;
 }
 
+let _prevTickEnd = 0;
+const WORKER_HITCH_MS = 60;
+
 function stepOnce() {
     const now = performance.now();
+    // Gap between end of the previous tick and start of this one. Normally
+    // ~4-10ms (setTimeout(0) clamp). Large values here indicate the worker
+    // thread was paused — usually GC, sometimes OS scheduling.
+    const tickGap = _prevTickEnd > 0 ? now - _prevTickEnd : 0;
     let dt = (now - _lastTickWall) / 1000;
     _lastTickWall = now;
     if (dt > 0.25) dt = 0.25;
@@ -202,7 +209,9 @@ function stepOnce() {
     const simStart = performance.now();
     const cpLen = self.road.checkPointList.length;
     let stepsRun = 0;
+    let maxStepMs = 0;
     for (let s = 0; s < steps; s++) {
+        const stepStart = performance.now();
         if (self.frameCount >= 60 * seconds) {
             postSnapshot(performance.now() - simStart, stepsRun);
             endGen();
@@ -229,6 +238,8 @@ function stepOnce() {
             }
         }
         stepsRun++;
+        const stepMs = performance.now() - stepStart;
+        if (stepMs > maxStepMs) maxStepMs = stepMs;
         if (performance.now() - simStart > TICK_BUDGET_MS) {
             // Budget tripped — hand remaining steps back to the accumulator
             // so next tick catches up.
@@ -240,7 +251,28 @@ function stepOnce() {
 
     // Always snapshot at the end of a tick. Main rAF pulls at 60Hz and
     // keeps only the latest — overshoot is dropped for free.
+    const postStart = performance.now();
     if (stepsRun > 0) postSnapshot(simMs, stepsRun);
+    const postMs = performance.now() - postStart;
+
+    const tickEnd = performance.now();
+    const tickMs = tickEnd - now;
+    _prevTickEnd = tickEnd;
+
+    // Report worker-side hitches so main can attribute snapGap to its real
+    // cause: gc (large tickGap, small tick work), one-huge-step (maxStep
+    // dominates), or postMessage cost (postMs dominates).
+    if (tickGap + tickMs > WORKER_HITCH_MS) {
+        self.postMessage({
+            type: 'debug',
+            event: 'slowTick',
+            gap: tickGap,
+            tick: tickMs,
+            maxStep: maxStepMs,
+            post: postMs,
+            steps: stepsRun
+        });
+    }
 }
 
 // --- snapshots ---------------------------------------------------------------

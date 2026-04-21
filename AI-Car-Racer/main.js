@@ -209,6 +209,17 @@ simWorker.onmessage = (ev) => {
             if (hitchEnabled && m.event === 'beginBuilt' && m.ms > 30){
                 recordHitch('workerBegin', m.ms, 'N=' + m.N);
             }
+            if (hitchEnabled && m.event === 'slowTick'){
+                // Classify the slow tick so we can see at a glance which
+                // bucket is the culprit: GC pause, one huge step, or post.
+                const parts = [];
+                if (m.gap  > 20) parts.push('gap=' + m.gap.toFixed(0));
+                if (m.tick > 30) parts.push('tick=' + m.tick.toFixed(0));
+                if (m.maxStep > 25) parts.push('maxStep=' + m.maxStep.toFixed(0));
+                if (m.post > 5)   parts.push('post=' + m.post.toFixed(0));
+                const totalMs = m.gap + m.tick;
+                recordHitch('wkTick', totalMs, parts.join(' ') + ' st=' + m.steps);
+            }
             break;
     }
 };
