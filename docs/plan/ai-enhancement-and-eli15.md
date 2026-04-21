@@ -406,8 +406,8 @@ Fill in as phases ship. `ship-task` writes back here on completion.
 | Phase | Status | Agent | Shipped commit | ELI15 chapters |
 |------|--------|-------|----------------|----------------|
 | P0.A | ✅ shipped | claude-opus-4-7 | (see git log) | `what-is-this-project` |
-| P0.B | ☐ | — | — | — |
-| P1.A | ☐ | — | — | — |
+| P0.B | ✅ shipped | claude-opus-4-7 | 2c9bf6e | `sensors`, `neural-network`, `genetic-algorithm`, `fitness-function`, `cnn-embedder`, `vectordb-hnsw`, `ema-reranker`, `lineage`, `track-similarity` |
+| P1.A | ✅ shipped | claude-opus-4-7 | 8c994c1 | `gnn` |
 | P1.B | ☐ | — | — | — |
 | P1.C | ☐ | — | — | — |
 | P2.A | ☐ | — | — | — |
