@@ -23,6 +23,20 @@ var traction=1;
 var frameCount = 0;
 var fastLap = '--';
 
+// Sim-speed multiplier. The physics loop targets `simSpeed × dt × 60` steps
+// per rAF via a fractional accumulator. Tying stepping to wall-dt instead of
+// rAF count means 1× matches real time regardless of monitor refresh rate
+// (the game was designed assuming 60Hz, so on 120Hz displays the old frame-
+// locked loop ran everything at 2×). Render still fires once per rAF — no
+// point drawing intermediate sim states at 20× or 100×.
+var simSpeed = 1;
+var _simStepAccum = 0;
+var _lastTickWall = performance.now();
+
+// Wall-clock anchor reset every begin(); used purely for the `Sim Time`
+// display so users can see sim-sec vs wall-sec diverge under the multiplier.
+var wallStart = performance.now();
+
 var acceleration = .05;
 var breakAccel = .05;
 // cars[0].update(road.borders, road.checkPointList);//create polygon
@@ -60,6 +74,14 @@ function begin(){
     cars=generateCars(batchSize);
     // cars[0].update(road.borders, road.checkPointList);//create polygon
     frameCount=0;
+    wallStart = performance.now();
+    // Prime the accumulator to 1 so the first rAF after begin() is guaranteed
+    // to run at least one physics step. Without this, dt≈0 on the opening
+    // rAF yields stepsThisFrame=0, and the car-draw path then reads empty
+    // sensor.rays (rays are populated in update()) → TypeError kills the
+    // rAF chain and the whole training loop freezes silently.
+    _simStepAccum = 1;
+    _lastTickWall = performance.now();
     currentSeedIds = [];
 
     var seededFromBridge = false;
@@ -239,64 +261,86 @@ function animate(){
         playerCar2.update(road.borders, road.checkPointList);
         playerCar2.draw(ctx,"blue",true);
     }
-    if(phase==4){        
+    if(phase==4){
         const timer = document.getElementById("timer");
-        timer.innerHTML = "<p>Game Time: " + String((frameCount/60).toFixed(2)) + "</p>";
+        const simSecs = (frameCount/60).toFixed(2);
+        const wallSecs = ((performance.now() - wallStart)/1000).toFixed(2);
+        timer.innerHTML = "<p>Sim Time: " + simSecs + "s " +
+            "<span style='opacity:.65;font-size:.85em'>(wall " + wallSecs + "s &middot; " + simSpeed + "&times;)</span></p>";
         // fastLap defaults to '--' until a lap completes (main.js:24).
         // Call toFixed only when it's numeric — otherwise the TypeError
         // throws out of animate(), kills the rAF chain, and the training
         // loop silently freezes with no visible movement on phase 4.
         timer.innerHTML += "<p>Fast Lap: " + (typeof fastLap === 'number' ? fastLap.toFixed(2) : fastLap) + "</p>";
-        if(frameCount==60*seconds){
-            nextBatch();
-        }
-        // canvas.height=window.innerHeight;
-        // canvas.width=window.innerWidth*.8;
         ctx.save();
-        // ctx.translate(-car.x+canvas.width*0.5,-car.y+canvas.height*0.5);
 
         if(!pause){
-            frameCount+=1;
-            for(let i=0;i<cars.length;i++){
-                cars[i].update(road.borders, road.checkPointList);
-            }
-            playerCar.update(road.borders, road.checkPointList);
-            playerCar2.update(road.borders, road.checkPointList);
-            // car.update(road.borders, road.checkPointList);
+            // Wall-time-based stepping: target `simSpeed × dt × 60` physics
+            // steps per rAF (60 steps = 1 sim-second by convention). The
+            // accumulator handles fractional output so 0.5× cleanly runs
+            // one step every ~2 rAFs and 100× bursts 100+ steps per rAF.
+            // dt is clamped to 250ms so a backgrounded tab resuming doesn't
+            // try to catch up with a huge burst of physics at once.
+            const now = performance.now();
+            let dt = (now - _lastTickWall) / 1000;
+            _lastTickWall = now;
+            if (dt > 0.25) dt = 0.25;
+            _simStepAccum += simSpeed * dt * 60;
+            let stepsThisFrame = Math.floor(_simStepAccum);
+            _simStepAccum -= stepsThisFrame;
 
-            testBestCar=cars.find(
-                c=>(c.checkPointsCount+c.laps*road.checkPointList.length)==Math.max(
-                    ...cars.map(c=>c.checkPointsCount+c.laps*road.checkPointList.length)
-            ));
-            if (testBestCar.checkPointsCount+testBestCar.laps*road.checkPointList.length > bestCar.checkPointsCount+bestCar.laps*road.checkPointList.length){
-                bestCar = testBestCar;
-            }
-            // P1.C — record the current best car's sensor/control state into
-            // the dynamics trajectory. The embedder detects bestCar identity
-            // changes internally and resets its ring buffer, so a late swap
-            // doesn't pollute the trajectory of the brain we ultimately archive.
-            if (window.__rvDynamics && bestCar){
-                try { window.__rvDynamics.recordFrame(bestCar); } catch (_) { /* best-effort */ }
-            }
-            // cars[0] = bestCar;
-            
+            let genEnded = false;
+            for (let s = 0; s < stepsThisFrame; s++){
+                // Generation-end check inside the loop + `>=` (not `==`) so a
+                // multi-step frame can't sail past the trigger. nextBatch()
+                // resets frameCount via begin(), so the next iteration starts
+                // fresh from 0 — but we break anyway to let the next rAF paint.
+                if (frameCount >= 60*seconds){
+                    nextBatch();
+                    genEnded = true;
+                    break;
+                }
+                frameCount+=1;
+                for(let i=0;i<cars.length;i++){
+                    cars[i].update(road.borders, road.checkPointList);
+                }
+                playerCar.update(road.borders, road.checkPointList);
+                playerCar2.update(road.borders, road.checkPointList);
 
-            
-            
-            ctx.globalAlpha=.2;
-            for(let i=0;i<cars.length;i++){
-                cars[i].draw(ctx,"rgb(227, 138, 15)");
+                testBestCar=cars.find(
+                    c=>(c.checkPointsCount+c.laps*road.checkPointList.length)==Math.max(
+                        ...cars.map(c=>c.checkPointsCount+c.laps*road.checkPointList.length)
+                ));
+                if (testBestCar.checkPointsCount+testBestCar.laps*road.checkPointList.length > bestCar.checkPointsCount+bestCar.laps*road.checkPointList.length){
+                    bestCar = testBestCar;
+                }
+                // P1.C — record the current best car's sensor/control state into
+                // the dynamics trajectory. The embedder detects bestCar identity
+                // changes internally and resets its ring buffer, so a late swap
+                // doesn't pollute the trajectory of the brain we ultimately archive.
+                // Recording is per sim-step (not per rAF) so trajectories stay
+                // dense at high simSpeed.
+                if (window.__rvDynamics && bestCar){
+                    try { window.__rvDynamics.recordFrame(bestCar); } catch (_) { /* best-effort */ }
+                }
             }
-            ctx.globalAlpha=1;
-            if(bestCar){
-                inputVisual(bestCar.controls);
-                bestCar.draw(ctx,"rgb(227, 138, 15)",true);
-            }
-            playerCar.draw(ctx,"red",true);
-            playerCar2.draw(ctx,"blue",true);
 
-            ctx.restore();
+            // Render once per rAF regardless of how many sim steps ran.
+            if (!genEnded){
+                ctx.globalAlpha=.2;
+                for(let i=0;i<cars.length;i++){
+                    cars[i].draw(ctx,"rgb(227, 138, 15)");
+                }
+                ctx.globalAlpha=1;
+                if(bestCar){
+                    inputVisual(bestCar.controls);
+                    bestCar.draw(ctx,"rgb(227, 138, 15)",true);
+                }
+                playerCar.draw(ctx,"red",true);
+                playerCar2.draw(ctx,"blue",true);
+            }
         }
+        ctx.restore();
     }
     requestAnimationFrame(animate);
 }

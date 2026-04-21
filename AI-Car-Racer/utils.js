@@ -119,6 +119,17 @@ function phaseToLayout(phase){
                 <input min=".001" max=".3" id="mutateValueInput" onkeydown="return false;" step=".001" type="range" onchange='setMutateValue(this.value)' oninput="document.getElementById('mutateValueOutput').value = 'Variance: ' + this.value" >
                 <output id="mutateValueOutput" name="Variance"></output>
                 <span data-eli15="genetic-algorithm" role="button" tabindex="0" aria-label="Learn: genetic algorithm + variance"></span>
+                <label id="simSpeedLabel" style="display:flex; align-items:center; gap:.4em; margin-top:.35em; font-size:.82em;">
+                    <span>Sim Speed:</span>
+                    <select id="simSpeedInput" onchange="setSimSpeed(this.value)" style="flex:1;">
+                        <option value="0.5">0.5&times; (slow)</option>
+                        <option value="1" selected>1&times; (real)</option>
+                        <option value="2">2&times;</option>
+                        <option value="5">5&times;</option>
+                        <option value="20">20&times;</option>
+                        <option value="100">100&times; (max)</option>
+                    </select>
+                </label>
             </div>
             <div id="timer"></div>
             <div id="timer-eli15" style="margin-top:.25em;">

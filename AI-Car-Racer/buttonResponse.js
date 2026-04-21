@@ -163,6 +163,12 @@ function setSeconds(value){
 function setMutateValue(value){
     mutateValue=value;
 }
+function setSimSpeed(value){
+    const n = Number(value);
+    simSpeed = (Number.isFinite(n) && n > 0) ? n : 1;
+    _simStepAccum = 0;
+    _lastTickWall = performance.now();
+}
 function restartBatch(){
     begin();
 }
