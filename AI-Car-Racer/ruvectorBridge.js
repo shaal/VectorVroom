@@ -9,12 +9,28 @@ import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_was
 import initCnn, { CnnEmbedder } from '../vendor/ruvector/ruvector_cnn_wasm/index.js';
 import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY } from './brainCodec.js';
 import { loadGnn, isReady as gnnIsReady, gnnScore } from './gnnReranker.js';
+import {
+  loadAdapter,
+  isReady as loraIsReady,
+  adapt as loraAdapt,
+  reward as loraReward,
+  info as loraInfo,
+  serialize as loraSerialize,
+  deserialize as loraDeserialize,
+  recentDrift as loraRecentDrift,
+  _debugReset as loraDebugReset,
+} from './lora/trackAdapter.js';
 
 const IDB_NAME = 'rv_car_learning';
-const IDB_VERSION = 1;
+// Bumped to 2 in P1.B to add the lora_track store. onupgradeneeded creates the
+// new store without touching the existing brains/tracks/observations stores,
+// so old archives hydrate unchanged on first load after the upgrade.
+const IDB_VERSION = 2;
 const BRAINS_STORE = `brains_${TOPOLOGY.join('_')}`; // topology-scoped per PRD risk #6
 const TRACKS_STORE = 'tracks';
 const OBS_STORE = 'observations';
+const LORA_STORE = 'lora_track';
+const LORA_KEY = 'singleton'; // single-row store; this is the only id ever used
 
 const TRACK_DIM = 512;
 // VectorDB returns cosine DISTANCE (1 - similarity), range [0, 2]. Dedup when
@@ -35,6 +51,14 @@ let _forceEma = false;      // test-only override; see setForceEma()
 // the scripted replay harness in tests/gnn-replay.html to get an
 // apples-to-apples EMA-vs-GNN comparison from a single archive snapshot.
 export function setForceEma(on) { _forceEma = !!on; }
+
+// Test-only: when true, recommendSeeds() searches with the *raw* track vector
+// instead of the LoRA-adapted one. Lets the lora-replay harness compare
+// adapted vs un-adapted retrieval against the same archive. Has no effect on
+// reward(): the adapter still receives reward signals when archiveBrain runs,
+// because that's the bit we're trying to keep behaviour-equivalent.
+let _bypassLora = false;
+export function setBypassLora(on) { _bypassLora = !!on; }
 
 let _ready = null;
 let _brainDB = null;
@@ -57,11 +81,20 @@ export function ready() {
     _brainDB = new VectorDB(FLAT_LENGTH, 'cosine');
     _trackDB = new VectorDB(TRACK_DIM, 'cosine');
     _cnn = new CnnEmbedder(); // default 224×224, 512-dim, L2-normalized
-    // Kick off GNN load in parallel with hydrate(). Best-effort: if loadGnn()
-    // resolves to null, recommendSeeds() silently falls back to the EMA path.
+    // Kick off GNN + LoRA loads in parallel with hydrate(). Best-effort: if
+    // either resolves to null, the corresponding code path silently falls back
+    // (EMA reranker for GNN; identity transform for LoRA).
     const gnnPromise = loadGnn();
+    const loraPromise = loadAdapter();
     await hydrate();
     try { await gnnPromise; } catch (_) { /* already logged inside loadGnn */ }
+    try {
+      await loraPromise;
+      // Hydrate adapter B-matrices after the wasm engines are live. Done
+      // here (not inside hydrate) because hydrate() runs before loadAdapter
+      // resolves on slow loads, and we need the wasm to exist before set_b.
+      await hydrateLoraSnapshot();
+    } catch (_) { /* already logged inside loadAdapter */ }
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => { try { flushPersist(); } catch (_) {} });
     }
@@ -93,6 +126,11 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   if (lap !== undefined) meta.fastestLap = lap;
   const id = _brainDB.insert(vec, null, meta);
   _brainMirror.set(id, { vector: vec, meta });
+  // Feed the LoRA reward signal: the most-recent adapt() input (cached inside
+  // trackAdapter) is the gradient direction; fitness gates whether it fires.
+  // No-op when the adapter isn't ready or `recommendSeeds` hasn't been called
+  // yet for this track (no cached input).
+  try { loraReward(meta.fitness); } catch (e) { console.warn('[lora] reward failed', e); }
   schedulePersist();
   return id;
 }
@@ -119,9 +157,17 @@ export function recommendSeeds(trackVec, k = 5) {
   // Gather candidate brain ids by joining trackDB hits against meta.trackId.
   // VectorDB scores are cosine DISTANCE (0 = identical, 2 = opposite); convert
   // to similarity for downstream math where higher = better.
+  // Run the incoming track vector through the LoRA adapter before searching.
+  // adapt() returns the input unchanged if the adapter isn't ready or the shape
+  // doesn't match — so this is safe even on cold boot. The adapter caches the
+  // *raw* vector internally so reward() can use it as a gradient signal later;
+  // we don't want to feed the post-adapter vector back as gradient (that would
+  // amplify whatever direction B currently points in).
+  const queryVec = trackVec ? (_bypassLora ? trackVec : loraAdapt(trackVec)) : null;
+
   const candidates = new Map(); // brainId -> trackSim (best across matched tracks)
-  if (trackVec && !_trackDB.isEmpty()) {
-    const trackHits = _trackDB.search(trackVec, Math.min(5, Number(_trackDB.len())));
+  if (queryVec && !_trackDB.isEmpty()) {
+    const trackHits = _trackDB.search(queryVec, Math.min(5, Number(_trackDB.len())));
     for (const th of trackHits) {
       const sim = 1 - th.score;
       for (const [bid, entry] of _brainMirror) {
@@ -212,6 +258,13 @@ export function info() {
   // ('gnn' | 'ema' | 'none'). `gnn` is a derived convenience flag for legacy
   // callers. `gnnLoaded` is "is the GNN wasm module actually available"; we
   // still fall back to EMA if the archive is below GNN_MIN_ARCHIVE.
+  // LoRA snapshot — `lora.ready` is the canonical "should the UI show
+  // adapter-related widgets" flag. `lora.drift` is the L2 distance between the
+  // most recent adapt() input and output; `lora.driftRecent` is a short
+  // history for the sparkline. When the adapter never ran this session,
+  // drift is 0 and recent is empty.
+  const lora = loraInfo();
+  lora.driftRecent = loraRecentDrift();
   return {
     brains: _brainMirror.size,
     tracks: _trackMirror.size,
@@ -223,6 +276,7 @@ export function info() {
     reranker: _rerankerMode,
     rerankerThreshold: GNN_MIN_ARCHIVE,
     topology: TOPOLOGY.slice(),
+    lora,
   };
 }
 
@@ -272,6 +326,9 @@ function openDB() {
       if (!db.objectStoreNames.contains(BRAINS_STORE)) db.createObjectStore(BRAINS_STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(TRACKS_STORE)) db.createObjectStore(TRACKS_STORE, { keyPath: 'id' });
       if (!db.objectStoreNames.contains(OBS_STORE)) db.createObjectStore(OBS_STORE, { keyPath: 'id' });
+      // LORA_STORE was added in IDB v2 (P1.B). Keying on `id` matches the
+      // pattern of the other stores; we only ever store one row (LORA_KEY).
+      if (!db.objectStoreNames.contains(LORA_STORE)) db.createObjectStore(LORA_STORE, { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -321,6 +378,34 @@ export async function hydrate() {
   }
 }
 
+// Read the single-row LORA_STORE and hand it to the adapter. Called from
+// ready() *after* loadAdapter() resolves — set_b needs the wasm engines live.
+// Failures are swallowed: the adapter just stays at its (zero-B) cold state.
+async function hydrateLoraSnapshot() {
+  if (typeof indexedDB === 'undefined') return;
+  if (!loraIsReady()) return;
+  let db;
+  try { db = await openDB(); } catch (e) {
+    console.warn('[lora] hydrate openDB failed', e); return;
+  }
+  try {
+    const row = await new Promise((resolve, reject) => {
+      const tx = db.transaction(LORA_STORE, 'readonly');
+      const req = tx.objectStore(LORA_STORE).get(LORA_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    if (row && row.snapshot) {
+      const ok = loraDeserialize(row.snapshot);
+      if (!ok) console.warn('[lora] hydrate snapshot rejected (shape mismatch)');
+    }
+  } catch (e) {
+    console.warn('[lora] hydrate failed', e);
+  } finally {
+    db.close();
+  }
+}
+
 function readAll(db, storeName) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
@@ -361,15 +446,17 @@ export async function persist() {
   _persistInFlight = (async () => {
     const db = await openDB();
     try {
-      const tx = db.transaction([BRAINS_STORE, TRACKS_STORE, OBS_STORE], 'readwrite');
+      const tx = db.transaction([BRAINS_STORE, TRACKS_STORE, OBS_STORE, LORA_STORE], 'readwrite');
       const brains = tx.objectStore(BRAINS_STORE);
       const tracks = tx.objectStore(TRACKS_STORE);
       const obs = tx.objectStore(OBS_STORE);
+      const lora = tx.objectStore(LORA_STORE);
       // Full rewrite keeps the logic simple; archive size stays small (hundreds
       // of entries, <100KB serialized) so the write cost is negligible.
       brains.clear();
       tracks.clear();
       obs.clear();
+      lora.clear();
       for (const [id, { vector, meta }] of _brainMirror) {
         brains.put({ id, vec: Array.from(vector), meta });
       }
@@ -379,6 +466,11 @@ export async function persist() {
       for (const [id, { weight, count }] of _observations) {
         obs.put({ id, weight, count });
       }
+      // Snapshot the adapter state. Skipped silently when the wasm module
+      // didn't load — we never persist a vacuous snapshot, which would
+      // overwrite a real one on the next boot.
+      const snapshot = loraSerialize();
+      if (snapshot) lora.put({ id: LORA_KEY, snapshot });
       await txPromise(tx);
     } finally {
       db.close();
@@ -425,6 +517,7 @@ export async function _debugReset() {
   _brainMirror.clear();
   _trackMirror.clear();
   _observations.clear();
+  loraDebugReset();
   if (typeof indexedDB !== 'undefined') {
     await new Promise((resolve) => {
       const req = indexedDB.deleteDatabase(IDB_NAME);

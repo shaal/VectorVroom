@@ -78,6 +78,11 @@
       oneLiner: 'A tiny graph neural network that lets parent brains\' scores nudge their children\'s.',
       loader: function () { return import('./chapters/gnn.js'); },
     },
+    'lora': {
+      title: 'LoRA — a tiny matrix that bends the embedding',
+      oneLiner: 'Two skinny matrices learn to nudge the 512-number track vector toward better-retrieving arrangements.',
+      loader: function () { return import('./chapters/lora.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.

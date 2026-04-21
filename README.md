@@ -33,9 +33,10 @@ These are the friction points you may hit on a fresh clone:
   anything that supports ES modules + WebAssembly + IndexedDB.
 - **No build step, no `npm install`.** The ruvector WASM packages are
   pre-built under `vendor/ruvector/ruvector_wasm/`, `vendor/ruvector/ruvector_cnn_wasm/`,
-  and `vendor/ruvector/ruvector_gnn_wasm/` (all three include `.wasm` binaries
-  + JS glue + `.d.ts`). If you want to rebuild them from source, see the upstream
-  ruvector repo; otherwise the vendored artifacts are authoritative.
+  `vendor/ruvector/ruvector_gnn_wasm/`, and `vendor/ruvector/ruvector_learning_wasm/`
+  (all four include `.wasm` binaries + JS glue + `.d.ts`). If you want to rebuild
+  them from source, see the upstream ruvector repo; otherwise the vendored artifacts
+  are authoritative.
 - **IndexedDB is per-origin.** Opening the game at `localhost:8765` and
   `127.0.0.1:8765` gives you two *separate* archives — stick with one host
   if you want seed recall to survive across sessions.
@@ -48,7 +49,7 @@ These are the friction points you may hit on a fresh clone:
   directly. Closes with `ESC` or by clicking the backdrop. Chapters now cover
   every existing AI feature — sensors, neural network, genetic algorithm,
   fitness function, CNN embedder, HNSW vector DB, EMA reranker, brain
-  lineage, and cross-track similarity.
+  lineage, cross-track similarity, the GNN reranker, and the LoRA track adapter.
 - **Track preset picker** appears top-left during phase 1 (editor phase);
   pick one of 5 pre-authored tracks or draw your own with left/right click.
   Loading a preset clears `bestBrain`/`progress` (the old brain is bound to

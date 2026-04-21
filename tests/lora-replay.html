@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<!--
+  lora-replay.html
+  Confidence gate for P1.B (MicroLoRA track adapter).
+
+  Run:
+    python3 -m http.server 8767     # from repo root
+    open http://localhost:8767/tests/lora-replay.html
+
+  Three checks, each rendered as a pass/fail card:
+    1. Cold-start drift ≈ 0 — adapter starts as near-identity.
+    2. After 10 generations on one track, drift > 0 and the LoRA
+       didn't cause top-1 retrieval fitness to drop below the
+       un-adapted baseline (apples-to-apples on the same archive).
+    3. State-survives-reload — serialize → reset wasm engines via _debugReset
+       (B zeros out) → deserialize → drift returns to the post-train value.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>LoRA track-adapter replay</title>
+  <style>
+    body { font: 14px/1.5 system-ui, -apple-system, sans-serif; max-width: 820px; margin: 2em auto; padding: 0 1em; color: #222; }
+    h1 { font-size: 1.25rem; margin: 0 0 .5em; }
+    .check { border: 1px solid #ddd; border-radius: 6px; padding: .8em 1em; margin: .8em 0; }
+    .check.pass { border-left: 4px solid #2b8a3e; background: #f4fbf5; }
+    .check.fail { border-left: 4px solid #c92a2a; background: #fff5f5; }
+    .verdict { font-weight: 600; margin-top: .3em; }
+    .verdict.pass { color: #2b8a3e; }
+    .verdict.fail { color: #c92a2a; }
+    table { border-collapse: collapse; margin-top: .4em; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 2px 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    pre { background: #f4f4f4; padding: .4em .6em; border-radius: 3px; overflow-x: auto; font-size: 12px; }
+    #summary { padding: .8em 1em; border-radius: 6px; margin-top: 1em; font-weight: 600; }
+    #summary.pass { background: #d3f9d8; color: #2b8a3e; }
+    #summary.fail { background: #ffe3e3; color: #c92a2a; }
+    #summary.pending { background: #fff3bf; color: #5c3c00; }
+  </style>
+</head>
+<body>
+  <h1>P1.B — MicroLoRA track-adapter gate</h1>
+  <p>
+    A scripted replay that walks the bridge through a synthetic 10-generation
+    archive on a fixed track, then asserts the three confidence-gate criteria.
+    Re-runs from a clean IndexedDB on every page load so results are deterministic.
+  </p>
+  <div id="summary" class="pending">Running…</div>
+  <div id="results"></div>
+
+  <script type="module">
+    import * as bridge from '../AI-Car-Racer/ruvectorBridge.js';
+    import { flatten } from '../AI-Car-Racer/brainCodec.js';
+    import { isReady as loraIsReady, info as loraInfo } from '../AI-Car-Racer/lora/trackAdapter.js';
+
+    const FLAT_LENGTH = 92;
+    const TRACK_DIM = 512;
+
+    const resultsEl = document.getElementById('results');
+    const summaryEl = document.getElementById('summary');
+
+    function mulberry32(seed) {
+      return function () {
+        seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function makeTrackVec(rand) {
+      const v = new Float32Array(TRACK_DIM);
+      let s = 0;
+      for (let i = 0; i < TRACK_DIM; i++) { v[i] = rand() * 2 - 1; s += v[i] * v[i]; }
+      const n = Math.sqrt(s) || 1;
+      for (let i = 0; i < TRACK_DIM; i++) v[i] /= n;
+      return v;
+    }
+
+    function makeBrain(rand) {
+      // Construct a NeuralNetwork-shaped object that brainCodec.flatten accepts.
+      // We mimic the structure {levels: [{biases, weights}, ...]}; the codec only
+      // reads numeric arrays, not class identity, so a plain object suffices.
+      const TOPOLOGY = [6, 8, 4];
+      const levels = [];
+      for (let li = 0; li < TOPOLOGY.length - 1; li++) {
+        const inN = TOPOLOGY[li], outN = TOPOLOGY[li + 1];
+        const biases = new Array(outN);
+        for (let j = 0; j < outN; j++) biases[j] = rand() * 2 - 1;
+        const weights = new Array(inN);
+        for (let i = 0; i < inN; i++) {
+          weights[i] = new Array(outN);
+          for (let j = 0; j < outN; j++) weights[i][j] = rand() * 2 - 1;
+        }
+        levels.push({ biases, weights, inputs: new Array(inN).fill(0), outputs: new Array(outN).fill(0) });
+      }
+      return { levels };
+    }
+
+    function renderCheck(name, doc, pass, details) {
+      const card = document.createElement('div');
+      card.className = 'check ' + (pass ? 'pass' : 'fail');
+      card.innerHTML = `
+        <div><strong>${name}</strong></div>
+        <div style="color:#555;">${doc}</div>
+        ${details ? `<div>${details}</div>` : ''}
+        <div class="verdict ${pass ? 'pass' : 'fail'}">${pass ? 'PASS' : 'FAIL'}</div>
+      `;
+      resultsEl.appendChild(card);
+      return pass;
+    }
+
+    function table(rows) {
+      let h = '<table><thead><tr>';
+      for (const k of Object.keys(rows[0])) h += `<th>${k}</th>`;
+      h += '</tr></thead><tbody>';
+      for (const r of rows) {
+        h += '<tr>';
+        for (const k of Object.keys(r)) h += `<td>${r[k]}</td>`;
+        h += '</tr>';
+      }
+      h += '</tbody></table>';
+      return h;
+    }
+
+    async function main() {
+      // Wait for the bridge (which initialises both the wasm vector engines
+      // and the LoRA adapter) before doing anything else.
+      await bridge.ready();
+      // Start from a clean slate so prior runs don't bias the gate.
+      await bridge._debugReset();
+
+      if (!loraIsReady()) {
+        renderCheck('LoRA wasm load', 'Wasm engine must load before any check can run.', false,
+          '<pre>trackAdapter.isReady() === false — lora wasm failed to instantiate. Check the network tab and the console for the underlying error.</pre>');
+        summaryEl.className = 'fail';
+        summaryEl.textContent = 'FAIL — LoRA wasm not available';
+        return;
+      }
+
+      const rand = mulberry32(42);
+      const trackVec = makeTrackVec(rand);
+
+      // ── Check 1: cold-start drift ≈ 0. We call recommendSeeds() once just
+      // to trigger an adapt() pass; the archive is empty so no candidates
+      // come back, but drift gets recorded.
+      bridge.recommendSeeds(trackVec, 1);
+      const coldDrift = loraInfo().drift;
+      const COLD_TOL = 0.02; // L2 between raw + post-LoRA(B=0) → ~0; allow tiny float noise
+      const c1Pass = coldDrift < COLD_TOL;
+      renderCheck(
+        '1. Cold-start drift ≈ 0',
+        'Fresh adapter (B = zeros) means adapt() should be the identity, modulo L2 renorm noise.',
+        c1Pass,
+        `<pre>drift = ${coldDrift.toExponential(3)} (tolerance ${COLD_TOL})</pre>`,
+      );
+
+      // ── Check 2: after 10 generations on one track, drift > 0 AND adapted
+      // top-1 fitness ≥ un-adapted baseline.
+      const G = 10;
+      const archived = [];
+      for (let g = 0; g < G; g++) {
+        // Each call to recommendSeeds() runs adapt() on the same track vec —
+        // populating the adapter's internal _lastRaw cache so the subsequent
+        // archiveBrain → reward(fitness) call has a gradient to apply.
+        bridge.recommendSeeds(trackVec, 5);
+        const brain = makeBrain(rand);
+        // Fitness rises with generation so reward()'s baseline-EMA goes
+        // up over time; the rising-fitness shape is what makes adapt
+        // updates fire (improvement > baseline triggers learning).
+        const fitness = 50 + g * 25;
+        bridge.archiveBrain(brain, fitness, trackVec, g, [], undefined);
+        archived.push({ gen: g, fitness });
+      }
+      const trainedDrift = loraInfo().drift;
+      const adapts = loraInfo().adaptCount;
+
+      // Top-1 with LoRA (default path): fed the adapted vector.
+      bridge.setBypassLora(false);
+      const adaptedSeeds = bridge.recommendSeeds(trackVec, 1);
+      const adaptedTop1 = adaptedSeeds[0] ? adaptedSeeds[0].meta.fitness : null;
+
+      // Top-1 with LoRA bypassed: same archive, raw query vector.
+      bridge.setBypassLora(true);
+      const rawSeeds = bridge.recommendSeeds(trackVec, 1);
+      const rawTop1 = rawSeeds[0] ? rawSeeds[0].meta.fitness : null;
+      bridge.setBypassLora(false);
+
+      const c2Drift = trainedDrift > 0;
+      const c2Top1 = adaptedTop1 !== null && rawTop1 !== null && adaptedTop1 >= rawTop1;
+      const c2Pass = c2Drift && c2Top1;
+      renderCheck(
+        `2. After ${G} generations: drift > 0 AND adapted top-1 ≥ raw top-1`,
+        'Spec gate: trained adapter must move the embedding off-identity, and must not regress the retrieval ranking against the un-adapted query.',
+        c2Pass,
+        table([
+          { metric: 'drift (post-train)', value: trainedDrift.toExponential(3), pass: c2Drift ? '✓' : '✗' },
+          { metric: 'adapt updates fired', value: adapts, pass: '—' },
+          { metric: 'adapted top-1 fitness', value: adaptedTop1, pass: '—' },
+          { metric: 'raw top-1 fitness',     value: rawTop1, pass: c2Top1 ? '✓' : '✗' },
+        ]),
+      );
+
+      // ── Check 3: state-survives-reload.
+      // We can't actually reload the page from inside the page, so we exercise
+      // the same code path the real reload uses: serialize → wipe → deserialize,
+      // then verify post-restore adapt() reproduces the same drift on the
+      // same input.
+      const snapBefore = bridge.info().lora;
+      const driftBefore = loraInfo().drift;
+      const snap = JSON.parse(JSON.stringify((await import('../AI-Car-Racer/lora/trackAdapter.js')).serialize()));
+      // _debugReset zeroes B and clears the cached _lastRaw.
+      const lora = await import('../AI-Car-Racer/lora/trackAdapter.js');
+      lora._debugReset();
+      const driftAfterReset = loraInfo().drift;
+      // Need a fresh adapt() to populate _lastRaw before measuring drift.
+      bridge.recommendSeeds(trackVec, 1);
+      const driftAfterResetWithRaw = loraInfo().drift;
+      lora.deserialize(snap);
+      bridge.recommendSeeds(trackVec, 1);
+      const driftAfterRestore = loraInfo().drift;
+
+      // After restore, drift on the same input should return to roughly the
+      // pre-snapshot value (tiny float noise from L2 renorm allowed).
+      const c3Pass = Math.abs(driftAfterRestore - driftBefore) < 1e-4 &&
+                     driftAfterResetWithRaw < driftBefore;
+      renderCheck(
+        '3. Adapter state survives serialize → reset → deserialize',
+        'Mirror of the IndexedDB persist/hydrate path — exercises get_b + set_b round-trip.',
+        c3Pass,
+        table([
+          { metric: 'drift before snapshot',           value: driftBefore.toExponential(3) },
+          { metric: 'drift after _debugReset',         value: driftAfterReset.toExponential(3) },
+          { metric: 'drift after reset + fresh adapt', value: driftAfterResetWithRaw.toExponential(3) },
+          { metric: 'drift after deserialize',         value: driftAfterRestore.toExponential(3) },
+        ]),
+      );
+
+      const allPass = c1Pass && c2Pass && c3Pass;
+      summaryEl.className = allPass ? 'pass' : 'fail';
+      summaryEl.textContent = allPass
+        ? '✓ PASS — all three confidence-gate checks satisfied.'
+        : '✗ FAIL — see individual cards.';
+    }
+
+    main().catch(function (err) {
+      console.error(err);
+      summaryEl.className = 'fail';
+      summaryEl.textContent = 'FAIL — uncaught error: ' + err.message;
+      const pre = document.createElement('pre');
+      pre.textContent = (err && err.stack) || String(err);
+      resultsEl.appendChild(pre);
+    });
+  </script>
+</body>
+</html>

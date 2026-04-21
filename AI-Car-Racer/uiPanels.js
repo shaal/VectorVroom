@@ -61,6 +61,16 @@
     // "why is it gnn vs ema?".
     '  <span data-eli15="gnn" role="button" tabindex="0" aria-label="Learn: how the GNN reranker works"></span>',
     '</div>',
+    // Track adapter (P1.B). Hidden until the LoRA wasm reports ready. The
+    // sparkline shows the L2 distance between the most-recent raw and
+    // adapted track vector — a visual cue for "how much is the adapter
+    // bending the embedding right now".
+    '<div class="rv-lora" data-rv="lora" hidden>',
+    '  <span class="rv-lora-label">track adapter:</span>',
+    '  <span class="rv-lora-drift" data-rv="lora-drift">drift —</span>',
+    '  <span class="rv-spark" data-rv="lora-spark"></span>',
+    '  <span data-eli15="lora" role="button" tabindex="0" aria-label="Learn: track-vector adapter (LoRA)"></span>',
+    '</div>',
     '<div class="rv-list" data-rv="list"></div>',
   ].join('');
 
@@ -73,6 +83,9 @@
     badge: root.querySelector('[data-rv="badge"]'),
     badgeEli15: root.querySelector('.rv-badge-eli15'),
     list: root.querySelector('[data-rv="list"]'),
+    lora: root.querySelector('[data-rv="lora"]'),
+    loraDrift: root.querySelector('[data-rv="lora-drift"]'),
+    loraSpark: root.querySelector('[data-rv="lora-spark"]'),
   };
 
   // Track-match badge auto-fade (P5.A). When `currentTrackVec` identity changes
@@ -99,6 +112,8 @@
     phase: -1,
     trackVecId: null, // Float32Array identity, not value
     seedIdsKey: '',
+    loraAdapts: -1,
+    loraDriftLen: -1, // length of recent-drift array; rises with adapt() calls even before reward()
   };
 
   // Reranker indicator state (P5.C). Track the previous top-K ordering so we
@@ -249,6 +264,60 @@
     el.badge.classList.add('rv-badge-showing');
   }
 
+  function renderLora(info) {
+    if (!el.lora) return;
+    if (window.rvDisabled) {
+      el.lora.hidden = true;
+      return;
+    }
+    const lora = info && info.lora;
+    if (!lora || !lora.ready) {
+      el.lora.hidden = true;
+      return;
+    }
+    el.lora.hidden = false;
+    // Show drift to 4 d.p. — typical adapted-vector distances start in the
+    // 1e-3 range and grow as B accumulates updates. The "·" mid-dot signals
+    // "this is metadata", not a primary KPI.
+    const driftStr = (Number(lora.drift) || 0).toFixed(4);
+    const adapts = lora.adaptCount | 0;
+    el.loraDrift.textContent = 'drift ' + driftStr + ' · ' + adapts + ' update' + (adapts === 1 ? '' : 's');
+    el.loraSpark.innerHTML = renderDriftSpark(Array.isArray(lora.driftRecent) ? lora.driftRecent : []);
+  }
+
+  // Sparkline scaled to its own min/max so a slowly-rising drift reads as
+  // "going up" even when absolute magnitudes are tiny. Empty → dash.
+  function renderDriftSpark(series) {
+    if (!series || series.length === 0) return '<span class="rv-spark-empty">—</span>';
+    const W = 40, H = 12, PAD = 1.5;
+    const n = series.length;
+    if (n === 1) {
+      return '<svg class="rv-spark-svg" viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' +
+        '<circle cx="' + (W / 2) + '" cy="' + (H / 2) + '" r="1.6" fill="#3a7bd5"></circle></svg>';
+    }
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < n; i++) {
+      const v = series[i];
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+    const range = hi - lo;
+    const usableW = W - 2 * PAD;
+    const usableH = H - 2 * PAD;
+    const pts = series.map(function (v, idx) {
+      const x = PAD + (idx / (n - 1)) * usableW;
+      const y = range === 0
+        ? PAD + usableH / 2
+        : PAD + usableH - ((v - lo) / range) * usableH;
+      return x.toFixed(2) + ',' + y.toFixed(2);
+    }).join(' ');
+    const last = pts.split(' ').pop().split(',');
+    return '<svg class="rv-spark-svg" viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' +
+      '<polyline points="' + pts + '" fill="none" stroke="#3a7bd5" stroke-width="1" ' +
+      'stroke-linecap="round" stroke-linejoin="round"></polyline>' +
+      '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="1.3" fill="#1a4f9c"></circle></svg>';
+  }
+
   function renderList(seeds, info) {
     if (window.rvDisabled) {
       el.list.innerHTML = '<div class="rv-empty">Bridge disabled via ?rv=0 — archive not consulted this session.</div>';
@@ -357,6 +426,10 @@
     const currentPhase = typeof window.phase === 'number' ? window.phase : 0;
     const seedIdsKey = Array.isArray(window.currentSeedIds) ? window.currentSeedIds.join(',') : '';
 
+    const loraAdapts = (info && info.lora) ? (info.lora.adaptCount | 0) : -1;
+    const loraDriftLen = (info && info.lora && Array.isArray(info.lora.driftRecent))
+      ? info.lora.driftRecent.length : -1;
+
     // Fast-path: nothing changed → no DOM writes, no recommendSeeds call.
     if (
       last.ready === ready &&
@@ -367,7 +440,9 @@
       last.observationEvents === (info.observationEvents | 0) &&
       last.phase === currentPhase &&
       last.trackVecId === trackVec &&
-      last.seedIdsKey === seedIdsKey
+      last.seedIdsKey === seedIdsKey &&
+      last.loraAdapts === loraAdapts &&
+      last.loraDriftLen === loraDriftLen
     ) return;
 
     // Recompute seeds for the badge/list. recommendSeeds is cheap (in-memory
@@ -403,6 +478,7 @@
     renderInfo(info);
     renderRerankerMode(info);
     renderReranker(info);
+    renderLora(info);
     renderBadge(trackVec, seeds);
     renderList(seeds, info || { ready: false, brains: 0 });
 
@@ -415,6 +491,8 @@
       phase: currentPhase,
       trackVecId: trackVec,
       seedIdsKey: seedIdsKey,
+      loraAdapts: loraAdapts,
+      loraDriftLen: loraDriftLen,
     };
   }
 

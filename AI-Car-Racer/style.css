@@ -363,3 +363,18 @@ h1{
     font-size: .7rem;
     line-height: 12px;
 }
+.rv-lora {
+    display: flex;
+    align-items: center;
+    gap: .4em;
+    margin: .25em 0 .1em 0;
+    font-size: .75rem;
+    color: #bcd;
+}
+.rv-lora-label {
+    color: #8aa;
+    text-transform: uppercase;
+    font-size: .62rem;
+    letter-spacing: .06em;
+}
+.rv-lora-drift { color: #dde; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .72rem; }
