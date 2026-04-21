@@ -40,6 +40,13 @@ class Car{
         }
         this.controls=new Controls(controlType);
         this.polygon=this.#createPolygon();
+        // Staggered physics-stride offset. When SENSOR_STRIDE > 1, non-
+        // privileged AI cars skip their whole update() on frames where
+        // (frameCount + _strideOffset) % stride != 0. Random per-car
+        // offsets spread the ~10k/frame workload across stride frames
+        // instead of clustering all cars on the same frames, which is
+        // what the perf HUD showed: one huge step then a near-empty one.
+        this._strideOffset = (controlType === 'AI') ? ((Math.random() * 64) | 0) : 0;
     }
 
     update(roadBorders, checkPointList){
@@ -47,6 +54,19 @@ class Car{
         // skip sensor raycasts + NN inference entirely. At end-of-gen this is
         // usually >80% of the population, so it dominates total sim cost.
         if(this.damaged && this.controlType == "AI"){
+            return;
+        }
+        // Physics-stride LOD. Skip the ENTIRE update (move + damage + checkpoint
+        // + perception) for non-privileged AI cars on off-stride frames. bestCar
+        // and player cars always run so UX + training signal stay clean.
+        // Staggered by _strideOffset so ~1/stride of the population runs each
+        // frame — otherwise all 10k cars pile into the same frame and blow the
+        // per-tick budget (which is what the "maxStep≈tick" hitches showed).
+        if(this.controlType === 'AI'
+            && typeof SENSOR_STRIDE !== 'undefined'
+            && SENSOR_STRIDE > 1
+            && this !== bestCar
+            && (((frameCount + this._strideOffset) % SENSOR_STRIDE) !== 0)){
             return;
         }
         if(!this.damaged){
@@ -93,30 +113,19 @@ class Car{
  
         }
         if(this.sensor){
-            // Perception LOD. At high simSpeed, non-privileged AI cars skip
-            // sensor + NN and keep last-frame controls — they're fodder
-            // anyway. bestCar + player cars always run fresh so the training
-            // signal stays clean and player input feels responsive. Reference
-            // equality `this === bestCar` is cheap and survives bestCar
-            // reassignment between steps.
-            const isPrivileged = (this === bestCar) || (this.controlType !== 'AI');
-            const skipPerception = !isPrivileged
-                && typeof SENSOR_STRIDE !== 'undefined'
-                && SENSOR_STRIDE > 1
-                && (frameCount % SENSOR_STRIDE !== 0);
-            if (!skipPerception){
-                this.sensor.update(roadBorders);
-                var offsets=this.sensor.readings.map(
-                    s=>s==null?0:1-s.offset
-                );
-                offsets.push(this.speed/this.maxSpeed);
-                const outputs=NeuralNetwork.feedForward(offsets,this.brain);
-                if(this.useBrain){
-                    this.controls.forward=outputs[0];
-                    this.controls.left=outputs[1];
-                    this.controls.right=outputs[2];
-                    this.controls.reverse=outputs[3];
-                }
+            // Stride filter happens at the top of update() now, so any car
+            // that reaches here is running a full-perception step.
+            this.sensor.update(roadBorders);
+            var offsets=this.sensor.readings.map(
+                s=>s==null?0:1-s.offset
+            );
+            offsets.push(this.speed/this.maxSpeed);
+            const outputs=NeuralNetwork.feedForward(offsets,this.brain);
+            if(this.useBrain){
+                this.controls.forward=outputs[0];
+                this.controls.left=outputs[1];
+                this.controls.right=outputs[2];
+                this.controls.reverse=outputs[3];
             }
         }
     }
