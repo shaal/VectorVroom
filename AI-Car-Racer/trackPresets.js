@@ -1,4 +1,5 @@
-// Five pre-authored tracks that can be loaded instead of drawn by hand.
+// Ten pre-authored tracks that can be loaded instead of drawn by hand.
+// Five geometric primitives + five famous-circuit stylisations.
 // Canvas is 3200x1800 (main.js:5-6). Start position is (2880, 900) (main.js:10).
 // Each preset's corridor (area between inner wall `points` and outer wall
 // `points2`) must contain the start point, otherwise the car spawns outside
@@ -25,10 +26,12 @@ window.TRACK_PRESETS = [
       { x: 2450, y: 1100 },
       { x: 650,  y: 1100 }
     ],
+    // Outer right pushed to x=3100 so the start (2880,900) has ~220px
+    // buffer instead of the old ~70px squeeze against x=2950.
     points2: [
       { x: 250,  y: 300  },
-      { x: 2950, y: 300  },
-      { x: 2950, y: 1500 },
+      { x: 3100, y: 300  },
+      { x: 3100, y: 1500 },
       { x: 250,  y: 1500 }
     ],
     checkPointListEditor: [
@@ -55,24 +58,25 @@ window.TRACK_PRESETS = [
       { x: 2075, y: 640  }, // 300°
       { x: 2423, y: 750  }  // 330°
     ],
-    // Outer ellipse: cx=1600, cy=900, rx=1300, ry=600, samples every 30°.
+    // Outer ellipse: cx=1600, cy=900, rx=1500 (was 1300 — start was 20px
+    // from the wall), ry=600, samples every 30°.
     points2: [
-      { x: 2900, y: 900  },
-      { x: 2726, y: 1200 },
-      { x: 2250, y: 1420 },
+      { x: 3100, y: 900  },
+      { x: 2899, y: 1200 },
+      { x: 2350, y: 1420 },
       { x: 1600, y: 1500 },
-      { x: 950,  y: 1420 },
-      { x: 474,  y: 1200 },
-      { x: 300,  y: 900  },
-      { x: 474,  y: 600  },
-      { x: 950,  y: 380  },
+      { x: 850,  y: 1420 },
+      { x: 301,  y: 1200 },
+      { x: 100,  y: 900  },
+      { x: 301,  y: 600  },
+      { x: 850,  y: 380  },
       { x: 1600, y: 300  },
-      { x: 2250, y: 380  },
-      { x: 2726, y: 600  }
+      { x: 2350, y: 380  },
+      { x: 2899, y: 600  }
     ],
     checkPointListEditor: [
       [{ x: 1600, y: 300  }, { x: 1600, y: 600  }],
-      [{ x: 300,  y: 900  }, { x: 650,  y: 900  }],
+      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }],
       [{ x: 1600, y: 1500 }, { x: 1600, y: 1200 }]
     ]
   },
@@ -85,10 +89,11 @@ window.TRACK_PRESETS = [
       { x: 2400, y: 500  }, // top-right
       { x: 2400, y: 1300 }  // bottom-right
     ],
+    // Outer right pushed from x=2950 to x=3100 for consistent start buffer.
     points2: [
       { x: 150,  y: 900  }, // left apex (outer)
-      { x: 2950, y: 250  }, // top-right
-      { x: 2950, y: 1550 }  // bottom-right
+      { x: 3100, y: 250  }, // top-right
+      { x: 3100, y: 1550 }  // bottom-right
     ],
     checkPointListEditor: [
       [{ x: 150,  y: 900  }, { x: 500,  y: 900  }], // left apex
@@ -98,8 +103,8 @@ window.TRACK_PRESETS = [
   },
   {
     name: 'Hexagon',
-    description: '6-sided regular-ish hexagon. Faster straights than oval.',
-    // Inner hexagon: cx=1600, cy=900, rx=950, ry=390 (y shortened to fit canvas).
+    description: '6-sided flat-top hexagon. Faster straights than oval.',
+    // Inner hexagon: cx=1600, cy=900, rx=950, ry=390 (flat-top, y shortened).
     points: [
       { x: 2550, y: 900  }, // 0°
       { x: 2075, y: 1290 }, // 60°
@@ -108,26 +113,26 @@ window.TRACK_PRESETS = [
       { x: 1125, y: 510  }, // 240°
       { x: 2075, y: 510  }  // 300°
     ],
-    // Outer hexagon: rx=1300, ry=520.
+    // Outer hexagon: rx=1500 (was 1300 — start was 20px from wall), ry=520.
     points2: [
-      { x: 2900, y: 900  },
-      { x: 2250, y: 1420 },
-      { x: 950,  y: 1420 },
-      { x: 300,  y: 900  },
-      { x: 950,  y: 380  },
-      { x: 2250, y: 380  }
+      { x: 3100, y: 900  },
+      { x: 2350, y: 1420 },
+      { x: 850,  y: 1420 },
+      { x: 100,  y: 900  },
+      { x: 850,  y: 380  },
+      { x: 2350, y: 380  }
     ],
     checkPointListEditor: [
       [{ x: 1600, y: 380  }, { x: 1600, y: 510  }], // top flat
-      [{ x: 300,  y: 900  }, { x: 650,  y: 900  }], // left vertex
+      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }], // left vertex
       [{ x: 1600, y: 1420 }, { x: 1600, y: 1290 }]  // bottom flat
     ]
   },
   {
     name: 'Pentagon',
     description: 'Irregular 5-vertex, apex-right. Narrower nose corridor.',
-    // Apex-right pentagon. Right-nose corridor is narrower (~120 px) than
-    // other presets — harder to stay on track without training.
+    // Apex-right pentagon. Right-nose corridor is narrower than other
+    // presets — harder to stay on track without training.
     points: [
       { x: 2500, y: 900  }, // right apex (inner)
       { x: 2000, y: 550  }, // top-right
@@ -135,8 +140,10 @@ window.TRACK_PRESETS = [
       { x: 700,  y: 1100 }, // bottom-left
       { x: 2000, y: 1250 }  // bottom-right
     ],
+    // Outer apex pushed from x=2950 to x=3100 so the start isn't
+    // jammed into the apex tip.
     points2: [
-      { x: 2950, y: 900  }, // right apex (outer)
+      { x: 3100, y: 900  }, // right apex (outer)
       { x: 2200, y: 250  },
       { x: 300,  y: 450  },
       { x: 300,  y: 1350 },
@@ -146,6 +153,294 @@ window.TRACK_PRESETS = [
       [{ x: 1500, y: 320  }, { x: 1500, y: 610  }], // top
       [{ x: 300,  y: 900  }, { x: 700,  y: 900  }], // left
       [{ x: 1500, y: 1510 }, { x: 1500, y: 1180 }]  // bottom
+    ]
+  },
+
+  // ─── Famous-circuit presets ──────────────────────────────────────────
+  // Stylised, not to scale. Each has real chicanes and/or a hairpin so the
+  // car must counter-steer through local sections — the net lap is still
+  // one direction (annular constraint; see docstring at top) but the
+  // driving-line weaves left-right-left-right between features.
+  //
+  // Authoring rule: the outer right edge stays near x=3100 across y∈[700,1100]
+  // on every track, so the spawn rectangle at (2880,900)±(15,25) never lands
+  // outside the corridor even when chicanes dent the outer wall elsewhere.
+
+  {
+    name: 'Monza',
+    description: 'Italian-GP: Rettifilo + Roggia chicanes, Lesmo, Ascari S, Parabolica.',
+    // Features (counterclockwise from pit straight):
+    //   top  — Rettifilo chicane (R-L), Biassono, Roggia chicane (L-R), Lesmo 1-2
+    //   left — short link
+    //   bot  — Ascari S (L-R-L), sweeping Parabolica
+    points: [
+      { x: 2500, y: 750  }, // pit straight top
+      { x: 2250, y: 650  }, // Rettifilo in (down-L)
+      { x: 2050, y: 800  }, // Rettifilo apex (flick R)
+      { x: 1850, y: 700  }, // Biassono
+      { x: 1550, y: 800  }, // Roggia in
+      { x: 1350, y: 700  }, // Roggia out
+      { x: 1050, y: 750  }, // Lesmo 1
+      { x: 750,  y: 800  }, // Lesmo 2
+      { x: 500,  y: 900  }, // left-mid link
+      { x: 700,  y: 1050 }, // Ascari entry
+      { x: 950,  y: 1150 }, // Ascari apex L
+      { x: 1250, y: 1050 }, // Ascari flick R
+      { x: 1550, y: 1150 }, // Ascari exit
+      { x: 1900, y: 1100 }, // Parabolica in
+      { x: 2200, y: 1150 }, // Parabolica apex
+      { x: 2500, y: 1100 }  // pit straight bottom
+    ],
+    points2: [
+      { x: 3100, y: 700  },
+      { x: 2900, y: 400  },
+      { x: 2250, y: 350  }, // Rettifilo outer
+      { x: 2050, y: 500  }, // Rettifilo outer chicane mate
+      { x: 1850, y: 400  },
+      { x: 1550, y: 500  }, // Roggia outer
+      { x: 1350, y: 400  },
+      { x: 1050, y: 450  }, // Lesmo outer
+      { x: 750,  y: 500  },
+      { x: 300,  y: 700  },
+      { x: 200,  y: 900  },
+      { x: 300,  y: 1100 },
+      { x: 700,  y: 1400 }, // Ascari outer
+      { x: 950,  y: 1500 },
+      { x: 1250, y: 1400 },
+      { x: 1550, y: 1500 },
+      { x: 1900, y: 1450 }, // Parabolica outer
+      { x: 2200, y: 1500 },
+      { x: 2900, y: 1400 },
+      { x: 3100, y: 1100 }
+    ],
+    checkPointListEditor: [
+      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // top after Roggia
+      [{ x: 200,  y: 900  }, { x: 500,  y: 900  }],  // left link
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }]   // bottom after Ascari
+    ]
+  },
+
+  {
+    name: 'Silverstone',
+    description: 'British-GP: Maggotts-Becketts-Chapel fast S, Club hairpin, Stowe.',
+    // Features (counterclockwise from pit straight):
+    //   top  — Copse kink R, then Maggotts-Becketts-Chapel 3-apex S (L-R-L-R)
+    //   left — Club hairpin (sharp inner V)
+    //   bot  — Abbey S, Stowe apex, Vale
+    points: [
+      { x: 2500, y: 750  },
+      { x: 2300, y: 850  }, // Copse kink
+      { x: 2050, y: 700  }, // Maggotts
+      { x: 1850, y: 800  }, // Becketts 1
+      { x: 1650, y: 700  }, // Becketts 2
+      { x: 1450, y: 800  }, // Chapel
+      { x: 1200, y: 700  }, // Hangar straight
+      { x: 900,  y: 750  },
+      { x: 600,  y: 800  }, // Vale approach
+      { x: 400,  y: 900  }, // Club hairpin TIP (sharp left apex)
+      { x: 600,  y: 1000 },
+      { x: 900,  y: 1100 }, // Abbey entry
+      { x: 1200, y: 1200 }, // Abbey
+      { x: 1500, y: 1100 },
+      { x: 1800, y: 1200 }, // Stowe
+      { x: 2100, y: 1100 },
+      { x: 2400, y: 1150 }
+    ],
+    points2: [
+      { x: 3100, y: 700  },
+      { x: 2900, y: 400  },
+      { x: 2300, y: 500  }, // Copse outer
+      { x: 2050, y: 350  }, // Maggotts outer
+      { x: 1850, y: 450  }, // Becketts outer 1
+      { x: 1650, y: 350  }, // Becketts outer 2
+      { x: 1450, y: 450  }, // Chapel outer
+      { x: 1200, y: 350  },
+      { x: 900,  y: 400  },
+      { x: 500,  y: 500  },
+      { x: 100,  y: 900  }, // Club outer apex (soft curve)
+      { x: 500,  y: 1350 },
+      { x: 900,  y: 1500 },
+      { x: 1200, y: 1550 }, // Abbey outer
+      { x: 1500, y: 1450 },
+      { x: 1800, y: 1550 }, // Stowe outer
+      { x: 2100, y: 1450 },
+      { x: 2400, y: 1500 },
+      { x: 2900, y: 1400 },
+      { x: 3100, y: 1100 }
+    ],
+    checkPointListEditor: [
+      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // mid Becketts
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // Club hairpin apex
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }]   // bot after Stowe
+    ]
+  },
+
+  {
+    name: 'Monaco',
+    description: 'Principality-GP: Grand Hotel hairpin + Piscine S + Mirabeau zigzag.',
+    // Tight streets: narrow corridor plus:
+    //   left  — Grand Hotel Hairpin (sharp inner V at (400,900))
+    //   top   — Piscine swimming-pool chicane (3-apex L-R-L)
+    //   bot   — Mirabeau zigzag + Sainte-Devote exit
+    points: [
+      { x: 2500, y: 700  },
+      { x: 2100, y: 750  }, // Anthony Noghes
+      { x: 1700, y: 650  }, // Piscine 1 (L)
+      { x: 1300, y: 750  }, // Piscine 2 (R)
+      { x: 900,  y: 650  }, // Piscine 3 (L)  — 3-apex top chicane
+      { x: 600,  y: 750  }, // Portier
+      { x: 500,  y: 850  },
+      { x: 400,  y: 900  }, // Grand Hotel HAIRPIN TIP (sharp V)
+      { x: 500,  y: 950  },
+      { x: 600,  y: 1050 },
+      { x: 900,  y: 1100 }, // Casino
+      { x: 1300, y: 1050 }, // Mirabeau zig (up)
+      { x: 1700, y: 1150 }, // Mirabeau zag (down)
+      { x: 2100, y: 1050 },
+      { x: 2500, y: 1100 }
+    ],
+    points2: [
+      { x: 3100, y: 700  },
+      { x: 3000, y: 450  },
+      { x: 2500, y: 300  },
+      { x: 2100, y: 400  },
+      { x: 1700, y: 300  }, // Piscine outer 1 mirror
+      { x: 1300, y: 400  }, // Piscine outer 2 mirror
+      { x: 900,  y: 300  }, // Piscine outer 3 mirror
+      { x: 500,  y: 400  },
+      { x: 200,  y: 700  },
+      { x: 100,  y: 900  }, // Grand Hotel outer apex
+      { x: 200,  y: 1100 },
+      { x: 500,  y: 1350 },
+      { x: 900,  y: 1450 }, // Casino outer
+      { x: 1300, y: 1400 }, // Mirabeau outer (up)
+      { x: 1700, y: 1500 }, // Mirabeau outer (down) — mirrors inner zig
+      { x: 2100, y: 1400 },
+      { x: 2500, y: 1500 },
+      { x: 3000, y: 1350 },
+      { x: 3100, y: 1100 }
+    ],
+    checkPointListEditor: [
+      [{ x: 1100, y: 300  }, { x: 1100, y: 700  }],  // after Piscine
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // Grand Hotel
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1100 }]   // after Mirabeau
+    ]
+  },
+
+  {
+    name: 'Spa',
+    description: 'Belgian-GP: La Source hairpin + Eau Rouge S + Pouhon + Bus Stop chicane.',
+    // Features (counterclockwise from pit straight):
+    //   top  — Bus Stop chicane (R-L-R), Les Combes chicane, Eau Rouge-Raidillon flick
+    //   left — La Source hairpin (sharp inner V)
+    //   bot  — Pouhon (fast-left sweep), Stavelot kink
+    points: [
+      { x: 2500, y: 800  },
+      { x: 2250, y: 700  }, // Bus Stop in
+      { x: 2050, y: 850  }, // Bus Stop apex
+      { x: 1850, y: 700  }, // Bus Stop out
+      { x: 1550, y: 800  }, // Les Combes in
+      { x: 1350, y: 700  }, // Les Combes out
+      { x: 1050, y: 800  }, // Eau Rouge/Raidillon flick
+      { x: 750,  y: 750  },
+      { x: 500,  y: 850  },
+      { x: 400,  y: 900  }, // La Source HAIRPIN TIP
+      { x: 500,  y: 950  },
+      { x: 750,  y: 1050 },
+      { x: 1050, y: 1150 }, // Pouhon entry
+      { x: 1350, y: 1200 }, // Pouhon apex 1
+      { x: 1650, y: 1150 }, // Pouhon apex 2
+      { x: 1950, y: 1200 }, // Stavelot kink
+      { x: 2250, y: 1100 },
+      { x: 2500, y: 1150 }
+    ],
+    points2: [
+      { x: 3100, y: 700  },
+      { x: 2900, y: 400  },
+      { x: 2250, y: 400  }, // Bus Stop outer mirror
+      { x: 2050, y: 550  },
+      { x: 1850, y: 400  },
+      { x: 1550, y: 500  }, // Les Combes outer
+      { x: 1350, y: 400  },
+      { x: 1050, y: 500  }, // Eau Rouge outer
+      { x: 500,  y: 500  },
+      { x: 100,  y: 900  }, // La Source outer apex
+      { x: 500,  y: 1300 },
+      { x: 1050, y: 1500 }, // Pouhon outer
+      { x: 1350, y: 1550 },
+      { x: 1650, y: 1500 },
+      { x: 1950, y: 1550 },
+      { x: 2250, y: 1450 },
+      { x: 2500, y: 1500 },
+      { x: 2900, y: 1400 },
+      { x: 3100, y: 1100 }
+    ],
+    checkPointListEditor: [
+      [{ x: 1200, y: 350  }, { x: 1200, y: 800  }],  // after Les Combes
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // La Source
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }]   // mid Pouhon
+    ]
+  },
+
+  {
+    name: 'Suzuka',
+    description: 'Japanese-GP: Esses + Degner + Hairpin + Spoon + 130R + Casio chicane.',
+    // NOTE: real Suzuka is a figure-8 (crossover bridge); this sim can't
+    // represent that with annular walls, so features are laid out as a
+    // non-crossing loop that keeps Suzuka's counter-steer character.
+    //
+    // Features (counterclockwise from pit straight):
+    //   top  — Turn 1 (right) + Esses (4-apex R-L-R-L) + Dunlop
+    //   left — Degner kink → Hairpin (sharp inner V)
+    //   bot  — back-straight → Spoon curve (double-apex) → 130R → Casio chicane
+    points: [
+      { x: 2500, y: 700  },
+      { x: 2250, y: 800  }, // Turn 1 (flick R)
+      { x: 1950, y: 700  }, // Esses 1 (L)
+      { x: 1750, y: 800  }, // Esses 2 (R)
+      { x: 1550, y: 700  }, // Esses 3 (L)
+      { x: 1350, y: 800  }, // Esses 4 (R)
+      { x: 1100, y: 750  }, // Dunlop
+      { x: 850,  y: 800  }, // Degner kink
+      { x: 650,  y: 900  },
+      { x: 400,  y: 900  }, // HAIRPIN TIP (sharp left apex, mid-left)
+      { x: 650,  y: 1000 },
+      { x: 900,  y: 1100 }, // back straight
+      { x: 1200, y: 1200 }, // Spoon entry
+      { x: 1400, y: 1250 }, // Spoon apex 1
+      { x: 1650, y: 1200 }, // Spoon apex 2
+      { x: 1900, y: 1100 }, // Spoon exit
+      { x: 2150, y: 1200 }, // 130R (fast L bulge)
+      { x: 2400, y: 1050 }, // Casio chicane in
+      { x: 2500, y: 1150 }  // Casio chicane out
+    ],
+    points2: [
+      { x: 3100, y: 700  },
+      { x: 2900, y: 400  },
+      { x: 2250, y: 500  }, // Turn 1 outer
+      { x: 1950, y: 400  }, // Esses outer 1
+      { x: 1750, y: 500  }, // Esses outer 2
+      { x: 1550, y: 400  }, // Esses outer 3
+      { x: 1350, y: 500  }, // Esses outer 4
+      { x: 1100, y: 400  },
+      { x: 850,  y: 500  }, // Degner outer
+      { x: 400,  y: 600  },
+      { x: 100,  y: 900  }, // Hairpin outer apex
+      { x: 400,  y: 1200 },
+      { x: 900,  y: 1450 },
+      { x: 1200, y: 1550 }, // Spoon outer
+      { x: 1400, y: 1600 },
+      { x: 1650, y: 1550 },
+      { x: 1900, y: 1450 },
+      { x: 2150, y: 1550 }, // 130R outer
+      { x: 2400, y: 1400 }, // Casio outer
+      { x: 2900, y: 1400 },
+      { x: 3100, y: 1100 }
+    ],
+    checkPointListEditor: [
+      [{ x: 1450, y: 400  }, { x: 1450, y: 800  }],  // mid Esses
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // Hairpin
+      [{ x: 1500, y: 1600 }, { x: 1500, y: 1200 }]   // mid Spoon
     ]
   }
 ];
