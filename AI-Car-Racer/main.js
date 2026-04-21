@@ -167,8 +167,13 @@ function nextBatch(){
             var fitness = bestCar.checkPointsCount +
                 (bestCar.laps || 0) * (road.checkPointList ? road.checkPointList.length : 0);
             var trackVec = window.currentTrackVec || null;
+            // Per-batch best lap for the archived brain — only meaningful if the
+            // car actually completed a lap this generation. Not to be confused
+            // with the global `fastLap` (all-time best across all training).
+            var batchFastest = (bestCar.laps > 0 && bestCar.lapTimes && bestCar.lapTimes.length)
+                ? Math.min.apply(null, bestCar.lapTimes) : undefined;
             window.__rvBridge.archiveBrain(
-                bestCar.brain, fitness, trackVec, generation, currentSeedIds.slice()
+                bestCar.brain, fitness, trackVec, generation, currentSeedIds.slice(), batchFastest
             );
             if (currentSeedIds.length){
                 window.__rvBridge.observe(currentSeedIds, fitness);

@@ -35,9 +35,9 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** any of `P5.B`, `P5.C`, `P5.D` — all three are parallelizable. **P5.A is done** (badge auto-fades after 4s via CSS `@keyframes rv-badge-pulse` + JS `animationend` handler in `uiPanels.js`). Suggested starting point is **P5.B** (sidebar lineage sparkline): the sidebar rows already render in `uiPanels.js`, and `meta.parentIds` is stored on each archived brain, so the sparkline is a pure SVG add per row.
+> **Now ready to claim:** `P5.C` or `P5.D` — both parallelizable. **P5.A + P5.B are done.** P5.B added `meta.fastestLap` (optional), `bridge.getLineage(id, maxDepth)` (walks best-fit parent, cycle-safe), and two-row sidebar layout (header fields + lineage sparkline SVG). Suggested starting point is **P5.C** (EMA-reranker indicator): `info().observations` is already surfaced, and the panel memo key already includes `observations`, so the indicator is a pure additive render.
 >
-> **Phase 5 heads-up:** (a) The panel's render loop in `uiPanels.js` is memoised against `{ready, brains, tracks, observations, phase, trackVecId, seedIdsKey}` — if you add a new input (e.g., a "last-reranked-at" timestamp for P5.C's GNN/EMA indicator), extend both the `last` struct and the fast-path comparison. (b) `recommendSeeds` returns `{id, vector, meta, score, trackSim}` per hit; `meta.parentIds` is already a list, so the P5.B sparkline can walk lineage without touching the bridge. (c) `window.NeuralNetwork`/`Level` + `window.__rvUnflatten` are still exposed on the window for any classic-script needs — don't duplicate those bridges. (d) **P5.A pattern for one-shot CSS animations:** uiPanels.js now uses `remove-class → force reflow (`void el.offsetWidth`) → re-add class` to restart `@keyframes` from frame 0, and listens for `animationend` to flip state after. Reuse this if P5.C wants the GNN/EMA indicator to pulse on observations tick.
+> **Phase 5 heads-up:** (a) The panel's render loop in `uiPanels.js` is memoised against `{ready, brains, tracks, observations, phase, trackVecId, seedIdsKey}` — if you add a new input (e.g., a "last-reranked-at" timestamp for P5.C's GNN/EMA indicator), extend both the `last` struct and the fast-path comparison. (b) `recommendSeeds` returns `{id, vector, meta, score, trackSim}` per hit. (c) `window.NeuralNetwork`/`Level` + `window.__rvUnflatten` are still exposed on the window for any classic-script needs — don't duplicate those bridges. (d) **P5.A pattern for one-shot CSS animations:** uiPanels.js uses `remove-class → force reflow (`void el.offsetWidth`) → re-add class` to restart `@keyframes` from frame 0, and listens for `animationend` to flip state after. Reuse this if P5.C wants the GNN/EMA indicator to pulse on observations tick. (e) **P5.B added `bridge.getLineage(id, maxDepth=6)`** — returns `[{id, fitness, generation}, ...]` oldest→newest, walks the highest-fitness parent at each step, visited-set + depth-cap both protect against cycles. Use this for any ancestry-aware rendering rather than walking `_brainMirror` from the UI. (f) **Narrow-sidebar gotcha**: the panel is in `grid-column: 2` and shares vertical space with the button strip; a single-row grid of many columns (>6) clips off the right edge. Prefer a two-row layout (header fields + a bottom row for visuals). The P5.B sidebar is the reference pattern — see `.rv-item-top` / `.rv-item-bottom` in `style.css`.
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
@@ -116,7 +116,7 @@ These items are independent of each other — each touches a different UI afford
 | ID | Task | Status | Owner | Depends on | Outputs | Verification |
 |---|---|---|---|---|---|---|
 | P5.A | Track-match badge text & animation: *"This track is N% similar to one you've trained on — loading K best candidate brains as seeds."* Numbers come from the cosine similarity returned by `embedTrack` + `recommendSeeds`. | `[x]` | sess-2026-04-20-ship-task-5a | P4.D, P4.E | edits in `uiPanels.js`, `style.css` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8780/AI-Car-Racer/index.html`: driven to phase=3, badge shows correct 55% + "1 candidate brain" (singular). Sampled opacity at 200ms resolution across full animation: fade-in 0→1 in ~500ms, holds at 1.000 for ~3.8s, fades 1→0 in ~400ms, `animationend` sets `hidden=true` at ~4966ms. Observations-tick mid-hold (0→1) does NOT restart animation — identity guard works. Screenshot: `docs/validation/screenshots/p5a-badge-holding.png`. |
-| P5.B | "Similar past brains" sidebar: per seed, show fitness, fastest lap, generation, and a tiny sparkline of its lineage. | `[ ]` |  | P4.C, P4.E | edits in `uiPanels.js`, `style.css` | Sidebar populates after `begin()`; updates on `nextBatch()` |
+| P5.B | "Similar past brains" sidebar: per seed, show fitness, fastest lap, generation, and a tiny sparkline of its lineage. | `[x]` | sess-2026-04-20-ship-task-5b | P4.C, P4.E | edits in `uiPanels.js`, `style.css`, `ruvectorBridge.js`, `main.js` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8790/AI-Car-Racer/index.html`: synthetic 3-brain lineage chain renders as "#1 50% fit 52.0 11.07s g2 p2 / LINEAGE [3pt-polyline]", "#2 fit 35.0 14.22s g1 p1 / [2pt-line]", "#3 fit 20.0 18.50s g0 p0 / [single-dot]". Legacy brain (no fastestLap meta) → lap renders `—`. `getLineage(id, 3)` truncates an 8-deep chain to the 3 newest; multi-parent walker picks fit=99 ancestor over fit=5. `?rv=0` unchanged. Phase-3 flow: badge + lap=12.34s + sparkline all present. Screenshots: `docs/validation/screenshots/p5b-sidebar-lineage.png`, `p5b-phase3-lap.png`. |
 | P5.C | GNN-observations indicator (or EMA-reranker indicator if P2.C was skipped): "GNN observations: N · last reranking shifted top-K by M positions." | `[ ]` |  | P4.C | edits in `uiPanels.js` | Indicator increments each generation; visible during phase=4 |
 | P5.D | Annotated fitness-over-generations graph in `grapher.js`: mark generations where `recommendSeeds` returned a non-empty result, and where the GNN reranker promoted/demoted a seed. | `[ ]` |  | P4.C | edits in `grapher.js` | Graph shows annotations on the right generations |
 
@@ -599,4 +599,78 @@ Sessions: append a dated entry below — don't edit prior entries.
       P5.B wants to animate sidebar rows when seeds change, it needs
       its own memo key (e.g. seedIdsKey or a seeds[].id.join(',')),
       since trackVec identity doesn't change when only seeds reshuffle.
+
+2026-04-20 · sess-ship-task-5b · P5.B complete.
+  Work:
+    - ruvectorBridge.js: archiveBrain() gained an optional 6th arg
+      `fastestLap` (number, seconds). Stored on meta as `fastestLap`
+      only when finite — legacy entries simply lack the key, which
+      the UI treats as "—". Also added `getLineage(id, maxDepth=6)`:
+      walks meta.parentIds backwards, at each step picking the
+      highest-fitness parent. Returns [{id, fitness, generation}, ...]
+      oldest→newest. Visited-set + depth-cap both prevent runaway on
+      cyclic or pathologically deep graphs.
+    - main.js: in nextBatch(), pass `batchFastest = (bestCar.laps>0 &&
+      bestCar.lapTimes.length) ? Math.min(...lapTimes) : undefined`
+      into archiveBrain. Intentionally the PER-BATCH best lap, not the
+      all-time global `fastLap` — archived brains record "what this
+      specific genome achieved", which is more informative as a ranking
+      signal than a global high-water mark.
+    - uiPanels.js: two-row sidebar item. Top row = rank · id · sim% ·
+      fit · lap · gen · parents. Bottom row = "LINEAGE" label + inline
+      SVG sparkline. The SVG uses viewBox="0 0 40 12" with 1.5px pad;
+      fitness is inverted so higher = visually up; terminal (newest)
+      point gets an emphasised dot. Three degenerate cases handled:
+      n=0 → "—" text placeholder; n=1 → single centered <circle>; all
+      equal → flatline at mid-height.
+    - style.css: .rv-item switched from 8-column grid to flex-column
+      with two nested rows. Fixed a narrow-panel clipping bug where
+      the single-row-8-column layout pushed the sparkline off the
+      right edge of the sidebar.
+
+  Design decision log (one line each, for future P5.C/P5.D sessions):
+    - Two-row layout instead of a wider panel: the panel lives in
+      grid-column 2 and can't widen without rewriting the page grid.
+      Splitting rows is lower-risk than a layout migration.
+    - fastestLap as an optional param rather than a separate
+      recordLap() call: keeps the archive operation atomic + avoids a
+      second schedulePersist trigger per batch.
+    - getLineage picks the highest-fitness parent rather than the
+      first, because for a GA the fit-line-of-descent is the more
+      meaningful visualisation (mutation direction), and deterministic
+      selection prevents flicker across re-renders.
+
+  Verification (agent-browser, :8790):
+    - Three-brain lineage chain (vec_0 fit=20 → vec_1 fit=35 → vec_2
+      fit=52) renders as three sidebar rows with laps 18.50s, 14.22s,
+      11.07s. SVG polyline points for vec_2 lineage:
+      "1.50,10.50 20.00,6.28 38.50,1.50" (3-pt ascending).
+    - Depth cap: 8-deep chain with maxDepth=3 returns generations
+      [5,6,7] only; maxDepth=10 returns all [0..7].
+    - Multi-parent: child with parentIds=[fit5, fit99] walks back
+      through fit99 — best-fit selection confirmed.
+    - Legacy meta (no fastestLap) → lap column renders "—".
+    - ?rv=0 path unchanged: "disabled (?rv=0)" muted + "archive not
+      consulted this session" copy. No regression.
+    - Phase=3 end-to-end: after programmatic rectangle-track finalize
+      and archiveBrain(..., fastestLap=12.34), the badge text shows
+      "100% similar...loading 1 candidate brain as seeds." and the
+      sidebar row shows "12.34s" + single-dot sparkline.
+    - Screenshots: docs/validation/screenshots/p5b-sidebar-lineage.png,
+      p5b-phase3-lap.png.
+
+  Gotchas for P5.C / P5.D:
+    - The sparkline SVG inlines into .rv-list.innerHTML on every
+      re-render. The panel's memo key prevents this from happening
+      except when {brains, observations, phase, trackVec, seedIds}
+      actually change, so per-tick cost is zero. But an SVG <animate>
+      element would stop and restart on every real re-render; if
+      P5.C's GNN indicator needs steady-state animation, put it on a
+      stable DOM node (rv-header), not inside the re-rendered list.
+    - `getLineage` walks `_brainMirror` (a Map) with O(n·depth). Fine
+      for archives < few hundred entries. If the archive grows large,
+      consider a pre-built parent-index Map in the bridge.
+    - Adding a new column to .rv-item-top? Count the
+      grid-template-columns entries — currently 7. Don't skip; the
+      grid will silently collapse extras into the last column.
 ```

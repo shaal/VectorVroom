@@ -63,10 +63,11 @@ function requireReady() {
 
 // ─── archive / retrieve ──────────────────────────────────────────────────────
 
-export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds = []) {
+export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds = [], fastestLap) {
   requireReady();
   const vec = flatten(brain);
   const trackId = trackVec ? upsertTrack(trackVec) : null;
+  const lap = Number.isFinite(fastestLap) ? Number(fastestLap) : undefined;
   const meta = {
     fitness: Number(fitness) || 0,
     trackId,
@@ -74,6 +75,7 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
     parentIds: Array.isArray(parentIds) ? parentIds.slice() : [],
     timestamp: Date.now(),
   };
+  if (lap !== undefined) meta.fastestLap = lap;
   const id = _brainDB.insert(vec, null, meta);
   _brainMirror.set(id, { vector: vec, meta });
   schedulePersist();
@@ -180,6 +182,42 @@ export function info() {
     gnn: false, // P2.C skipped; EMA fallback active
     topology: TOPOLOGY.slice(),
   };
+}
+
+// Walk meta.parentIds backwards to assemble a lineage trail.
+// At each step, when a brain has multiple parents, we pick the highest-fitness
+// ancestor — that is "the line of descent we credit this genome to". Cycle-safe
+// via a visited set; depth-capped so pathological graphs can't blow the stack.
+// Returns entries oldest→newest (i.e. ancestor first, queried id last).
+export function getLineage(id, maxDepth = 6) {
+  if (!id || !_brainMirror.has(id)) return [];
+  const seen = new Set();
+  const trail = [];
+  let cur = id;
+  const cap = Math.max(1, maxDepth | 0);
+  while (cur && !seen.has(cur) && trail.length < cap) {
+    const entry = _brainMirror.get(cur);
+    if (!entry) break;
+    seen.add(cur);
+    const m = entry.meta || {};
+    trail.push({
+      id: cur,
+      fitness: typeof m.fitness === 'number' ? m.fitness : 0,
+      generation: typeof m.generation === 'number' ? m.generation : 0,
+    });
+    const parents = Array.isArray(m.parentIds) ? m.parentIds : [];
+    let best = null;
+    let bestFit = -Infinity;
+    for (const pid of parents) {
+      if (seen.has(pid)) continue;
+      const pe = _brainMirror.get(pid);
+      if (!pe) continue;
+      const pf = (pe.meta && typeof pe.meta.fitness === 'number') ? pe.meta.fitness : 0;
+      if (pf > bestFit) { bestFit = pf; best = pid; }
+    }
+    cur = best;
+  }
+  return trail.reverse();
 }
 
 // ─── persistence (native IndexedDB) ──────────────────────────────────────────

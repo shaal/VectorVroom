@@ -138,24 +138,75 @@
       }
       return;
     }
+    const bridge = window.__rvBridge;
     const rows = seeds.map(function (s, i) {
       const m = s.meta || {};
       const fit = (typeof m.fitness === 'number') ? m.fitness.toFixed(1) : '—';
       const gen = (typeof m.generation === 'number') ? m.generation : '—';
       const parents = Array.isArray(m.parentIds) ? m.parentIds.length : 0;
       const simPct = Math.max(0, Math.min(100, Math.round(50 + 50 * (s.trackSim || 0))));
+      const lap = (typeof m.fastestLap === 'number' && isFinite(m.fastestLap))
+        ? m.fastestLap.toFixed(2) + 's' : '—';
+      const lineage = (bridge && typeof bridge.getLineage === 'function')
+        ? (bridge.getLineage(s.id, 6) || []) : [];
+      const sparkline = renderSparkline(lineage);
       return [
         '<div class="rv-item">',
-        '  <span class="rv-rank">#', (i + 1), '</span>',
-        '  <span class="rv-id" title="', escapeAttr(s.id), '">', escapeHtml(s.id), '</span>',
-        '  <span class="rv-sim">', simPct, '%</span>',
-        '  <span class="rv-fit" title="fitness">fit ', fit, '</span>',
-        '  <span class="rv-gen" title="generation">g', gen, '</span>',
-        '  <span class="rv-parents" title="parent seed count">p', parents, '</span>',
+        '  <div class="rv-item-top">',
+        '    <span class="rv-rank">#', (i + 1), '</span>',
+        '    <span class="rv-id" title="', escapeAttr(s.id), '">', escapeHtml(s.id), '</span>',
+        '    <span class="rv-sim">', simPct, '%</span>',
+        '    <span class="rv-fit" title="fitness">fit ', fit, '</span>',
+        '    <span class="rv-lap" title="fastest lap for this archived brain">', lap, '</span>',
+        '    <span class="rv-gen" title="generation">g', gen, '</span>',
+        '    <span class="rv-parents" title="parent seed count">p', parents, '</span>',
+        '  </div>',
+        '  <div class="rv-item-bottom">',
+        '    <span class="rv-spark-label">lineage</span>',
+        '    <span class="rv-spark" title="lineage fitness (oldest → newest, best-fit parent)">', sparkline, '</span>',
+        '  </div>',
         '</div>',
       ].join('');
     }).join('');
     el.list.innerHTML = rows;
+  }
+
+  // Tiny SVG sparkline of lineage fitness. Input is oldest→newest (getLineage
+  // order). Empty → placeholder dash so the grid column stays populated.
+  function renderSparkline(lineage) {
+    if (!lineage || lineage.length === 0) {
+      return '<span class="rv-spark-empty">—</span>';
+    }
+    const W = 40, H = 12, PAD = 1.5;
+    const n = lineage.length;
+    if (n === 1) {
+      const cx = W / 2, cy = H / 2;
+      return '<svg class="rv-spark-svg" viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' +
+        '<circle cx="' + cx + '" cy="' + cy + '" r="1.6" fill="#d38b4b"></circle></svg>';
+    }
+    const vals = lineage.map(function (p) { return p.fitness; });
+    let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < vals.length; i++) {
+      if (vals[i] < lo) lo = vals[i];
+      if (vals[i] > hi) hi = vals[i];
+    }
+    const range = hi - lo;
+    const usableW = W - 2 * PAD;
+    const usableH = H - 2 * PAD;
+    const pts = vals.map(function (v, idx) {
+      const x = PAD + (n === 1 ? 0 : (idx / (n - 1)) * usableW);
+      // Flat lineage (all equal) pins to mid-height; otherwise invert so higher fitness is up.
+      const y = range === 0
+        ? PAD + usableH / 2
+        : PAD + usableH - ((v - lo) / range) * usableH;
+      return x.toFixed(2) + ',' + y.toFixed(2);
+    }).join(' ');
+    // Emphasise the terminal (newest/current) point with a marker.
+    const last = pts.split(' ').pop().split(',');
+    return '<svg class="rv-spark-svg" viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' +
+      '<polyline points="' + pts + '" fill="none" stroke="#d38b4b" stroke-width="1" ' +
+      'stroke-linecap="round" stroke-linejoin="round"></polyline>' +
+      '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="1.3" fill="#824006"></circle></svg>';
   }
 
   function escapeHtml(s) {
