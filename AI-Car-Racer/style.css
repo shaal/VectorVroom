@@ -216,6 +216,58 @@ h1{
     color: #666;
 }
 .rv-info-muted { color: #a07e5a; font-style: italic; }
+/* Master toggle in the rv-panel header. Flipping the checkbox mutates
+   window.rvDisabled and the next tick() repaints every section. The custom
+   switch graphic is a visual shorthand for "the whole layer is on/off";
+   the native <input type="checkbox"> is hidden but still the source of
+   truth (aria-wise and for the change handler). */
+.rv-master-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: .35em;
+    cursor: pointer;
+    user-select: none;
+    font-size: .68rem;
+    color: #a07e5a;
+    margin-left: .5em;
+}
+.rv-master-toggle input[type="checkbox"] {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+.rv-master-toggle-track {
+    position: relative;
+    display: inline-block;
+    width: 26px;
+    height: 14px;
+    background: #c8b89a;
+    border-radius: 7px;
+    transition: background .15s;
+}
+.rv-master-toggle-thumb {
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform .15s;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.15);
+}
+.rv-master-toggle input[type="checkbox"]:checked + .rv-master-toggle-track {
+    background: #d38b4b;
+}
+.rv-master-toggle input[type="checkbox"]:checked + .rv-master-toggle-track .rv-master-toggle-thumb {
+    transform: translateX(12px);
+}
+.rv-master-toggle-label {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .66rem;
+    letter-spacing: .02em;
+    min-width: 1.5em;
+}
 
 .rv-reranker-mode {
     font-size: .72rem;

@@ -28,6 +28,19 @@
     // point at the specific chapter for that row.
     '    <span data-eli15="what-is-this-project" role="button" tabindex="0" aria-label="Learn: what is this project doing?"></span>',
     '  </span>',
+    // Master toggle: disables the whole ruvector layer at runtime. Flipping
+    // OFF makes bridgeReady()/bridgeReadyLocal() return false everywhere,
+    // which cascades into "no retrieval, no seeding, no reranker, no LoRA,
+    // no SONA" — the app falls back to the pure genetic-algorithm path.
+    // Pedagogically useful: train a few generations with it off, flip it
+    // on, watch the seed list populate and fitness climb faster. The
+    // genetic-algorithm chapter explains the baseline-vs-enhanced split.
+    '  <label class="rv-master-toggle" title="Disable all vector-memory features — fall back to pure GA">',
+    '    <input type="checkbox" data-rv="master-toggle" checked />',
+    '    <span class="rv-master-toggle-track"><span class="rv-master-toggle-thumb"></span></span>',
+    '    <span class="rv-master-toggle-label" data-rv="master-toggle-label">on</span>',
+    '    <span data-eli15="genetic-algorithm" role="button" tabindex="0" aria-label="Learn: what still works when you flip this off"></span>',
+    '  </label>',
     // rv-info is the brains/tracks/obs line — it's populated by VectorDB
     // counts, so the HNSW chapter is the right anchor. A neighbouring
     // cnn-embedder badge gives learners a jumping-off point for the "tracks"
@@ -200,7 +213,31 @@
     abAdapterBtns: root.querySelectorAll('[data-rv="ab-adapter-opt"]'),
     abDynamicsBtns: root.querySelectorAll('[data-rv="ab-dynamics-opt"]'),
     abIndexBtns: root.querySelectorAll('[data-rv="ab-index-opt"]'),
+    masterToggle: root.querySelector('[data-rv="master-toggle"]'),
+    masterToggleLabel: root.querySelector('[data-rv="master-toggle-label"]'),
   };
+
+  // Master toggle: mutating window.rvDisabled is enough — every bridgeReady()
+  // / bridgeReadyLocal() call site already re-reads the flag on each call
+  // (bridgeReady in main.js reads the top-level `var rvDisabled`, which IS
+  // window.rvDisabled; uiPanels.js uses window.rvDisabled explicitly). The
+  // 500ms tick() will repaint naturally, but we force an immediate tick after
+  // flipping so the UI responds without the polling lag.
+  if (el.masterToggle) {
+    // Initial paint: respect any URL-level ?rv=0.
+    if (window.rvDisabled) {
+      el.masterToggle.checked = false;
+      if (el.masterToggleLabel) el.masterToggleLabel.textContent = 'off';
+    }
+    el.masterToggle.addEventListener('change', function () {
+      window.rvDisabled = !el.masterToggle.checked;
+      if (el.masterToggleLabel) {
+        el.masterToggleLabel.textContent = window.rvDisabled ? 'off' : 'on';
+      }
+      // Repaint now rather than waiting on the next 500ms tick.
+      try { tick(); } catch (e) { console.warn('[rv-panel] tick after toggle failed', e); }
+    });
+  }
 
   // P3.B — mount the lineage viewer once; rendering is driven from tick().
   // We don't *expand* the section by default — the DAG costs a real layout
@@ -354,7 +391,7 @@
 
   function renderInfo(info) {
     if (window.rvDisabled) {
-      el.info.textContent = 'disabled (?rv=0)';
+      el.info.textContent = 'disabled — pure GA mode';
       el.info.className = 'rv-info rv-info-muted';
       return;
     }

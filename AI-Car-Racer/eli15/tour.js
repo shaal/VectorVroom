@@ -48,6 +48,11 @@
       rationale: 'No gradient descent — just copy the winners and nudge.',
     },
     {
+      id: 'genetic-algorithm',
+      anchor: '#rv-panel [data-rv="master-toggle"]',
+      rationale: 'Flip this OFF to train on pure GA — no vector memory, no reranker, no adapter. On = the enhanced stack. Everything past this step is what the toggle controls.',
+    },
+    {
       id: 'fitness-function',
       anchor: null,
       rationale: 'How "best" is decided each generation.',

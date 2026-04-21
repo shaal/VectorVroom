@@ -132,7 +132,7 @@ function nextPhase(){
             // ready yet (first boot of a cold session) this is a silent no-op.
             try {
                 window.__rvSessionBestFitness = 0;
-                if (window.__rvBridge && window.currentTrackVec) {
+                if (!window.rvDisabled && window.__rvBridge && window.currentTrackVec) {
                     window.__rvBridge.beginPhase4Trajectory(window.currentTrackVec);
                 }
             } catch (e) { console.warn('[sona] phase-4 begin failed', e); }
@@ -146,7 +146,7 @@ function backPhase(){
     // tears down. Uses the running session-best fitness that main.js maintains
     // after each archiveBrain call.
     try {
-        if (phase === 4 && window.__rvBridge) {
+        if (phase === 4 && !window.rvDisabled && window.__rvBridge) {
             var fit = Number(window.__rvSessionBestFitness) || 0;
             window.__rvBridge.endPhase4Trajectory(fit);
         }
