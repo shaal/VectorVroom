@@ -88,6 +88,21 @@
       oneLiner: 'Squash a whole lap of sensor+control readings into a single 64-number vector we can search on.',
       loader: function () { return import('./chapters/dynamics-embedding.js'); },
     },
+    'sona-trajectory': {
+      title: 'SONA trajectories — framing a whole session\'s worth of driving',
+      oneLiner: 'A trajectory is the tape recording of one training run — steps of (what the car saw, how well it did).',
+      loader: function () { return import('./chapters/trajectory.js'); },
+    },
+    'reasoningbank': {
+      title: 'ReasoningBank — clusters of "situations that looked alike"',
+      oneLiner: 'k-means over trajectory embeddings turns many generations of driving into a handful of reusable patterns.',
+      loader: function () { return import('./chapters/reasoningbank.js'); },
+    },
+    'ewc': {
+      title: 'EWC++ — learning new tracks without forgetting old ones',
+      oneLiner: 'A penalty term that pins "important" weights so fine-tuning on a new track doesn\'t clobber prior skills.',
+      loader: function () { return import('./chapters/ewc.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.

@@ -9,17 +9,27 @@ import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_was
 import initCnn, { CnnEmbedder } from '../vendor/ruvector/ruvector_cnn_wasm/index.js';
 import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY } from './brainCodec.js';
 import { loadGnn, isReady as gnnIsReady, gnnScore } from './gnnReranker.js';
+// P2.A — the SONA engine is a façade that subsumes the P1.B MicroLoRA
+// adapter (unchanged call shape: adapt / reward / drift) and adds trajectory
+// recording + ReasoningBank pattern extraction. We keep the `lora*` local
+// names so the rest of this file reads the same as before P2.A, and pull in
+// the new SONA surface under a separate `sona*` namespace.
 import {
-  loadAdapter,
+  loadEngine as loadSonaEngine,
   isReady as loraIsReady,
+  sonaReady,
   adapt as loraAdapt,
   reward as loraReward,
-  info as loraInfo,
+  info as sonaEngineInfo,
   serialize as loraSerialize,
   deserialize as loraDeserialize,
   recentDrift as loraRecentDrift,
-  _debugReset as loraDebugReset,
-} from './lora/trackAdapter.js';
+  _debugReset as sonaEngineDebugReset,
+  beginTrajectory as sonaBeginTrajectory,
+  addStep as sonaAddStep,
+  endTrajectory as sonaEndTrajectory,
+  findPatterns as sonaFindPatterns,
+} from './sona/engine.js';
 
 const IDB_NAME = 'rv_car_learning';
 // Bumped to 3 in P1.C to add the dynamics store. onupgradeneeded for v3
@@ -102,16 +112,23 @@ export function ready() {
     // either resolves to null, the corresponding code path silently falls back
     // (EMA reranker for GNN; identity transform for LoRA).
     const gnnPromise = loadGnn();
-    const loraPromise = loadAdapter();
+    // P2.A — loadSonaEngine boots the LoRA adapter AND the SONA ephemeral
+    // agent in parallel. Either side can fail independently without taking
+    // the other down; we log+fall through in both cases.
+    const sonaPromise = loadSonaEngine();
     await hydrate();
     try { await gnnPromise; } catch (_) { /* already logged inside loadGnn */ }
     try {
-      await loraPromise;
+      await sonaPromise;
       // Hydrate adapter B-matrices after the wasm engines are live. Done
-      // here (not inside hydrate) because hydrate() runs before loadAdapter
-      // resolves on slow loads, and we need the wasm to exist before set_b.
+      // here (not inside hydrate) because hydrate() runs before the engine
+      // promise resolves on slow loads, and we need the wasm to exist
+      // before set_b. The SONA agent keeps no persisted state — pattern
+      // clusters are session-scoped, consistent with the plan's
+      // "trajectories, ReasoningBank clusters, EWC++ anti-forgetting" being
+      // driven by *this session's* training.
       await hydrateLoraSnapshot();
-    } catch (_) { /* already logged inside loadAdapter */ }
+    } catch (_) { /* already logged inside loadSonaEngine */ }
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => { try { flushPersist(); } catch (_) {} });
     }
@@ -164,6 +181,20 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   // No-op when the adapter isn't ready or `recommendSeeds` hasn't been called
   // yet for this track (no cached input).
   try { loraReward(meta.fitness); } catch (e) { console.warn('[lora] reward failed', e); }
+  // P2.A — record the generation as a SONA trajectory step. The dynamics
+  // vector (P1.C) is the natural "activations" signal for this step: it's
+  // a fixed-dim summary of *how the car drove* during the generation, which
+  // is exactly what SONA's REINFORCE gradient estimator wants from
+  // TrajectoryStep.activations. When dynamicsVec is absent we fall through
+  // to trackVec; when both are absent (very short runs) we skip the step.
+  // The trajectory itself is framed by main.js on phase-4 enter/exit —
+  // here we just append a step to whatever's currently open (no-op if
+  // nothing's open).
+  try {
+    const stepActs = (dynamicsVec instanceof Float32Array) ? dynamicsVec
+                    : (trackVec instanceof Float32Array) ? trackVec : null;
+    if (stepActs) sonaAddStep(stepActs, null, meta.fitness);
+  } catch (e) { console.warn('[sona] step failed', e); }
   schedulePersist();
   return id;
 }
@@ -333,8 +364,11 @@ export function info() {
   // most recent adapt() input and output; `lora.driftRecent` is a short
   // history for the sparkline. When the adapter never ran this session,
   // drift is 0 and recent is empty.
-  const lora = loraInfo();
-  lora.driftRecent = loraRecentDrift();
+  // P2.A — sonaEngineInfo returns { lora: {...}, sona: {...} } where the
+  // LoRA sub-object has the same shape as the P1.B info() used to return.
+  const engineInfo = sonaEngineInfo();
+  const lora = engineInfo.lora;
+  const sona = engineInfo.sona;
   return {
     brains: _brainMirror.size,
     tracks: _trackMirror.size,
@@ -347,6 +381,13 @@ export function info() {
     rerankerThreshold: GNN_MIN_ARCHIVE,
     topology: TOPOLOGY.slice(),
     lora,
+    // P2.A — SONA stats exposed to the UI panel. `trajectories` grows with
+    // endTrajectory + per-step flushes inside sona/engine.js; `patterns` is
+    // the ReasoningBank cluster count; `microUpdates` is a local counter
+    // (each process_task call bumps one); `ewcLambda` is the config value
+    // for the anti-catastrophic-forgetting regulariser. `trajectoryOpen`
+    // flips true between begin/end so the panel can show "recording…".
+    sona,
     // P1.C. `enabled` is the UI toggle state; `count` is how many archived
     // brains actually have a dynamics vector associated — that lets the
     // panel show "off" vs "on but no data yet" vs "on, N trajectories".
@@ -356,6 +397,26 @@ export function info() {
       hasQuery: !!_queryDynamicsVec,
     },
   };
+}
+
+// ─── P2.A SONA trajectory + pattern surface ──────────────────────────────
+//
+// Exposed here (rather than having main.js import sona/engine.js directly)
+// so the no-build classic-script consumer route via window.__rvBridge keeps
+// working without a second sidecar import. These are thin pass-throughs.
+// When SONA isn't ready, they no-op silently — callers can fire-and-forget.
+
+export function beginPhase4Trajectory(trackVec) {
+  try { return sonaBeginTrajectory(trackVec); } catch (e) { console.warn('[sona] begin failed', e); return null; }
+}
+export function addPhase4Step(activations, attention, stepReward) {
+  try { sonaAddStep(activations, attention, stepReward); } catch (e) { console.warn('[sona] addStep failed', e); }
+}
+export function endPhase4Trajectory(finalFitness) {
+  try { return sonaEndTrajectory(finalFitness); } catch (e) { console.warn('[sona] endTrajectory failed', e); return null; }
+}
+export function findSimilarCircuits(trackVec, k = 5) {
+  try { return sonaFindPatterns(trackVec, k); } catch (e) { console.warn('[sona] findPatterns failed', e); return []; }
 }
 
 // Walk meta.parentIds backwards to assemble a lineage trail.
@@ -624,7 +685,7 @@ export async function _debugReset() {
   _dynamicsMirror.clear();
   _observations.clear();
   _queryDynamicsVec = null;
-  loraDebugReset();
+  sonaEngineDebugReset();
   if (typeof indexedDB !== 'undefined') {
     await new Promise((resolve) => {
       const req = indexedDB.deleteDatabase(IDB_NAME);

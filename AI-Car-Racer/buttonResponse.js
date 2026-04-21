@@ -126,11 +126,31 @@ function nextPhase(){
             road.roadEditor.editModeChange(false);
             phaseToLayout(phase);
             submitTrack();
+            // P2.A — frame a SONA trajectory around the whole training session.
+            // The trackVec was embedded in phase 3 (embedCurrentTrack), so it's
+            // available here on window.currentTrackVec. When the bridge isn't
+            // ready yet (first boot of a cold session) this is a silent no-op.
+            try {
+                window.__rvSessionBestFitness = 0;
+                if (window.__rvBridge && window.currentTrackVec) {
+                    window.__rvBridge.beginPhase4Trajectory(window.currentTrackVec);
+                }
+            } catch (e) { console.warn('[sona] phase-4 begin failed', e); }
             // pauseGame();
             break;
     }
 }
 function backPhase(){
+    // P2.A — if we're leaving phase 4, close the SONA trajectory first so its
+    // steps get clustered into ReasoningBank patterns before the session state
+    // tears down. Uses the running session-best fitness that main.js maintains
+    // after each archiveBrain call.
+    try {
+        if (phase === 4 && window.__rvBridge) {
+            var fit = Number(window.__rvSessionBestFitness) || 0;
+            window.__rvBridge.endPhase4Trajectory(fit);
+        }
+    } catch (e) { console.warn('[sona] phase-4 end failed', e); }
     phase-=2;
     nextPhase();
 }

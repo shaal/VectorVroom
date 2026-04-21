@@ -71,6 +71,27 @@
     '  <span class="rv-spark" data-rv="lora-spark"></span>',
     '  <span data-eli15="lora" role="button" tabindex="0" aria-label="Learn: track-vector adapter (LoRA)"></span>',
     '</div>',
+    // SONA stats row (P2.A). Hidden until SONA wasm boots. Shows the four
+    // headline numbers the plan calls out: in-flight/complete trajectories,
+    // reasoning-bank patterns extracted, micro-update count, EWC λ (the
+    // anti-catastrophic-forgetting regulariser strength). Each concept has
+    // its own ELI15 chapter badge.
+    '<div class="rv-sona" data-rv="sona" hidden>',
+    '  <span class="rv-sona-label">SONA:</span>',
+    '  <span class="rv-sona-stats" data-rv="sona-stats">—</span>',
+    '  <span data-eli15="sona-trajectory" role="button" tabindex="0" aria-label="Learn: SONA trajectories"></span>',
+    '  <span data-eli15="reasoningbank" role="button" tabindex="0" aria-label="Learn: ReasoningBank patterns"></span>',
+    '  <span data-eli15="ewc" role="button" tabindex="0" aria-label="Learn: EWC++ anti-forgetting"></span>',
+    '</div>',
+    // Similar circuits (P2.A). Top-k ReasoningBank clusters matched against
+    // the current trackVec, each row showing avg quality + member count.
+    // Hidden until at least one pattern is stored.
+    '<div class="rv-circuits" data-rv="circuits" hidden>',
+    '  <div class="rv-circuits-title">Similar circuits',
+    '    <span data-eli15="reasoningbank" role="button" tabindex="0" aria-label="Learn: similar circuits come from ReasoningBank clustering"></span>',
+    '  </div>',
+    '  <div class="rv-circuits-list" data-rv="circuits-list"></div>',
+    '</div>',
     // Dynamics trajectory toggle (P1.C). Off by default — the plan keeps
     // this opt-in because it changes retrieval ordering. The count next to
     // the label shows how many archived brains have a dynamics vector
@@ -101,6 +122,10 @@
     dynamics: root.querySelector('[data-rv="dynamics"]'),
     dynamicsToggle: root.querySelector('[data-rv="dynamics-toggle"]'),
     dynamicsStatus: root.querySelector('[data-rv="dynamics-status"]'),
+    sona: root.querySelector('[data-rv="sona"]'),
+    sonaStats: root.querySelector('[data-rv="sona-stats"]'),
+    circuits: root.querySelector('[data-rv="circuits"]'),
+    circuitsList: root.querySelector('[data-rv="circuits-list"]'),
   };
 
   // Dynamics toggle wiring (P1.C). The checkbox owns UI state; the bridge
@@ -148,6 +173,11 @@
     loraDriftLen: -1, // length of recent-drift array; rises with adapt() calls even before reward()
     dynamicsEnabled: null,
     dynamicsCount: -1,
+    sonaReady: null,
+    sonaTrajectories: -1,
+    sonaPatterns: -1,
+    sonaMicroUpdates: -1,
+    sonaTrajectoryOpen: null,
   };
 
   // Reranker indicator state (P5.C). Track the previous top-K ordering so we
@@ -382,6 +412,70 @@
     }
   }
 
+  // P2.A — SONA stats strip. The four plan-mandated numbers live here. We
+  // show `traj N (+open)` when a trajectory is currently recording so the
+  // user sees begin/end in action without opening devtools. `μup` is the
+  // cumulative micro-update count (one per processTask call); it naturally
+  // outpaces `traj` because each trajectory replays as multiple micro-updates.
+  function renderSona(info) {
+    if (!el.sona) return;
+    if (window.rvDisabled) { el.sona.hidden = true; return; }
+    const s = info && info.sona;
+    if (!s || !s.ready) { el.sona.hidden = true; return; }
+    el.sona.hidden = false;
+    const traj = s.trajectories | 0;
+    const pats = s.patterns | 0;
+    const mu = s.microUpdates | 0;
+    const lam = Number(s.ewcLambda) || 0;
+    const openMark = s.trajectoryOpen
+      ? ' (+open, ' + (s.trajectorySteps | 0) + ' step' + ((s.trajectorySteps | 0) === 1 ? '' : 's') + ')'
+      : '';
+    el.sonaStats.textContent =
+      'traj ' + traj + openMark +
+      ' · patterns ' + pats +
+      ' · μup ' + mu +
+      ' · λ ' + lam;
+  }
+
+  // P2.A — similar circuits list. Each row = one ReasoningBank cluster
+  // matched against the current trackVec; we show cosine similarity %,
+  // member count and average quality (both read from the cluster object
+  // returned by the sona/engine findPatterns() call).
+  function renderCircuits(trackVec, info) {
+    if (!el.circuits || !el.circuitsList) return;
+    if (window.rvDisabled) { el.circuits.hidden = true; return; }
+    const bridge = window.__rvBridge;
+    const s = info && info.sona;
+    // Hide when SONA isn't ready yet, no patterns have been extracted, or we
+    // don't have a trackVec to query with — there's nothing useful to show
+    // in any of those cases.
+    if (!s || !s.ready || !(s.patterns | 0) || !trackVec ||
+        !bridge || typeof bridge.findSimilarCircuits !== 'function') {
+      el.circuits.hidden = true;
+      return;
+    }
+    let rows = [];
+    try { rows = bridge.findSimilarCircuits(trackVec, 5) || []; }
+    catch (e) { console.warn('[rv-panel] findSimilarCircuits failed', e); rows = []; }
+    if (rows.length === 0) { el.circuits.hidden = true; return; }
+    el.circuits.hidden = false;
+    const html = rows.map(function (r, i) {
+      const sim = (typeof r.sim === 'number') ? r.sim : 0;
+      const pct = Math.max(0, Math.min(100, Math.round(50 + 50 * sim)));
+      const members = (r.clusterSize | 0);
+      const q = (typeof r.avgQuality === 'number') ? r.avgQuality.toFixed(2) : '—';
+      return [
+        '<div class="rv-circuit-row">',
+        '  <span class="rv-rank">#', (i + 1), '</span>',
+        '  <span class="rv-sim">', pct, '%</span>',
+        '  <span class="rv-circuit-members" title="cluster size">', members, ' member', (members === 1 ? '' : 's'), '</span>',
+        '  <span class="rv-circuit-quality" title="average quality within cluster">q ', q, '</span>',
+        '</div>',
+      ].join('');
+    }).join('');
+    el.circuitsList.innerHTML = html;
+  }
+
   function renderList(seeds, info) {
     if (window.rvDisabled) {
       el.list.innerHTML = '<div class="rv-empty">Bridge disabled via ?rv=0 — archive not consulted this session.</div>';
@@ -495,6 +589,11 @@
       ? info.lora.driftRecent.length : -1;
     const dynamicsEnabled = info && info.dynamics ? !!info.dynamics.enabled : null;
     const dynamicsCount = info && info.dynamics ? (info.dynamics.count | 0) : -1;
+    const sonaReadyFlag = info && info.sona ? !!info.sona.ready : null;
+    const sonaTrajectories = info && info.sona ? (info.sona.trajectories | 0) : -1;
+    const sonaPatterns = info && info.sona ? (info.sona.patterns | 0) : -1;
+    const sonaMicroUpdates = info && info.sona ? (info.sona.microUpdates | 0) : -1;
+    const sonaTrajectoryOpen = info && info.sona ? !!info.sona.trajectoryOpen : null;
 
     // Fast-path: nothing changed → no DOM writes, no recommendSeeds call.
     if (
@@ -510,7 +609,12 @@
       last.loraAdapts === loraAdapts &&
       last.loraDriftLen === loraDriftLen &&
       last.dynamicsEnabled === dynamicsEnabled &&
-      last.dynamicsCount === dynamicsCount
+      last.dynamicsCount === dynamicsCount &&
+      last.sonaReady === sonaReadyFlag &&
+      last.sonaTrajectories === sonaTrajectories &&
+      last.sonaPatterns === sonaPatterns &&
+      last.sonaMicroUpdates === sonaMicroUpdates &&
+      last.sonaTrajectoryOpen === sonaTrajectoryOpen
     ) return;
 
     // Stage the current dynamics query vector so recommendSeeds can mix it
@@ -558,6 +662,8 @@
     renderRerankerMode(info);
     renderReranker(info);
     renderLora(info);
+    renderSona(info);
+    renderCircuits(trackVec, info);
     renderDynamics(info);
     renderBadge(trackVec, seeds);
     renderList(seeds, info || { ready: false, brains: 0 });
@@ -575,6 +681,11 @@
       loraDriftLen: loraDriftLen,
       dynamicsEnabled: dynamicsEnabled,
       dynamicsCount: dynamicsCount,
+      sonaReady: sonaReadyFlag,
+      sonaTrajectories: sonaTrajectories,
+      sonaPatterns: sonaPatterns,
+      sonaMicroUpdates: sonaMicroUpdates,
+      sonaTrajectoryOpen: sonaTrajectoryOpen,
     };
   }
 

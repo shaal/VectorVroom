@@ -409,3 +409,52 @@ h1{
     font-size: .72rem;
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
+/* P2.A — SONA stats strip. Piggy-backs on the .rv-lora visual rhythm so
+   the panel stays visually coherent (label chip + monospace values). */
+.rv-sona {
+    display: flex;
+    align-items: center;
+    gap: .4em;
+    flex-wrap: wrap;
+    padding: .1em .2em;
+    font-size: .72rem;
+    color: #bcd;
+}
+.rv-sona[hidden] { display: none; }
+.rv-sona-label {
+    color: #8aa;
+    text-transform: uppercase;
+    font-size: .62rem;
+    letter-spacing: .06em;
+}
+.rv-sona-stats {
+    color: #dde;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .72rem;
+}
+.rv-circuits {
+    padding: .2em .2em .1em;
+    margin-top: .25em;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.rv-circuits[hidden] { display: none; }
+.rv-circuits-title {
+    display: flex;
+    align-items: center;
+    gap: .3em;
+    color: #8aa;
+    text-transform: uppercase;
+    font-size: .62rem;
+    letter-spacing: .06em;
+    margin-bottom: .2em;
+}
+.rv-circuit-row {
+    display: flex;
+    align-items: center;
+    gap: .5em;
+    padding: .12em .2em;
+    font-size: .72rem;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: #dde;
+}
+.rv-circuit-members, .rv-circuit-quality { color: #bcd; }

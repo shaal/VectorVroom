@@ -197,6 +197,12 @@ function nextBatch(){
             window.__rvBridge.archiveBrain(
                 bestCar.brain, fitness, trackVec, generation, currentSeedIds.slice(), batchFastest, dynamicsVec
             );
+            // P2.A — track the running session-best so backPhase() can close
+            // the SONA trajectory with a meaningful final fitness. Per-gen
+            // fitness resets when the session restarts (nextPhase case 4).
+            if (!window.__rvSessionBestFitness || fitness > window.__rvSessionBestFitness) {
+                window.__rvSessionBestFitness = fitness;
+            }
             if (window.__rvDynamics){
                 try { window.__rvDynamics.reset(); } catch (_) { /* best-effort */ }
             }

@@ -285,6 +285,20 @@ engine: trajectories, ReasoningBank clusters, EWC++ anti-forgetting.
 - No regressions on P1.B's confidence gate (adapter drift, persistence,
   `?rv=0` skip).
 
+**Shipped notes.** Three Oval/Triangle/Hexagon sessions produced
+`patterns=4, trajectories=36`. "Similar circuits" renders multi-row with
+`#N · cos-sim% · N members · q avg-q`. Ship required an upstream patch to
+`ruvector-sona`: `EphemeralAgent::get_patterns()` at
+`crates/sona/src/training/federated.rs:234` was calling
+`find_patterns(&[], 0)` (always empty) — replaced with `get_all_patterns()`,
+and added a new `find_patterns(query, k)` method plus
+`WasmEphemeralAgent::findPatterns` binding so the JS side can ask for
+cosine-ranked top-k directly from the wasm reasoning bank.
+`vendor/ruvector/sona/VENDORED.md` records the upstream as
+`v2.2.0-21-gd5d3296c-dirty` — the `-dirty` is our uncommitted patch in
+`~/code/utilities/ruvector`; pushing that fix upstream is a follow-up task
+so future re-vendors don't need a local patched tree.
+
 ---
 
 ## Wave 3 — structural optimisations
@@ -410,7 +424,7 @@ Fill in as phases ship. `ship-task` writes back here on completion.
 | P1.A | ✅ shipped | claude-opus-4-7 | 8c994c1 | `gnn` |
 | P1.B | ✅ shipped | claude-opus-4-7 | (see git log) | `lora` |
 | P1.C | ✅ shipped | claude-opus-4-7 | (see git log) | `dynamics-embedding` |
-| P2.A | ☐ | — | — | — |
+| P2.A | ✅ shipped | claude-opus-4-7 | (this commit) | `sona-trajectory`, `reasoningbank`, `ewc` |
 | P3.A | ☐ | — | — | — |
 | P3.B | ☐ | — | — | — |
 | P4.A | ☐ | — | — | — |

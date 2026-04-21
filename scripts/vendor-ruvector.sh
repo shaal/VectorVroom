@@ -10,8 +10,14 @@
 #                 Defaults to the Cargo package name with dashes → underscores,
 #                 matching the existing convention (ruvector_cnn_wasm, ruvector_wasm).
 #
+# Optional env:
+#   WASM_FEATURES Space-separated cargo feature flags to pass as
+#                 `--features "$WASM_FEATURES"`. Needed for crates whose WASM
+#                 bindings live behind a non-default feature (e.g. sona → "wasm").
+#
 # What it does:
-#   1. runs   wasm-pack build --target web --release   in a tmp out-dir
+#   1. runs   wasm-pack build --target web --release [--features …]   inside
+#      the crate directory (wasm-pack's default pkg/ output, which it manages)
 #   2. copies the resulting pkg/ contents into vendor/ruvector/$VENDOR_NAME/
 #   3. writes VENDORED.md recording the upstream commit SHA, date, and host
 #
@@ -67,19 +73,32 @@ fi
 VENDOR_DIR="$VENDOR_ROOT/$VENDOR_NAME"
 
 # ─── build ───────────────────────────────────────────────────────────────
-TMP_OUT="$(mktemp -d -t vendor-ruvector.XXXXXXXX)"
-# shellcheck disable=SC2064
-trap "rm -rf '$TMP_OUT'" EXIT
+# wasm-pack 0.13+ forwards `--out-dir` to `cargo build` as an unstable flag,
+# which breaks on stable toolchains. Let wasm-pack use its default `pkg/`
+# directory inside the crate, and copy from there.
+BUILD_PKG="$CRATE_ABS/pkg"
+echo "[vendor-ruvector] building $CRATE_ABS (features='${WASM_FEATURES:-<default>}') → $BUILD_PKG"
 
-echo "[vendor-ruvector] building $CRATE_ABS → $TMP_OUT/pkg"
+rm -rf "$BUILD_PKG"
+
 # --target web produces browser-ready glue (no bundler needed); --release
 # turns on optimisations so the .wasm matches what end users download.
-wasm-pack build "$CRATE_ABS" --target web --release --out-dir "$TMP_OUT/pkg"
+# Feature flags (optional) let us build crates whose WASM bindings live behind
+# a non-default feature (e.g. ruvector-sona's `wasm` feature).
+WASM_PACK_ARGS=("build" "$CRATE_ABS" "--target" "web" "--release")
+if [[ -n "${WASM_FEATURES:-}" ]]; then
+  WASM_PACK_ARGS+=("--features" "$WASM_FEATURES")
+fi
+wasm-pack "${WASM_PACK_ARGS[@]}"
 
-if [[ ! -d "$TMP_OUT/pkg" ]]; then
-  echo "error: wasm-pack did not produce $TMP_OUT/pkg" >&2
+if [[ ! -d "$BUILD_PKG" ]]; then
+  echo "error: wasm-pack did not produce $BUILD_PKG" >&2
   exit 1
 fi
+
+# Clean up the in-crate pkg/ on exit so the source tree stays tidy.
+# shellcheck disable=SC2064
+trap "rm -rf '$BUILD_PKG'" EXIT
 
 # ─── copy into vendor/ ───────────────────────────────────────────────────
 mkdir -p "$VENDOR_DIR"
@@ -90,7 +109,7 @@ find "$VENDOR_DIR" -mindepth 1 -maxdepth 1 ! -name 'VENDORED.md' -exec rm -rf {}
 
 # Copy every pkg/ artifact (.wasm, .js, .d.ts, package.json, README.md, …)
 # except .gitignore (wasm-pack emits one that would hide the vendored files).
-cp -R "$TMP_OUT/pkg/." "$VENDOR_DIR/"
+cp -R "$BUILD_PKG/." "$VENDOR_DIR/"
 rm -f "$VENDOR_DIR/.gitignore"
 
 # ─── write VENDORED.md ───────────────────────────────────────────────────

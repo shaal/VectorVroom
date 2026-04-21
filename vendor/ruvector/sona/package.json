@@ -1,0 +1,32 @@
+{
+  "name": "ruvector-sona",
+  "type": "module",
+  "collaborators": [
+    "RuVector Team <team@ruvector.dev>"
+  ],
+  "description": "Self-Optimizing Neural Architecture - Runtime-adaptive learning for LLM routers with two-tier LoRA, EWC++, and ReasoningBank",
+  "version": "0.2.0",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "files": [
+    "ruvector_sona_bg.wasm",
+    "ruvector_sona.js",
+    "ruvector_sona.d.ts"
+  ],
+  "main": "ruvector_sona.js",
+  "homepage": "https://github.com/ruvnet/ruvector/tree/main/crates/sona",
+  "types": "ruvector_sona.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "neural",
+    "learning",
+    "lora",
+    "llm",
+    "adaptive"
+  ]
+}
