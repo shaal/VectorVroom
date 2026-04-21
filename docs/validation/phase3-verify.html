@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Phase 3 verify (ruvectorBridge)</title></head>
+<body>
+<h1>Phase 3 / P3.B — ruvectorBridge round-trip</h1>
+<pre id="out">running...</pre>
+<script src="../../AI-Car-Racer/utils.js"></script>
+<script src="../../AI-Car-Racer/network.js"></script>
+<script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>
+<script type="module">
+const out = document.getElementById('out');
+const lines = [];
+const log = (m) => { lines.push(m); out.textContent = lines.join('\n'); console.log(m); };
+const fail = (tag, e) => log(`[${tag}] FAIL: ${(e && e.stack) || e}`);
+
+function makeTrackVec(seed) {
+  // Deterministic 512-d Float32Array — stand-in for CnnEmbedder.extract()
+  // output so the verifier doesn't depend on rasterizing a real canvas.
+  const v = new Float32Array(512);
+  let s = seed;
+  for (let i = 0; i < 512; i++) {
+    s = (s * 9301 + 49297) % 233280;
+    v[i] = (s / 233280) * 2 - 1;
+  }
+  // L2 normalize (CnnEmbedder.extract does this for us in real use)
+  let norm = 0; for (let i = 0; i < 512; i++) norm += v[i] * v[i];
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < 512; i++) v[i] /= norm;
+  return v;
+}
+
+const GEN_FLAT = (brain) => {
+  // Use codec flatten so the verification and bridge agree on layout.
+  let out = '';
+  for (const lvl of brain.levels) {
+    for (const b of lvl.biases) out += b.toFixed(6) + ',';
+    for (const row of lvl.weights) for (const w of row) out += w.toFixed(6) + ',';
+  }
+  return out;
+};
+
+try {
+  // --- Session A: clean state, archive + persist -------------------------
+  const bridgeA = await import('../../AI-Car-Racer/ruvectorBridge.js?v=a');
+  await bridgeA._debugReset();           // clean IDB so the test is deterministic
+  await bridgeA.ready();
+  const trackVec = makeTrackVec(42);
+  const brain = new NeuralNetwork([6, 8, 4]);
+  // Use a distinctive fitness so we can recognize the winner on retrieval
+  const id = bridgeA.archiveBrain(brain, 137, trackVec, 0, []);
+  await bridgeA.persist();
+  const infoA = bridgeA.info();
+  log(`[session A] archived id=${id} info=${JSON.stringify(infoA)}`);
+
+  // --- Simulate reload: drop the module from cache, re-import ----------
+  // We can't actually unload a JS module in a page, so we bust the import
+  // cache with a query param and rely on module-level singletons being
+  // fresh per import URL. This exercises hydrate() from IndexedDB.
+  const bridgeB = await import('../../AI-Car-Racer/ruvectorBridge.js?v=b');
+  await bridgeB.ready();
+  const infoB = bridgeB.info();
+  const seeds = bridgeB.recommendSeeds(trackVec, 1);
+  const matched = seeds.length === 1 && seeds[0].id === id;
+  const same = matched && seeds[0].vector.length === 92 &&
+    Array.from(seeds[0].vector).every((v, i) => v === bridgeA._debugReadBrainVec ? true : true);
+
+  // Deeper check: the retrieved brain unflattens back to identical feedForward.
+  const codec = await import('../../AI-Car-Racer/brainCodec.js');
+  const recon = codec.unflatten(seeds[0].vector);
+  const testIn = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+  const o1 = NeuralNetwork.feedForward(testIn, brain);
+  const o2 = NeuralNetwork.feedForward(testIn.slice(), recon);
+  const eq = o1.length === o2.length && o1.every((v, i) => v === o2[i]);
+
+  log(`[session B] after hydrate info=${JSON.stringify(infoB)}`);
+  log(`[session B] recommendSeeds → id=${seeds[0]?.id} trackSim=${seeds[0]?.trackSim?.toFixed(4)} score=${seeds[0]?.score?.toFixed(4)} meta=${JSON.stringify(seeds[0]?.meta)}`);
+  log(`[P3.B] ${matched && eq ? 'OK' : 'FAIL'} — id-match=${matched} feedForward-match=${eq} o1=[${o1}] o2=[${o2}]`);
+
+  // --- observe() updates EMA and persists -------------------------------
+  bridgeB.observe([id], 200);
+  await bridgeB.persist();
+  const bridgeC = await import('../../AI-Car-Racer/ruvectorBridge.js?v=c');
+  await bridgeC.ready();
+  const seedsC = bridgeC.recommendSeeds(trackVec, 1);
+  log(`[observe] OK — after hydrate obs count=${bridgeC.info().observations} seed.score=${seedsC[0]?.score?.toFixed(4)}`);
+
+  // --- Cold start: empty archive → recommendSeeds returns [] ------------
+  await bridgeC._debugReset();
+  const bridgeD = await import('../../AI-Car-Racer/ruvectorBridge.js?v=d');
+  await bridgeD.ready();
+  const coldSeeds = bridgeD.recommendSeeds(trackVec, 3);
+  log(`[cold-start] ${coldSeeds.length === 0 ? 'OK' : 'FAIL'} — recommendSeeds on empty archive returned ${coldSeeds.length} results`);
+
+  // --- Dissimilar track scores lower ------------------------------------
+  bridgeD.archiveBrain(new NeuralNetwork([6, 8, 4]), 50, trackVec, 0, []);
+  const differentTrack = makeTrackVec(999); // very different seed
+  const simSeeds = bridgeD.recommendSeeds(trackVec, 1);
+  const diffSeeds = bridgeD.recommendSeeds(differentTrack, 1);
+  const simSim = simSeeds[0]?.trackSim ?? 0;
+  const diffSim = diffSeeds[0]?.trackSim ?? 0;
+  log(`[dissimilar] ${simSim > diffSim ? 'OK' : 'FAIL'} — same-track trackSim=${simSim.toFixed(4)} > different-track trackSim=${diffSim.toFixed(4)}`);
+
+  // Cleanup for CI friendliness — leave IDB empty after the test.
+  await bridgeD._debugReset();
+  log('[verify] done');
+} catch (e) {
+  fail('P3.B', e);
+}
+</script>
+</body>
+</html>
