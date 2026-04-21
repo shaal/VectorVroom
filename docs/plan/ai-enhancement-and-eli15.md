@@ -297,7 +297,8 @@ cosine-ranked top-k directly from the wasm reasoning bank.
 `vendor/ruvector/sona/VENDORED.md` records the upstream as
 `v2.2.0-21-gd5d3296c-dirty` — the `-dirty` is our uncommitted patch in
 `~/code/utilities/ruvector`; pushing that fix upstream is a follow-up task
-so future re-vendors don't need a local patched tree.
+so future re-vendors don't need a local patched tree. Full workflow
+concerns and options are in `docs/plan/ruvector-upstream-patches.md`.
 
 ---
 
