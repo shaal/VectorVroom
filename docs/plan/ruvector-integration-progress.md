@@ -35,7 +35,7 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** `P5.C` or `P5.D` — both parallelizable. **P5.A + P5.B are done.** P5.B added `meta.fastestLap` (optional), `bridge.getLineage(id, maxDepth)` (walks best-fit parent, cycle-safe), and two-row sidebar layout (header fields + lineage sparkline SVG). Suggested starting point is **P5.C** (EMA-reranker indicator): `info().observations` is already surfaced, and the panel memo key already includes `observations`, so the indicator is a pure additive render.
+> **Now ready to claim:** `P5.D` only (final task in Phase 5). **P5.A + P5.B + P5.C are done.** P5.C added `info().observationEvents` (sum of per-id counts, ticks on every `observe()` call including repeats on the same id), a Spearman's-footrule `computeRankShift(prev, curr)` over the top-K union, and a `.rv-reranker` line rendered under the header that reads *"EMA reranker: N observations (M brains) · last shift K positions"*. The panel's render memo (`last` struct + fast-path compare) was extended with `observationEvents` so repeat observes don't fall through the fast path. `info().observations` kept its original semantics (distinct brain ids) for backwards-compat with existing logs.
 >
 > **Phase 5 heads-up:** (a) The panel's render loop in `uiPanels.js` is memoised against `{ready, brains, tracks, observations, phase, trackVecId, seedIdsKey}` — if you add a new input (e.g., a "last-reranked-at" timestamp for P5.C's GNN/EMA indicator), extend both the `last` struct and the fast-path comparison. (b) `recommendSeeds` returns `{id, vector, meta, score, trackSim}` per hit. (c) `window.NeuralNetwork`/`Level` + `window.__rvUnflatten` are still exposed on the window for any classic-script needs — don't duplicate those bridges. (d) **P5.A pattern for one-shot CSS animations:** uiPanels.js uses `remove-class → force reflow (`void el.offsetWidth`) → re-add class` to restart `@keyframes` from frame 0, and listens for `animationend` to flip state after. Reuse this if P5.C wants the GNN/EMA indicator to pulse on observations tick. (e) **P5.B added `bridge.getLineage(id, maxDepth=6)`** — returns `[{id, fitness, generation}, ...]` oldest→newest, walks the highest-fitness parent at each step, visited-set + depth-cap both protect against cycles. Use this for any ancestry-aware rendering rather than walking `_brainMirror` from the UI. (f) **Narrow-sidebar gotcha**: the panel is in `grid-column: 2` and shares vertical space with the button strip; a single-row grid of many columns (>6) clips off the right edge. Prefer a two-row layout (header fields + a bottom row for visuals). The P5.B sidebar is the reference pattern — see `.rv-item-top` / `.rv-item-bottom` in `style.css`.
 
@@ -117,7 +117,7 @@ These items are independent of each other — each touches a different UI afford
 |---|---|---|---|---|---|---|
 | P5.A | Track-match badge text & animation: *"This track is N% similar to one you've trained on — loading K best candidate brains as seeds."* Numbers come from the cosine similarity returned by `embedTrack` + `recommendSeeds`. | `[x]` | sess-2026-04-20-ship-task-5a | P4.D, P4.E | edits in `uiPanels.js`, `style.css` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8780/AI-Car-Racer/index.html`: driven to phase=3, badge shows correct 55% + "1 candidate brain" (singular). Sampled opacity at 200ms resolution across full animation: fade-in 0→1 in ~500ms, holds at 1.000 for ~3.8s, fades 1→0 in ~400ms, `animationend` sets `hidden=true` at ~4966ms. Observations-tick mid-hold (0→1) does NOT restart animation — identity guard works. Screenshot: `docs/validation/screenshots/p5a-badge-holding.png`. |
 | P5.B | "Similar past brains" sidebar: per seed, show fitness, fastest lap, generation, and a tiny sparkline of its lineage. | `[x]` | sess-2026-04-20-ship-task-5b | P4.C, P4.E | edits in `uiPanels.js`, `style.css`, `ruvectorBridge.js`, `main.js` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8790/AI-Car-Racer/index.html`: synthetic 3-brain lineage chain renders as "#1 50% fit 52.0 11.07s g2 p2 / LINEAGE [3pt-polyline]", "#2 fit 35.0 14.22s g1 p1 / [2pt-line]", "#3 fit 20.0 18.50s g0 p0 / [single-dot]". Legacy brain (no fastestLap meta) → lap renders `—`. `getLineage(id, 3)` truncates an 8-deep chain to the 3 newest; multi-parent walker picks fit=99 ancestor over fit=5. `?rv=0` unchanged. Phase-3 flow: badge + lap=12.34s + sparkline all present. Screenshots: `docs/validation/screenshots/p5b-sidebar-lineage.png`, `p5b-phase3-lap.png`. |
-| P5.C | GNN-observations indicator (or EMA-reranker indicator if P2.C was skipped): "GNN observations: N · last reranking shifted top-K by M positions." | `[ ]` |  | P4.C | edits in `uiPanels.js` | Indicator increments each generation; visible during phase=4 |
+| P5.C | GNN-observations indicator (or EMA-reranker indicator if P2.C was skipped): "GNN observations: N · last reranking shifted top-K by M positions." | `[x]` | sess-2026-04-20-ship-task-5c | P4.C | edits in `uiPanels.js`, `ruvectorBridge.js` (`info().observationEvents`), `style.css` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8795/AI-Car-Racer/index.html`: empty archive → "EMA reranker: idle (awaiting first observation)"; single observe that swaps two seeds → "last shift 2 positions"; repeat observe on the same id → events counter ticks (1→2) and shift recomputes; zero-effect observe on already-top seed → "last shift 0 positions"; non-reranker reshuffle (new brain archived) leaves `lastShift` unchanged; `?rv=0` hides the line; phase=4 visibility confirmed; real `nextBatch()` end-to-end shows events 6→10→11 and shifts 10→1 across two generations. Screenshots: `docs/validation/screenshots/p5c-reranker-indicator.png`, `p5c-reranker-idle.png`, `p5c-reranker-disabled.png`. |
 | P5.D | Annotated fitness-over-generations graph in `grapher.js`: mark generations where `recommendSeeds` returned a non-empty result, and where the GNN reranker promoted/demoted a seed. | `[ ]` |  | P4.C | edits in `grapher.js` | Graph shows annotations on the right generations |
 
 ---
@@ -673,4 +673,116 @@ Sessions: append a dated entry below — don't edit prior entries.
     - Adding a new column to .rv-item-top? Count the
       grid-template-columns entries — currently 7. Don't skip; the
       grid will silently collapse extras into the last column.
+
+2026-04-20 · sess-ship-task-5c · P5.C complete.
+  Work:
+    - ruvectorBridge.js: added `info().observationEvents` (sum of
+      per-id `.count` across `_observations`). The existing `.size`-based
+      `observations` field stays as-is so the `[ruvector] ready —
+      obs=...` log line keeps its meaning.
+    - uiPanels.js: added `.rv-reranker` node under the header. Copy:
+        - obs=0:         "EMA reranker: idle (awaiting first observation)"
+                         (rv-reranker-muted class for italic/low-emphasis)
+        - obs>0:         "EMA reranker: N observations (M brains) ·
+                         last shift K position(s)"   (shift = "—" when
+                         no baseline has been captured yet, e.g. first
+                         tick after page reload)
+      Engine prefix switches "EMA" → "GNN" automatically when/if
+      `info().gnn` ever flips true, so P2.C-reversal wouldn't need UI
+      changes.
+    - uiPanels.js: added `computeRankShift(prev, curr)` using
+      Spearman's footrule over the union of ids. Ids present in only
+      one list are treated as rank K (first slot past the bottom of
+      top-K), which correctly rewards a brain rising from outside the
+      top-K and penalises a brain falling off. Sum of abs rank
+      displacement is the total "positions moved".
+    - uiPanels.js: extended the render memo. Added `observationEvents`
+      to both the `last` struct AND the fast-path comparison — without
+      this, repeat observes on the same id (which don't move
+      `_observations.size`) would be silently skipped and the
+      indicator would stall.
+    - style.css: added `.rv-reranker` / `.rv-reranker-muted` + dashed
+      underline separator. 0.72rem, matches existing `.rv-*` palette.
+
+  Design decision log:
+    - Why TWO fields (observations + observationEvents) instead of
+      redefining the one? The old field is already referenced in the
+      boot-log string ("obs=N") and was verified in P3.B/P4.C
+      validation output. Renaming it would force a chain of text-match
+      updates in docs/validation. Adding a second field is cheaper
+      and leaves the boot log invariant.
+    - Why Spearman's footrule (union-based) instead of Kendall tau or
+      "common-ids-only" displacement? Kendall ignores inserts/removes;
+      common-ids-only reports shift=0 on a full replacement of the
+      top-K, which would lie to the user. Footrule with K-as-sentinel
+      for missing ids handles swaps, drop-outs, and fresh promotions
+      uniformly.
+    - Why `lastShift` only updates when `observationEvents` rises (not
+      when brains/trackVec/phase change)? The indicator labels this
+      as a "reranking" metric. A non-observe reshuffle (new brain,
+      new track) shouldn't retroactively "credit" the reranker. The
+      baseline `lastSeedIds` is refreshed on every render so that
+      when the next real observe fires, the diff is against the seed
+      order at that exact moment — not against a stale snapshot.
+    - Why poll-driven, not event-driven? Same rationale as P4.E /
+      P5.A / P5.B — the panel already polls at 500ms; adding event
+      hooks would couple uiPanels.js to bridge internals and to the
+      nextBatch sequence. The memo keeps idle ticks free.
+
+  Known limitation (documented here so P5.D doesn't re-discover it):
+    main.js's nextBatch() calls archiveBrain() and observe() in the
+    same synchronous block, so the panel's 500ms tick sees BOTH events
+    before it can diff. The computed shift in that case blends the
+    archive-reshuffle with the EMA-rerank effect — "total top-K
+    change this generation" rather than "EMA-only contribution".
+    Isolated observe() calls (without an accompanying archive) DO
+    produce a pure-EMA shift, which is what validation exercised
+    (shift=2 after vec_0/vec_1 swap). If P5.D wants to isolate the
+    two contributions in the fitness-over-generations graph, do the
+    diff INSIDE the bridge: snapshot the top-K right before the EMA
+    write inside `observe()`, then call `computeRankShift` against
+    the post-write ordering. That captures the EMA effect exactly,
+    with no archive contamination.
+
+  Verification trail (agent-browser, :8795, sequence recorded above
+  in the P5.C row). Summary of the end-to-end numbers:
+    - initial state after reset:       events=0, distinct=0, shift=null
+    - after first observe(['vec_0'], 1000):
+                                       events=1, distinct=1, shift=2
+    - after second observe(['vec_0'], 0) [same id, different outcome]:
+                                       events=2, distinct=1, shift=2
+      (crucially, events ticked from 1→2 even though distinct stayed
+      at 1 — verifies the observationEvents fix)
+    - after observe(['vec_2'], 1000) [already-top seed]:
+                                       events=3, distinct=2, shift=0
+    - after archiveBrain(new_top):     brains 3→4, seeds reshuffled,
+                                       shift UNCHANGED at 0 (correct)
+    - after real nextBatch()×2 (training loop):
+                                       events 6→10→11, shift 10, then 1
+    - ?rv=0:                           indicator hidden (hidden=true,
+                                       text="")
+    - No console errors; the two wasm HNSW warnings are upstream
+      pre-existing, same as P4.B baseline.
+
+  Screenshots (captured at :8795):
+    docs/validation/screenshots/p5c-reranker-indicator.png   (active)
+    docs/validation/screenshots/p5c-reranker-idle.png        (empty archive)
+    docs/validation/screenshots/p5c-reranker-disabled.png    (?rv=0)
+
+  Notes for P5.D:
+    - `info().observationEvents` is the right signal for "a new
+      generation just closed" — it ticks exactly once per observe()
+      call, which main.js makes exactly once per nextBatch.
+    - If you want to annotate "recommendSeeds returned non-empty"
+      generations on the graph, you already have it: main.js sets
+      `currentSeedIds.length > 0` right after a non-empty seed
+      retrieval. Just record that alongside the generation count
+      in your plot array (use a parallel localStorage key — don't
+      overload `localStorage.progress`, which grapher.js already
+      parses as a flat number array).
+    - If you want to also annotate "EMA reranker promoted/demoted
+      something significantly", the same `computeRankShift` function
+      can be lifted out of uiPanels.js to a shared helper. But see
+      the limitation above — to isolate EMA-only shift from
+      archive-also shift, you'd need a bridge-internal snapshot.
 ```

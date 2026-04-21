@@ -25,6 +25,7 @@
     '  <span class="rv-title">Vector Memory</span>',
     '  <span class="rv-info" data-rv="info"></span>',
     '</div>',
+    '<div class="rv-reranker" data-rv="reranker" hidden></div>',
     '<div class="rv-badge" data-rv="badge" hidden></div>',
     '<div class="rv-list-title">Seeded from archive</div>',
     '<div class="rv-list" data-rv="list"></div>',
@@ -32,6 +33,7 @@
 
   const el = {
     info: root.querySelector('[data-rv="info"]'),
+    reranker: root.querySelector('[data-rv="reranker"]'),
     badge: root.querySelector('[data-rv="badge"]'),
     list: root.querySelector('[data-rv="list"]'),
   };
@@ -55,9 +57,21 @@
     brains: -1,
     tracks: -1,
     observations: -1,
+    observationEvents: -1, // total observe() calls; repeat-obs on same id still ticks this
     phase: -1,
     trackVecId: null, // Float32Array identity, not value
     seedIdsKey: '',
+  };
+
+  // Reranker indicator state (P5.C). Track the previous top-K ordering so we
+  // can report "last reranking shifted top-K by M positions" after each
+  // observe() call. Non-reranker reshuffles (new-brain archive, new trackVec)
+  // refresh the baseline but do NOT overwrite `lastShift` — only a genuine
+  // observations-increment counts as a reranker event.
+  let rerankState = {
+    lastSeedIds: [],
+    lastObservationEvents: 0,
+    lastShift: null, // null until an observe() tick has a baseline to diff
   };
 
   function bridgeReadyLocal() {
@@ -83,6 +97,61 @@
       ' · ' + info.observations + ' obs' +
       (info.gnn ? ' · gnn' : ' · ema');
     el.info.className = 'rv-info';
+  }
+
+  // Spearman's footrule over the union of ids. Ids present in only one list
+  // are treated as rank K (the first position past the bottom of top-K), so a
+  // drop-out from position i contributes K-i and a fresh promotion into
+  // position i contributes K-i symmetrically. Items that just reshuffled
+  // contribute the absolute difference of their old/new positions.
+  function computeRankShift(prev, curr) {
+    if (!prev.length && !curr.length) return 0;
+    const K = Math.max(prev.length, curr.length);
+    const prevIdx = new Map();
+    for (let i = 0; i < prev.length; i++) prevIdx.set(prev[i], i);
+    const currIdx = new Map();
+    for (let i = 0; i < curr.length; i++) currIdx.set(curr[i], i);
+    const union = new Set();
+    for (const id of prev) union.add(id);
+    for (const id of curr) union.add(id);
+    let sum = 0;
+    for (const id of union) {
+      const pi = prevIdx.has(id) ? prevIdx.get(id) : K;
+      const ci = currIdx.has(id) ? currIdx.get(id) : K;
+      sum += Math.abs(pi - ci);
+    }
+    return sum;
+  }
+
+  function renderReranker(info) {
+    if (window.rvDisabled) {
+      el.reranker.hidden = true;
+      el.reranker.textContent = '';
+      return;
+    }
+    if (!info || !info.ready) {
+      el.reranker.hidden = true;
+      return;
+    }
+    el.reranker.hidden = false;
+    const engine = info.gnn ? 'GNN' : 'EMA';
+    // Count total observe() calls (grows each generation) for the main metric;
+    // the distinct-brain count is shown in parens for transparency.
+    const events = (info.observationEvents | 0);
+    const distinct = (info.observations | 0);
+    if (events === 0) {
+      el.reranker.textContent = engine + ' reranker: idle (awaiting first observation)';
+      el.reranker.className = 'rv-reranker rv-reranker-muted';
+      return;
+    }
+    const shiftText = rerankState.lastShift === null
+      ? '—'
+      : (rerankState.lastShift + ' position' + (rerankState.lastShift === 1 ? '' : 's'));
+    el.reranker.textContent =
+      engine + ' reranker: ' + events + ' observation' + (events === 1 ? '' : 's') +
+      ' (' + distinct + ' brain' + (distinct === 1 ? '' : 's') + ')' +
+      ' · last shift ' + shiftText;
+    el.reranker.className = 'rv-reranker';
   }
 
   function renderBadge(trackVec, seeds) {
@@ -236,6 +305,7 @@
       last.brains === info.brains &&
       last.tracks === info.tracks &&
       last.observations === info.observations &&
+      last.observationEvents === (info.observationEvents | 0) &&
       last.phase === currentPhase &&
       last.trackVecId === trackVec &&
       last.seedIdsKey === seedIdsKey
@@ -254,7 +324,25 @@
       }
     }
 
+    // Reranker diff (P5.C). When the observation-event count rises, compare
+    // the new top-K ordering against the snapshot captured on the previous
+    // re-render; that magnitude is the "last shift". We always refresh the
+    // baseline seedIds so non-reranker reshuffles (trackVec/phase/new-brain)
+    // don't pollute the next real shift measurement. Keying on *events*
+    // instead of *distinct brains* catches repeat observes on the same id
+    // — those still rerun EMA and can reshuffle the top-K.
+    if (info && info.ready) {
+      const seedIdsArr = seeds.map(function (s) { return s.id; });
+      const eventsNow = info.observationEvents | 0;
+      if (eventsNow > rerankState.lastObservationEvents && rerankState.lastSeedIds.length > 0) {
+        rerankState.lastShift = computeRankShift(rerankState.lastSeedIds, seedIdsArr);
+      }
+      rerankState.lastSeedIds = seedIdsArr;
+      rerankState.lastObservationEvents = eventsNow;
+    }
+
     renderInfo(info);
+    renderReranker(info);
     renderBadge(trackVec, seeds);
     renderList(seeds, info || { ready: false, brains: 0 });
 
@@ -263,6 +351,7 @@
       brains: info ? info.brains : -1,
       tracks: info ? info.tracks : -1,
       observations: info ? info.observations : -1,
+      observationEvents: info ? (info.observationEvents | 0) : -1,
       phase: currentPhase,
       trackVecId: trackVec,
       seedIdsKey: seedIdsKey,

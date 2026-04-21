@@ -174,10 +174,18 @@ export function observe(retrievedIds, outcomeFitness) {
 // ─── introspection (for UI + debugging) ──────────────────────────────────────
 
 export function info() {
+  // `observations` = distinct brain ids that have received feedback (kept for
+  // backwards-compat with existing logs). `observationEvents` = total number
+  // of observe() calls (sums per-id counts); this is what the reranker-shift
+  // indicator keys off, because repeat observes on the same id also rerun
+  // the EMA and can reshuffle the ordering.
+  let events = 0;
+  for (const o of _observations.values()) events += (o.count | 0);
   return {
     brains: _brainMirror.size,
     tracks: _trackMirror.size,
     observations: _observations.size,
+    observationEvents: events,
     ready: !!_brainDB,
     gnn: false, // P2.C skipped; EMA fallback active
     topology: TOPOLOGY.slice(),

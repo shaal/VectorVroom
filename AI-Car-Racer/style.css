@@ -217,6 +217,17 @@ h1{
 }
 .rv-info-muted { color: #a07e5a; font-style: italic; }
 
+.rv-reranker {
+    font-size: .72rem;
+    color: #555;
+    margin: 0 0 .4em 0;
+    padding: .15em 0 .3em 0;
+    border-bottom: 1px dashed #e0d3bd;
+    letter-spacing: .01em;
+}
+.rv-reranker[hidden] { display: none; }
+.rv-reranker-muted { color: #a07e5a; font-style: italic; }
+
 .rv-badge {
     margin: .3em 0 .5em 0;
     padding: .4em .55em;
