@@ -55,12 +55,15 @@
     <script src="eli15/index.js"></script>
     <script type="module">
       // Sidecar module: warms the ruvector bridge and exposes handles on
-      // window.__rvBridge / window.__rvUnflatten for classic-script consumers
-      // (main.js uses unflatten to turn seed Float32 vectors into NeuralNetwork
-      // instances; the bridge itself has no globalThis access to NeuralNetwork).
+      // window.__rvBridge / window.__rvUnflatten / window.__rvDynamics for
+      // classic-script consumers (main.js uses unflatten to turn seed Float32
+      // vectors into NeuralNetwork instances; the bridge itself has no
+      // globalThis access to NeuralNetwork).
       import * as bridge from './ruvectorBridge.js';
+      import * as dynamics from './dynamicsEmbedder.js';
       import { unflatten } from './brainCodec.js';
       window.__rvBridge = bridge;
+      window.__rvDynamics = dynamics;
       window.__rvUnflatten = unflatten;
       bridge.ready().catch((e) => console.error('[ruvector] init failed', e));
     </script>

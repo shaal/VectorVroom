@@ -22,17 +22,21 @@ import {
 } from './lora/trackAdapter.js';
 
 const IDB_NAME = 'rv_car_learning';
-// Bumped to 2 in P1.B to add the lora_track store. onupgradeneeded creates the
-// new store without touching the existing brains/tracks/observations stores,
-// so old archives hydrate unchanged on first load after the upgrade.
-const IDB_VERSION = 2;
+// Bumped to 3 in P1.C to add the dynamics store. onupgradeneeded for v3
+// creates the new store only; brains/tracks/observations/lora are untouched,
+// so old archives continue to hydrate unchanged — they just don't have
+// dynamicsId set on any brain meta (backwards-compat: missing → skip the
+// dynamics term in recommendSeeds).
+const IDB_VERSION = 3;
 const BRAINS_STORE = `brains_${TOPOLOGY.join('_')}`; // topology-scoped per PRD risk #6
 const TRACKS_STORE = 'tracks';
 const OBS_STORE = 'observations';
 const LORA_STORE = 'lora_track';
 const LORA_KEY = 'singleton'; // single-row store; this is the only id ever used
+const DYNAMICS_STORE = 'dynamics';
 
 const TRACK_DIM = 512;
+const DYNAMICS_DIM = 64; // matches dynamicsEmbedder.DYNAMICS_DIM
 // VectorDB returns cosine DISTANCE (1 - similarity), range [0, 2]. Dedup when
 // distance is tiny, i.e. the two track vectors are essentially identical.
 const TRACK_DEDUPE_MAX_DIST = 0.005; // ≈ 0.9975 cosine similarity
@@ -63,10 +67,22 @@ export function setBypassLora(on) { _bypassLora = !!on; }
 let _ready = null;
 let _brainDB = null;
 let _trackDB = null;
+let _dynamicsDB = null;
 let _cnn = null;
+
+// Dynamics retrieval toggle. Default off per P1.C plan: adding the extra
+// similarity term shifts seeding behaviour, so we keep it opt-in and let the
+// panel checkbox drive it. `_queryDynamicsVec` is set by callers (main.js /
+// uiPanels) before recommendSeeds so the bridge stays pure-read.
+let _useDynamics = false;
+let _queryDynamicsVec = null;
+// Weight of the dynamics-sim term in the final score product. Small enough
+// that dynamics can tie-break but won't drown out fitness × track-similarity.
+const DYNAMICS_TERM_WEIGHT = 0.3;
 
 const _brainMirror = new Map(); // id -> { vector: Float32Array, meta }
 const _trackMirror = new Map(); // id -> { vector: Float32Array, meta }
+const _dynamicsMirror = new Map(); // id -> { vector: Float32Array, meta }
 const _observations = new Map(); // brainId -> { weight, count }
 
 let _persistTimer = null;
@@ -80,6 +96,7 @@ export function ready() {
     await Promise.all([initVec(), initCnn()]);
     _brainDB = new VectorDB(FLAT_LENGTH, 'cosine');
     _trackDB = new VectorDB(TRACK_DIM, 'cosine');
+    _dynamicsDB = new VectorDB(DYNAMICS_DIM, 'cosine');
     _cnn = new CnnEmbedder(); // default 224×224, 512-dim, L2-normalized
     // Kick off GNN + LoRA loads in parallel with hydrate(). Best-effort: if
     // either resolves to null, the corresponding code path silently falls back
@@ -104,17 +121,29 @@ export function ready() {
 }
 
 function requireReady() {
-  if (!_brainDB || !_trackDB || !_cnn) {
+  if (!_brainDB || !_trackDB || !_dynamicsDB || !_cnn) {
     throw new Error('ruvectorBridge: call await ready() before using the bridge');
   }
 }
 
+// P1.C — dynamics retrieval controls. UI owns the toggle; `setUseDynamics`
+// flips the flag, `setQueryDynamicsVec` stages the current-generation vector
+// the next recommendSeeds() call will use. Both are no-ops when the bridge
+// isn't ready or dynamics archive is empty — the call-site can fire-and-forget.
+export function setUseDynamics(on) { _useDynamics = !!on; }
+export function isUsingDynamics() { return !!_useDynamics; }
+export function setQueryDynamicsVec(vec) {
+  _queryDynamicsVec = (vec instanceof Float32Array && vec.length === DYNAMICS_DIM) ? vec : null;
+}
+
 // ─── archive / retrieve ──────────────────────────────────────────────────────
 
-export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds = [], fastestLap) {
+export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds = [], fastestLap, dynamicsVec) {
   requireReady();
   const vec = flatten(brain);
   const trackId = trackVec ? upsertTrack(trackVec) : null;
+  const dynamicsId = (dynamicsVec instanceof Float32Array && dynamicsVec.length === DYNAMICS_DIM)
+    ? insertDynamics(dynamicsVec) : null;
   const lap = Number.isFinite(fastestLap) ? Number(fastestLap) : undefined;
   const meta = {
     fitness: Number(fitness) || 0,
@@ -124,6 +153,10 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
     timestamp: Date.now(),
   };
   if (lap !== undefined) meta.fastestLap = lap;
+  // Only write dynamicsId when we actually got a vector. Older archives
+  // without this field stay shape-compatible; recommendSeeds skips them
+  // automatically because `!entry.meta.dynamicsId` → no lookup.
+  if (dynamicsId !== null) meta.dynamicsId = dynamicsId;
   const id = _brainDB.insert(vec, null, meta);
   _brainMirror.set(id, { vector: vec, meta });
   // Feed the LoRA reward signal: the most-recent adapt() input (cached inside
@@ -132,6 +165,16 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   // yet for this track (no cached input).
   try { loraReward(meta.fitness); } catch (e) { console.warn('[lora] reward failed', e); }
   schedulePersist();
+  return id;
+}
+
+// Dynamics vectors are deliberately *not* deduped: two runs on the same track
+// by genuinely different brains will produce different trajectories, and the
+// whole point of the dynamics key is "how this brain drove", not "what track
+// this was". Each archiveBrain call gets its own dynamicsId.
+function insertDynamics(dynamicsVec) {
+  const id = _dynamicsDB.insert(dynamicsVec, null, { firstSeen: Date.now() });
+  _dynamicsMirror.set(id, { vector: dynamicsVec, meta: { firstSeen: Date.now() } });
   return id;
 }
 
@@ -192,6 +235,25 @@ export function recommendSeeds(trackVec, k = 5) {
   const gnnMap = useGnn ? gnnScore(_brainMirror, candidates) : null;
   _rerankerMode = useGnn && gnnMap ? 'gnn' : (candidates.size > 0 ? 'ema' : 'none');
 
+  // P1.C — precompute dynamics similarity per brain when the toggle is on,
+  // we have a staged query vector, and the dynamics archive is non-empty.
+  // This runs one nearest-neighbour sweep against _dynamicsDB (instead of
+  // per-brain lookups) so the cost stays O(K log N) where K is the archive
+  // size. Brains without `meta.dynamicsId` (pre-P1.C archives) silently
+  // score 0 on this term — their overall ranking just stays determined by
+  // trackTerm × fitTerm × rerankTerm, same as before this phase shipped.
+  const dynamicsSimMap = new Map(); // brainId -> dynamicsSim in [-1,1]
+  const dynamicsActive = _useDynamics && _queryDynamicsVec && !_dynamicsDB.isEmpty();
+  if (dynamicsActive) {
+    const dHits = _dynamicsDB.search(_queryDynamicsVec, Math.min(_dynamicsMirror.size, 25));
+    const hitMap = new Map();
+    for (const h of dHits) hitMap.set(h.id, 1 - h.score);
+    for (const [bid, entry] of _brainMirror) {
+      const did = entry.meta && entry.meta.dynamicsId;
+      if (did != null && hitMap.has(did)) dynamicsSimMap.set(bid, hitMap.get(did));
+    }
+  }
+
   const scored = [];
   for (const [bid, trackSim] of candidates) {
     const entry = _brainMirror.get(bid);
@@ -207,12 +269,20 @@ export function recommendSeeds(trackVec, k = 5) {
       const emaBoost = obs ? obs.weight : 0;
       rerankTerm = 1 + 0.3 * emaBoost;
     }
+    const dynamicsSim = dynamicsSimMap.has(bid) ? dynamicsSimMap.get(bid) : 0;
+    // Map cosine [-1,1] → [1 - W, 1 + W] so the term multiplicatively nudges
+    // the composite score up for similar trajectories and down for opposite
+    // ones, while leaving brains with no dynamics data at term = 1.
+    const dynamicsTerm = dynamicsActive
+      ? (1 + DYNAMICS_TERM_WEIGHT * dynamicsSim)
+      : 1;
     scored.push({
       id: bid,
       vector: entry.vector,
       meta: entry.meta,
-      score: trackTerm * fitTerm * rerankTerm,
+      score: trackTerm * fitTerm * rerankTerm * dynamicsTerm,
       trackSim,
+      dynamicsSim,
     });
   }
   scored.sort((a, b) => b.score - a.score);
@@ -277,6 +347,14 @@ export function info() {
     rerankerThreshold: GNN_MIN_ARCHIVE,
     topology: TOPOLOGY.slice(),
     lora,
+    // P1.C. `enabled` is the UI toggle state; `count` is how many archived
+    // brains actually have a dynamics vector associated — that lets the
+    // panel show "off" vs "on but no data yet" vs "on, N trajectories".
+    dynamics: {
+      enabled: !!_useDynamics,
+      count: _dynamicsMirror.size,
+      hasQuery: !!_queryDynamicsVec,
+    },
   };
 }
 
@@ -329,6 +407,10 @@ function openDB() {
       // LORA_STORE was added in IDB v2 (P1.B). Keying on `id` matches the
       // pattern of the other stores; we only ever store one row (LORA_KEY).
       if (!db.objectStoreNames.contains(LORA_STORE)) db.createObjectStore(LORA_STORE, { keyPath: 'id' });
+      // DYNAMICS_STORE was added in IDB v3 (P1.C). One row per archived
+      // dynamics vector, keyed by the _dynamicsDB-assigned id — mirrors the
+      // brains/tracks store shape.
+      if (!db.objectStoreNames.contains(DYNAMICS_STORE)) db.createObjectStore(DYNAMICS_STORE, { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -351,6 +433,12 @@ export async function hydrate() {
     return;
   }
   try {
+    // Dynamics store only exists on IDB v3+, but even an older DB file that
+    // upgraded through onupgradeneeded will now have the empty store — so
+    // readAll is safe. Still, wrap in try/catch to be defensive against
+    // partial upgrades from a crashed earlier session.
+    let dynamicsRows = [];
+    try { dynamicsRows = await readAll(db, DYNAMICS_STORE); } catch (_) { dynamicsRows = []; }
     const [brainRows, trackRows, obsRows] = await Promise.all([
       readAll(db, BRAINS_STORE),
       readAll(db, TRACKS_STORE),
@@ -363,6 +451,16 @@ export async function hydrate() {
       if (vec.length !== TRACK_DIM) continue;
       _trackDB.insert(vec, row.id, row.meta || {});
       _trackMirror.set(row.id, { vector: vec, meta: row.meta || {} });
+    }
+    // Dynamics second — brain meta references dynamicsId, so the mirror
+    // being populated when brains hydrate means recommendSeeds can find the
+    // match immediately. (Brain rows from pre-P1.C archives simply won't
+    // have meta.dynamicsId set; that's the backwards-compat path.)
+    for (const row of dynamicsRows) {
+      const vec = toFloat32(row.vec);
+      if (vec.length !== DYNAMICS_DIM) continue;
+      _dynamicsDB.insert(vec, row.id, row.meta || {});
+      _dynamicsMirror.set(row.id, { vector: vec, meta: row.meta || {} });
     }
     for (const row of brainRows) {
       const vec = toFloat32(row.vec);
@@ -446,22 +544,27 @@ export async function persist() {
   _persistInFlight = (async () => {
     const db = await openDB();
     try {
-      const tx = db.transaction([BRAINS_STORE, TRACKS_STORE, OBS_STORE, LORA_STORE], 'readwrite');
+      const tx = db.transaction([BRAINS_STORE, TRACKS_STORE, OBS_STORE, LORA_STORE, DYNAMICS_STORE], 'readwrite');
       const brains = tx.objectStore(BRAINS_STORE);
       const tracks = tx.objectStore(TRACKS_STORE);
       const obs = tx.objectStore(OBS_STORE);
       const lora = tx.objectStore(LORA_STORE);
+      const dynamics = tx.objectStore(DYNAMICS_STORE);
       // Full rewrite keeps the logic simple; archive size stays small (hundreds
       // of entries, <100KB serialized) so the write cost is negligible.
       brains.clear();
       tracks.clear();
       obs.clear();
       lora.clear();
+      dynamics.clear();
       for (const [id, { vector, meta }] of _brainMirror) {
         brains.put({ id, vec: Array.from(vector), meta });
       }
       for (const [id, { vector, meta }] of _trackMirror) {
         tracks.put({ id, vec: Array.from(vector), meta });
+      }
+      for (const [id, { vector, meta }] of _dynamicsMirror) {
+        dynamics.put({ id, vec: Array.from(vector), meta });
       }
       for (const [id, { weight, count }] of _observations) {
         obs.put({ id, weight, count });
@@ -489,9 +592,11 @@ export function hydrateFromFixture(fixture) {
   requireReady();
   _brainMirror.clear();
   _trackMirror.clear();
+  _dynamicsMirror.clear();
   _observations.clear();
   _brainDB = new VectorDB(FLAT_LENGTH, 'cosine');
   _trackDB = new VectorDB(TRACK_DIM, 'cosine');
+  _dynamicsDB = new VectorDB(DYNAMICS_DIM, 'cosine');
   const toF32 = (v) => (v instanceof Float32Array) ? v : new Float32Array(v);
   for (const row of (fixture.tracks || [])) {
     const vec = toF32(row.vec);
@@ -516,7 +621,9 @@ export function hydrateFromFixture(fixture) {
 export async function _debugReset() {
   _brainMirror.clear();
   _trackMirror.clear();
+  _dynamicsMirror.clear();
   _observations.clear();
+  _queryDynamicsVec = null;
   loraDebugReset();
   if (typeof indexedDB !== 'undefined') {
     await new Promise((resolve) => {

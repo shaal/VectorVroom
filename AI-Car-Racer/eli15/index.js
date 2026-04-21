@@ -83,6 +83,11 @@
       oneLiner: 'Two skinny matrices learn to nudge the 512-number track vector toward better-retrieving arrangements.',
       loader: function () { return import('./chapters/lora.js'); },
     },
+    'dynamics-embedding': {
+      title: 'Dynamics embedding — how the car drove, not just what it saw',
+      oneLiner: 'Squash a whole lap of sensor+control readings into a single 64-number vector we can search on.',
+      loader: function () { return import('./chapters/dynamics-embedding.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.

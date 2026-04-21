@@ -71,6 +71,18 @@
     '  <span class="rv-spark" data-rv="lora-spark"></span>',
     '  <span data-eli15="lora" role="button" tabindex="0" aria-label="Learn: track-vector adapter (LoRA)"></span>',
     '</div>',
+    // Dynamics trajectory toggle (P1.C). Off by default — the plan keeps
+    // this opt-in because it changes retrieval ordering. The count next to
+    // the label shows how many archived brains have a dynamics vector
+    // attached; pre-P1.C archives show 0 until a new generation is archived.
+    '<div class="rv-dynamics" data-rv="dynamics">',
+    '  <label class="rv-dynamics-label">',
+    '    <input type="checkbox" data-rv="dynamics-toggle" />',
+    '    dynamics key:',
+    '    <span class="rv-dynamics-status" data-rv="dynamics-status">off</span>',
+    '  </label>',
+    '  <span data-eli15="dynamics-embedding" role="button" tabindex="0" aria-label="Learn: dynamics trajectory embedding"></span>',
+    '</div>',
     '<div class="rv-list" data-rv="list"></div>',
   ].join('');
 
@@ -86,7 +98,27 @@
     lora: root.querySelector('[data-rv="lora"]'),
     loraDrift: root.querySelector('[data-rv="lora-drift"]'),
     loraSpark: root.querySelector('[data-rv="lora-spark"]'),
+    dynamics: root.querySelector('[data-rv="dynamics"]'),
+    dynamicsToggle: root.querySelector('[data-rv="dynamics-toggle"]'),
+    dynamicsStatus: root.querySelector('[data-rv="dynamics-status"]'),
   };
+
+  // Dynamics toggle wiring (P1.C). The checkbox owns UI state; the bridge
+  // stores the flag so recommendSeeds() can read it without a round-trip
+  // through the panel. setUseDynamics is missing before the bridge module
+  // imports in sidecar resolve, so we gate on typeof.
+  if (el.dynamicsToggle) {
+    el.dynamicsToggle.addEventListener('change', function () {
+      const b = window.__rvBridge;
+      if (b && typeof b.setUseDynamics === 'function') {
+        b.setUseDynamics(el.dynamicsToggle.checked);
+      }
+      // Force a repaint on the next tick so the status text flips instantly,
+      // without waiting for the 500ms poll. The `last.*` memo entries get
+      // overwritten in tick() anyway.
+      last.dynamicsEnabled = !el.dynamicsToggle.checked; // invalidate
+    });
+  }
 
   // Track-match badge auto-fade (P5.A). When `currentTrackVec` identity changes
   // (a new track was finalised), we restart a one-shot CSS animation that fades
@@ -114,6 +146,8 @@
     seedIdsKey: '',
     loraAdapts: -1,
     loraDriftLen: -1, // length of recent-drift array; rises with adapt() calls even before reward()
+    dynamicsEnabled: null,
+    dynamicsCount: -1,
   };
 
   // Reranker indicator state (P5.C). Track the previous top-K ordering so we
@@ -318,6 +352,36 @@
       '<circle cx="' + last[0] + '" cy="' + last[1] + '" r="1.3" fill="#1a4f9c"></circle></svg>';
   }
 
+  function renderDynamics(info) {
+    if (!el.dynamics) return;
+    if (window.rvDisabled) {
+      el.dynamics.hidden = true;
+      return;
+    }
+    const d = info && info.dynamics;
+    if (!d) {
+      el.dynamics.hidden = true;
+      return;
+    }
+    el.dynamics.hidden = false;
+    // Keep the checkbox's DOM state in sync with the bridge's flag so a
+    // `_debugReset()` or a manual setUseDynamics call from the console is
+    // reflected in the UI.
+    if (el.dynamicsToggle && el.dynamicsToggle.checked !== !!d.enabled) {
+      el.dynamicsToggle.checked = !!d.enabled;
+    }
+    if (el.dynamicsStatus) {
+      if (!d.enabled) {
+        el.dynamicsStatus.textContent = 'off';
+      } else if ((d.count | 0) === 0) {
+        el.dynamicsStatus.textContent = 'on (no trajectories yet — train one generation)';
+      } else {
+        el.dynamicsStatus.textContent = 'on · ' + d.count + ' trajector' +
+          (d.count === 1 ? 'y' : 'ies');
+      }
+    }
+  }
+
   function renderList(seeds, info) {
     if (window.rvDisabled) {
       el.list.innerHTML = '<div class="rv-empty">Bridge disabled via ?rv=0 — archive not consulted this session.</div>';
@@ -429,6 +493,8 @@
     const loraAdapts = (info && info.lora) ? (info.lora.adaptCount | 0) : -1;
     const loraDriftLen = (info && info.lora && Array.isArray(info.lora.driftRecent))
       ? info.lora.driftRecent.length : -1;
+    const dynamicsEnabled = info && info.dynamics ? !!info.dynamics.enabled : null;
+    const dynamicsCount = info && info.dynamics ? (info.dynamics.count | 0) : -1;
 
     // Fast-path: nothing changed → no DOM writes, no recommendSeeds call.
     if (
@@ -442,8 +508,21 @@
       last.trackVecId === trackVec &&
       last.seedIdsKey === seedIdsKey &&
       last.loraAdapts === loraAdapts &&
-      last.loraDriftLen === loraDriftLen
+      last.loraDriftLen === loraDriftLen &&
+      last.dynamicsEnabled === dynamicsEnabled &&
+      last.dynamicsCount === dynamicsCount
     ) return;
+
+    // Stage the current dynamics query vector so recommendSeeds can mix it
+    // in when the toggle is on. queryVector() returns null when no frames
+    // have been captured yet (pre-phase-4 or first load), which the bridge
+    // interprets as "no dynamics signal available this tick" and silently
+    // drops the term for the upcoming call.
+    if (ready && window.__rvDynamics && typeof window.__rvBridge.setQueryDynamicsVec === 'function') {
+      try {
+        window.__rvBridge.setQueryDynamicsVec(window.__rvDynamics.queryVector());
+      } catch (_) { /* best-effort */ }
+    }
 
     // Recompute seeds for the badge/list. recommendSeeds is cheap (in-memory
     // cosine over a few hundred entries), and only runs when one of the
@@ -479,6 +558,7 @@
     renderRerankerMode(info);
     renderReranker(info);
     renderLora(info);
+    renderDynamics(info);
     renderBadge(trackVec, seeds);
     renderList(seeds, info || { ready: false, brains: 0 });
 
@@ -493,6 +573,8 @@
       seedIdsKey: seedIdsKey,
       loraAdapts: loraAdapts,
       loraDriftLen: loraDriftLen,
+      dynamicsEnabled: dynamicsEnabled,
+      dynamicsCount: dynamicsCount,
     };
   }
 

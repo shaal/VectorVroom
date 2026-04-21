@@ -67,6 +67,18 @@ function begin(){
         try {
             var bridge = window.__rvBridge;
             var trackVec = window.currentTrackVec || null;
+            // Stage the mid-training dynamics query vector. On begin() it's
+            // from the *previous* generation's trajectory (captured up to
+            // nextBatch). First-ever call: nothing staged → setQueryDynamicsVec
+            // null → the bridge silently skips the dynamics term. This is
+            // the P1.C "currently running generation's mid-training
+            // dynamics" signal, frozen at the moment we reseed.
+            if (window.__rvDynamics && typeof bridge.setQueryDynamicsVec === 'function'){
+                try {
+                    var qDyn = window.__rvDynamics.queryVector();
+                    bridge.setQueryDynamicsVec(qDyn);
+                } catch (_) { /* embedder is best-effort */ }
+            }
             var seeds = bridge.recommendSeeds(trackVec, 10);
             if (seeds && seeds.length > 0){
                 currentSeedIds = seeds.map(function(s){ return s.id; });
@@ -172,9 +184,22 @@ function nextBatch(){
             // with the global `fastLap` (all-time best across all training).
             var batchFastest = (bestCar.laps > 0 && bestCar.lapTimes && bestCar.lapTimes.length)
                 ? Math.min.apply(null, bestCar.lapTimes) : undefined;
+            // Finalise the trajectory the best car just drove. finalizeVector
+            // returns null when no frames were captured (very short runs or
+            // the bestCar never had a sensor update); archiveBrain tolerates
+            // that by skipping the dynamicsId write. We reset the embedder
+            // *after* finalising so the next generation starts with a clean
+            // ring buffer regardless of which car turns out to be best.
+            var dynamicsVec = null;
+            if (window.__rvDynamics){
+                try { dynamicsVec = window.__rvDynamics.finalizeVector(); } catch (_) { dynamicsVec = null; }
+            }
             window.__rvBridge.archiveBrain(
-                bestCar.brain, fitness, trackVec, generation, currentSeedIds.slice(), batchFastest
+                bestCar.brain, fitness, trackVec, generation, currentSeedIds.slice(), batchFastest, dynamicsVec
             );
+            if (window.__rvDynamics){
+                try { window.__rvDynamics.reset(); } catch (_) { /* best-effort */ }
+            }
             if (currentSeedIds.length){
                 window.__rvBridge.observe(currentSeedIds, fitness);
             }
@@ -239,6 +264,13 @@ function animate(){
             ));
             if (testBestCar.checkPointsCount+testBestCar.laps*road.checkPointList.length > bestCar.checkPointsCount+bestCar.laps*road.checkPointList.length){
                 bestCar = testBestCar;
+            }
+            // P1.C — record the current best car's sensor/control state into
+            // the dynamics trajectory. The embedder detects bestCar identity
+            // changes internally and resets its ring buffer, so a late swap
+            // doesn't pollute the trajectory of the brain we ultimately archive.
+            if (window.__rvDynamics && bestCar){
+                try { window.__rvDynamics.recordFrame(bestCar); } catch (_) { /* best-effort */ }
             }
             // cars[0] = bestCar;
             

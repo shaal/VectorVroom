@@ -409,7 +409,7 @@ Fill in as phases ship. `ship-task` writes back here on completion.
 | P0.B | ✅ shipped | claude-opus-4-7 | 2c9bf6e | `sensors`, `neural-network`, `genetic-algorithm`, `fitness-function`, `cnn-embedder`, `vectordb-hnsw`, `ema-reranker`, `lineage`, `track-similarity` |
 | P1.A | ✅ shipped | claude-opus-4-7 | 8c994c1 | `gnn` |
 | P1.B | ✅ shipped | claude-opus-4-7 | (see git log) | `lora` |
-| P1.C | ☐ | — | — | — |
+| P1.C | ✅ shipped | claude-opus-4-7 | (see git log) | `dynamics-embedding` |
 | P2.A | ☐ | — | — | — |
 | P3.A | ☐ | — | — | — |
 | P3.B | ☐ | — | — | — |
