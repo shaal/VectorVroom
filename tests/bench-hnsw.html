@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<!--
+  bench-hnsw.html — P3.A confidence gate.
+
+  How to run:
+    python3 -m http.server 8767    # from repo root
+    open http://localhost:8767/tests/bench-hnsw.html
+
+  Generates a reproducible 500-vector synthetic archive in 512 dimensions
+  (matches TRACK_DIM), then for 100 random queries compares:
+
+    • recall@5 vs exact top-5 under each index's native metric
+    • median + p99 .search() latency
+
+  PASS gate (from docs/plan/ai-enhancement-and-eli15.md §P3.A):
+    Hyperbolic recall@5  ≥  Euclidean recall@5
+    Hyperbolic p99        ≤  1.5 × Euclidean p99
+
+  A machine-readable marker is written to window.__hnswBenchResult for
+  agent-browser automation.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Hyperbolic vs Euclidean HNSW bench</title>
+  <style>
+    body { font: 14px/1.5 system-ui, -apple-system, sans-serif; max-width: 860px; margin: 2em auto; padding: 0 1em; color: #222; }
+    h1 { font-size: 1.3rem; margin: 0 0 .4em; }
+    h2 { font-size: 1.05rem; margin: 1em 0 .3em; }
+    p { color: #333; }
+    pre { background: #f4f4f4; padding: .6em .8em; border-radius: 4px; overflow-x: auto; font-size: 12px; }
+    table { border-collapse: collapse; margin-top: .5em; font-size: 13px; min-width: 480px; }
+    th, td { border: 1px solid #ddd; padding: 4px 10px; text-align: right; }
+    th { background: #f4f4f4; text-align: left; }
+    td.label { text-align: left; background: #fafafa; font-weight: 600; }
+    #summary { padding: .8em 1em; border-radius: 6px; margin: 1em 0; font-weight: 600; }
+    #summary.pass { background: #d3f9d8; color: #2b8a3e; }
+    #summary.fail { background: #ffe3e3; color: #c92a2a; }
+    #summary.pending { background: #fff3bf; color: #5c3c00; }
+    .gate { margin-top: .4em; font-size: 13px; }
+    .gate.pass { color: #2b8a3e; }
+    .gate.fail { color: #c92a2a; }
+  </style>
+</head>
+<body>
+  <h1>HNSW bench — Euclidean vs Hyperbolic (P3.A)</h1>
+  <p>
+    500 synthetic 512-d vectors, 100 random queries, recall@5 measured against
+    a brute-force top-5 under each index's own metric. Latency is per
+    <code>.search()</code> call. Both indices use the crate default
+    <code>ef_search = 50</code>.
+  </p>
+  <div id="summary" class="pending">Running…</div>
+  <div id="results"></div>
+
+  <script type="module">
+    // Note: we bypass the bridge and exercise the wasm classes directly.
+    // That keeps the benchmark honest (no adapter overhead in the timing)
+    // and avoids pulling in IndexedDB, which would otherwise prompt for
+    // storage permission on first run.
+    import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js';
+    import initHyp, {
+      HyperbolicIndex,
+      projectToBall,
+      poincareDistance,
+    } from '../vendor/ruvector/ruvector_hyperbolic_hnsw_wasm/ruvector_hyperbolic_hnsw_wasm.js';
+
+    const N = 500;
+    const Q = 100;
+    const DIM = 512;
+    const K = 5;
+    const EF_SEARCH = 50;
+    const CURVATURE = 1.0;
+    const SEED = 2026_04_21; // matches today's date; lock the run so anyone re-running gets identical numbers.
+
+    // Small LCG — plenty for this harness; we care about reproducibility,
+    // not statistical quality.
+    function mulberry32(seed) {
+      let a = seed >>> 0;
+      return function () {
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function randomUnitVector(rand) {
+      // Gaussian via Box-Muller then L2-normalise → uniform on the unit
+      // sphere. Matches the distribution of CnnEmbedder outputs closely
+      // enough that the benchmark is representative of the production
+      // trackDB workload.
+      const v = new Float32Array(DIM);
+      for (let i = 0; i < DIM; i += 2) {
+        const u1 = Math.max(1e-9, rand());
+        const u2 = rand();
+        const r = Math.sqrt(-2 * Math.log(u1));
+        v[i]     = r * Math.cos(2 * Math.PI * u2);
+        if (i + 1 < DIM) v[i + 1] = r * Math.sin(2 * Math.PI * u2);
+      }
+      let s = 0;
+      for (let i = 0; i < DIM; i++) s += v[i] * v[i];
+      s = 1 / Math.sqrt(s);
+      for (let i = 0; i < DIM; i++) v[i] *= s;
+      return v;
+    }
+
+    // Clustered data so nearest-neighbour structure has real signal. 16
+    // random cluster centres; each archive vector is centre + small gaussian
+    // noise, re-normalised. Recall@5 against a uniform archive would be
+    // dominated by noise.
+    function generateArchive(rand) {
+      const centres = [];
+      for (let i = 0; i < 16; i++) centres.push(randomUnitVector(rand));
+      const archive = [];
+      for (let i = 0; i < N; i++) {
+        const c = centres[i % centres.length];
+        const v = new Float32Array(DIM);
+        let s = 0;
+        for (let d = 0; d < DIM; d++) {
+          // small gaussian jitter, then we'll renormalise below
+          const g = (rand() - 0.5) * 0.3;
+          v[d] = c[d] + g;
+          s += v[d] * v[d];
+        }
+        s = 1 / Math.sqrt(s);
+        for (let d = 0; d < DIM; d++) v[d] *= s;
+        archive.push(v);
+      }
+      return archive;
+    }
+
+    function cosineDistance(a, b) {
+      let dot = 0;
+      for (let i = 0; i < DIM; i++) dot += a[i] * b[i];
+      // a, b are unit vectors → cosine distance in [0, 2]
+      return 1 - dot;
+    }
+
+    function bruteTopKCosine(archive, q, k) {
+      const scored = new Array(archive.length);
+      for (let i = 0; i < archive.length; i++) scored[i] = { i, d: cosineDistance(archive[i], q) };
+      scored.sort((a, b) => a.d - b.d);
+      return scored.slice(0, k);
+    }
+
+    function bruteTopKPoincare(projectedArchive, qProj, k) {
+      const scored = new Array(projectedArchive.length);
+      for (let i = 0; i < projectedArchive.length; i++) {
+        scored[i] = { i, d: poincareDistance(projectedArchive[i], qProj, CURVATURE) };
+      }
+      scored.sort((a, b) => a.d - b.d);
+      return scored.slice(0, k);
+    }
+
+    function percentile(sortedNums, p) {
+      if (sortedNums.length === 0) return NaN;
+      const idx = Math.min(sortedNums.length - 1, Math.floor(p * sortedNums.length));
+      return sortedNums[idx];
+    }
+
+    function median(sortedNums) { return percentile(sortedNums, 0.5); }
+
+    const summaryEl = document.getElementById('summary');
+    const resultsEl = document.getElementById('results');
+
+    (async () => {
+      try {
+        await Promise.all([initVec(), initHyp()]);
+      } catch (e) {
+        summaryEl.className = 'fail';
+        summaryEl.textContent = 'wasm init failed: ' + String(e);
+        window.__hnswBenchResult = 'FAIL';
+        return;
+      }
+
+      const rand = mulberry32(SEED);
+      const archive = generateArchive(rand);
+      const queries = [];
+      // Queries drawn from a mixture: 60 perturbed-archive vectors (so they
+      // have real neighbours), 40 fully-random unit vectors (to probe the
+      // "far from data" regime). Random mixing ratio is deliberate — the
+      // common case for trackDB is "new track shape is somewhat-like a
+      // saved one", not "identical" or "alien".
+      for (let i = 0; i < 60; i++) {
+        const src = archive[i * 7 % N];
+        const v = new Float32Array(DIM);
+        let s = 0;
+        for (let d = 0; d < DIM; d++) { v[d] = src[d] + (rand() - 0.5) * 0.2; s += v[d]*v[d]; }
+        s = 1 / Math.sqrt(s);
+        for (let d = 0; d < DIM; d++) v[d] *= s;
+        queries.push(v);
+      }
+      for (let i = 0; i < 40; i++) queries.push(randomUnitVector(rand));
+
+      // ── Euclidean side ───────────────────────────────────────────
+      const eucDB = new VectorDB(DIM, 'cosine');
+      for (let i = 0; i < N; i++) eucDB.insert(archive[i], String(i), null);
+
+      const eucLatencies = [];
+      let eucRecallSum = 0;
+      for (const q of queries) {
+        const gold = new Set(bruteTopKCosine(archive, q, K).map(r => r.i));
+        const t0 = performance.now();
+        const hits = eucDB.search(q, K);
+        eucLatencies.push(performance.now() - t0);
+        let hit = 0;
+        for (const h of hits) if (gold.has(Number(h.id))) hit += 1;
+        eucRecallSum += hit / K;
+      }
+      const eucRecall = eucRecallSum / queries.length;
+
+      // ── Hyperbolic side ──────────────────────────────────────────
+      const hypIdx = new HyperbolicIndex(EF_SEARCH, CURVATURE);
+      const projectedArchive = new Array(N);
+      for (let i = 0; i < N; i++) {
+        const p = projectToBall(archive[i], CURVATURE);
+        projectedArchive[i] = p;
+        hypIdx.insert(p);
+      }
+      const hypLatencies = [];
+      let hypRecallSum = 0;
+      for (const q of queries) {
+        const qProj = projectToBall(q, CURVATURE);
+        const gold = new Set(bruteTopKPoincare(projectedArchive, qProj, K).map(r => r.i));
+        const t0 = performance.now();
+        const hits = hypIdx.search(qProj, K) || [];
+        hypLatencies.push(performance.now() - t0);
+        let hit = 0;
+        for (const h of hits) if (gold.has(Number(h.id))) hit += 1;
+        hypRecallSum += hit / K;
+      }
+      const hypRecall = hypRecallSum / queries.length;
+
+      eucLatencies.sort((a, b) => a - b);
+      hypLatencies.sort((a, b) => a - b);
+      const eucP50 = median(eucLatencies);
+      const eucP99 = percentile(eucLatencies, 0.99);
+      const hypP50 = median(hypLatencies);
+      const hypP99 = percentile(hypLatencies, 0.99);
+
+      const recallGatePass = hypRecall >= eucRecall - 1e-6;
+      const latencyGatePass = hypP99 <= eucP99 * 1.5 + 1e-6;
+      const allPass = recallGatePass && latencyGatePass;
+
+      const table = `
+        <table>
+          <thead><tr><th>metric</th><th>euclidean</th><th>hyperbolic</th><th>ratio H/E</th></tr></thead>
+          <tbody>
+            <tr><td class="label">recall@5 (↑ better)</td><td>${(eucRecall*100).toFixed(2)}%</td><td>${(hypRecall*100).toFixed(2)}%</td><td>${(hypRecall/Math.max(1e-9,eucRecall)).toFixed(3)}</td></tr>
+            <tr><td class="label">p50 latency (ms)</td><td>${eucP50.toFixed(3)}</td><td>${hypP50.toFixed(3)}</td><td>${(hypP50/Math.max(1e-9,eucP50)).toFixed(2)}×</td></tr>
+            <tr><td class="label">p99 latency (ms)</td><td>${eucP99.toFixed(3)}</td><td>${hypP99.toFixed(3)}</td><td>${(hypP99/Math.max(1e-9,eucP99)).toFixed(2)}×</td></tr>
+          </tbody>
+        </table>`;
+
+      resultsEl.innerHTML = `
+        <h2>Results</h2>
+        ${table}
+        <h2>Gate</h2>
+        <div class="gate ${recallGatePass ? 'pass' : 'fail'}">
+          ${recallGatePass ? 'PASS' : 'FAIL'} — hyperbolic recall@5 (${(hypRecall*100).toFixed(2)}%) ${recallGatePass ? '≥' : '&lt;'} euclidean recall@5 (${(eucRecall*100).toFixed(2)}%)
+        </div>
+        <div class="gate ${latencyGatePass ? 'pass' : 'fail'}">
+          ${latencyGatePass ? 'PASS' : 'FAIL'} — hyperbolic p99 (${hypP99.toFixed(3)} ms) ${latencyGatePass ? '≤' : '&gt;'} 1.5 × euclidean p99 (${(eucP99*1.5).toFixed(3)} ms)
+        </div>
+        <h2>Harness config</h2>
+        <pre>N = ${N} vectors   DIM = ${DIM}   Q = ${Q} queries   K = ${K}
+seed = ${SEED}   ef_search = ${EF_SEARCH}   curvature = ${CURVATURE}</pre>`;
+
+      summaryEl.className = allPass ? 'pass' : 'fail';
+      summaryEl.textContent = allPass
+        ? 'BOTH GATES PASS — hyperbolic recall ≥ euclidean, p99 within 1.5×.'
+        : 'FAIL — one or both gates failed; see table.';
+      window.__hnswBenchResult = allPass ? 'PASS' : 'FAIL';
+      window.__hnswBenchDetail = {
+        eucRecall, hypRecall,
+        eucP99, hypP99, eucP50, hypP50,
+        recallGatePass, latencyGatePass,
+      };
+    })().catch((e) => {
+      summaryEl.className = 'fail';
+      summaryEl.textContent = 'harness crashed: ' + String(e && e.stack || e);
+      window.__hnswBenchResult = 'FAIL';
+    });
+  </script>
+</body>
+</html>

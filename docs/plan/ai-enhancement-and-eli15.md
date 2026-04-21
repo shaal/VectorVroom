@@ -332,6 +332,40 @@ p99 latency within 1.5× of Euclidean. If either fails, keep the flag off
 but ship the chapter — hyperbolic space is worth teaching even if we don't
 adopt it.
 
+**Shipped notes.** `ruvector-hyperbolic-hnsw-wasm` is vendored at
+`vendor/ruvector/ruvector_hyperbolic_hnsw_wasm/` (same upstream commit
+family as the prior P2.A/P3.B vendor step). The wrapper
+`AI-Car-Racer/hyperbolicAdapter.js` implements the slice of the `VectorDB`
+surface the bridge calls (insert / search / len / isEmpty) on top of
+`HyperbolicIndex`, with three correctness details worth remembering:
+Poincaré-ball projection on every insert and query (CNN outputs live on
+the unit sphere; the c=1 ball needs them shrunk with `projectToBall`);
+a `1 − exp(−d)` distance squash so the unbounded Poincaré metric coerces
+into the cosine-distance-shaped [0, 1) the bridge multiplies against;
+and string↔numeric id bookkeeping so the hyperbolic index honours the
+string ids coming from persisted archives. The swap is controlled three
+ways — `?hhnsw=1` URL flag at boot, `__rvBridge.setIndexKind('hyperbolic')`
+at runtime, and the A/B toggle strip's *index* row in the Vector Memory
+panel (now unlocked). `info().policy.index` reports the live kind;
+`policy.hyperbolicLoaded` gates UI affordances when the wasm fails to
+initialise.
+
+The confidence gate's **recall leg failed honestly**: on a 500-vector,
+512-dimensional seeded synthetic archive
+(`tests/bench-hnsw.html`, seed `2026_04_21`), Euclidean HNSW hit recall@5
+= 100.00% while Hyperbolic HNSW hit 85.20% (p50 0.20 ms vs 0.10 ms, p99
+1.10 ms vs 0.50 ms — latency leg passes at 0.45× of baseline). This is
+expected for L2-normalised spherical data, which is the cosine-HNSW sweet
+spot; hyperbolic embeddings' advantage is tree-like structure. Per the
+plan's escape hatch, the default stays Euclidean and the feature ships
+as a toggle + teaching chapter + benchmark harness rather than the new
+baseline. Existing regressions (`gnn-replay.html`, `lineage-dag-equivalence.html`)
+still pass. Browser smoke tested with agent-browser: default boot
+reports `policy.index = "euclidean"`, `?hhnsw=1` boots to `"hyperbolic"`,
+toggle click flips the policy in both directions, archive contents
+(13 brains / 1 track) survive the swap, and the ELI15 registry now has
+18 chapters with the tour playlist extended to match.
+
 ---
 
 ### P3.B — Lineage DAG viewer
@@ -408,17 +442,20 @@ each layer.
 
 **Shipped notes.** Guided tour is `AI-Car-Racer/eli15/tour.js`, exposed as
 `window.ELI15Tour` and launched from the 🚗 FAB (stacks above the existing
-🎓 FAB). The playlist is 17 chapters in teaching order; 15 steps resolve a
-live DOM anchor (`[data-eli15]` badges + `[data-rv]` panel rows), 2 are
-conceptual-only (`genetic-algorithm`, `fitness-function`). Tour navigation:
+🎓 FAB). The playlist is 18 chapters in teaching order (extended from 17
+when P3.A added `hyperbolic-space`); 16 steps resolve a live DOM anchor
+(`[data-eli15]` badges + `[data-rv]` panel rows), 2 are conceptual-only
+(`genetic-algorithm`, `fitness-function`). Tour navigation:
 → / Next, ← / Back, progress dots (clickable jumps), × / Esc to exit.
 The A/B toggle strip lives in the Vector Memory panel
-(`[data-rv="abstrip"]`): reranker (`auto|none|ema|gnn`) and adapter
-(`off|micro-lora|sona`) both round-trip through new bridge setters
-`setRerankerMode()` / `setAdapterMode()`, observed via `info().policy`.
-The dynamics row is a pass-through to the existing `setUseDynamics`;
-the index control is locked to `euclidean` with a 🔒 `hyperbolic` affordance
-that previews P3.A. Verified: 17/17 chapter titles match, reranker modes
+(`[data-rv="abstrip"]`): reranker (`auto|none|ema|gnn`), adapter
+(`off|micro-lora|sona`), and index (`euclidean|hyperbolic`) all
+round-trip through new bridge setters `setRerankerMode()` /
+`setAdapterMode()` / `setIndexKind()`, observed via `info().policy`.
+The dynamics row is a pass-through to the existing `setUseDynamics`.
+P3.A (hyperbolic HNSW) unlocked the index control — the former
+🔒 affordance is gone, replaced with runtime-gated disable when
+`policy.hyperbolicLoaded === false`. Verified: 17/17 chapter titles match, reranker modes
 produce 9/15 position differences on the peer-pressure fixture, `?rv=0`
 still hides the bridge-driven UI while leaving ELI15 + tour FABs usable.
 GNN-replay + lineage-DAG-equivalence regressions still pass.
@@ -452,6 +489,6 @@ Fill in as phases ship. `ship-task` writes back here on completion.
 | P1.B | ✅ shipped | claude-opus-4-7 | (see git log) | `lora` |
 | P1.C | ✅ shipped | claude-opus-4-7 | (see git log) | `dynamics-embedding` |
 | P2.A | ✅ shipped | claude-opus-4-7 | (this commit) | `sona-trajectory`, `reasoningbank`, `ewc` |
-| P3.A | ☐ | — | — | — |
+| P3.A | ✅ shipped (flag default-off) | claude-opus-4-7 | (this commit) | `hyperbolic-space` |
 | P3.B | ✅ shipped | claude-opus-4-7 | 271245f | `lineage-dag` |
 | P4.A | ✅ shipped | claude-opus-4-7 | (this commit) | tour playlist covers all 17 chapters; no new chapters authored |

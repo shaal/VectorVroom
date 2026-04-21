@@ -112,6 +112,11 @@
       anchor: '#rv-panel [data-rv="lineage"]',
       rationale: 'Expand the 🌳 section to see the full DAG rendered on canvas.',
     },
+    {
+      id: 'hyperbolic-space',
+      anchor: '#rv-panel [data-rv="ab-index"]',
+      rationale: 'The index toggle flips the nearest-neighbour geometry — flat vs. Poincaré-ball.',
+    },
   ];
 
   let _running = false;

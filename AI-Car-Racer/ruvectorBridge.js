@@ -9,6 +9,15 @@ import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_was
 import initCnn, { CnnEmbedder } from '../vendor/ruvector/ruvector_cnn_wasm/index.js';
 import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY } from './brainCodec.js';
 import { loadGnn, isReady as gnnIsReady, gnnScore } from './gnnReranker.js';
+// P3.A — hyperbolic HNSW swap. `loadHyperbolic` boots the wasm side; the
+// adapter mimics the slice of VectorDB the bridge actually calls (insert /
+// search / len / isEmpty) so the swap is a one-line constructor change.
+// When the wasm fails to load, the flag silently falls back to Euclidean.
+import {
+  loadHyperbolic,
+  isHyperbolicReady,
+  HyperbolicVectorDB,
+} from './hyperbolicAdapter.js';
 // P3.B — lineage DAG. Replaces the hand-walked parentIds traversal in
 // getLineage() with a cycle-safe DAG structure (ruvector_dag_wasm) shadowed
 // by a JS-side adjacency list for O(depth) queries. Same fallback discipline
@@ -132,6 +141,50 @@ let _trackDB = null;
 let _dynamicsDB = null;
 let _cnn = null;
 
+// P3.A — index geometry. `_indexKind` is the *active* backend ('euclidean' or
+// 'hyperbolic'), flipped at ready() time based on the `?hhnsw=1` URL flag OR
+// by the A/B toggle strip calling setIndexKind() at runtime. We always boot
+// the wasm in the background so flipping the toggle later doesn't stall on a
+// wasm-pack download; isHyperbolicReady() reports readiness for the UI.
+let _indexKind = 'euclidean';
+const VALID_INDEX_KINDS = ['euclidean', 'hyperbolic'];
+function pickIndexClass(kind) {
+  if (kind === 'hyperbolic' && isHyperbolicReady()) return HyperbolicVectorDB;
+  return VectorDB;
+}
+export function getIndexKind() { return _indexKind; }
+// Runtime swap: tears the stores down and rebuilds the index under the new
+// geometry from _brainMirror / _trackMirror / _dynamicsMirror. Persistence is
+// preserved because hydrate() always rebuilds from IDB anyway. Intentionally
+// synchronous (no IDB trip) so the A/B toggle feels instant.
+export function setIndexKind(kind) {
+  if (!VALID_INDEX_KINDS.includes(kind)) return false;
+  if (kind === 'hyperbolic' && !isHyperbolicReady()) {
+    console.warn('[ruvector] hyperbolic wasm not ready — staying on euclidean');
+    return false;
+  }
+  if (kind === _indexKind) return true;
+  _indexKind = kind;
+  rebuildIndicesFromMirror();
+  return true;
+}
+function rebuildIndicesFromMirror() {
+  if (!_brainDB || !_trackDB || !_dynamicsDB) return;
+  const IndexClass = pickIndexClass(_indexKind);
+  _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
+  _trackDB = new IndexClass(TRACK_DIM, 'cosine');
+  _dynamicsDB = new IndexClass(DYNAMICS_DIM, 'cosine');
+  for (const [id, { vector, meta }] of _trackMirror) {
+    _trackDB.insert(vector, id, meta || {});
+  }
+  for (const [id, { vector, meta }] of _dynamicsMirror) {
+    _dynamicsDB.insert(vector, id, meta || {});
+  }
+  for (const [id, { vector, meta }] of _brainMirror) {
+    _brainDB.insert(vector, id, meta || {});
+  }
+}
+
 // Dynamics retrieval toggle. Default off per P1.C plan: adding the extra
 // similarity term shifts seeding behaviour, so we keep it opt-in and let the
 // panel checkbox drive it. `_queryDynamicsVec` is set by callers (main.js /
@@ -155,10 +208,26 @@ let _persistInFlight = null;
 export function ready() {
   if (_ready) return _ready;
   _ready = (async () => {
+    // P3.A — boot hyperbolic wasm in parallel with the Euclidean / CNN
+    // inits. We always load it so the A/B toggle can flip to hyperbolic
+    // without a cold-start stall, even when the URL flag isn't set.
+    // `?hhnsw=1` flips the default kind at init time; the toggle can still
+    // override later. This mirrors the pattern already used for `?rv=0`.
+    const hyperbolicPromise = loadHyperbolic();
+    let wantHyperbolic = false;
+    try {
+      if (typeof window !== 'undefined' && typeof URLSearchParams === 'function') {
+        const usp = new URLSearchParams(window.location.search || '');
+        wantHyperbolic = usp.get('hhnsw') === '1';
+      }
+    } catch (_) { /* ignore — fall back to euclidean */ }
     await Promise.all([initVec(), initCnn()]);
-    _brainDB = new VectorDB(FLAT_LENGTH, 'cosine');
-    _trackDB = new VectorDB(TRACK_DIM, 'cosine');
-    _dynamicsDB = new VectorDB(DYNAMICS_DIM, 'cosine');
+    try { await hyperbolicPromise; } catch (_) { /* already logged */ }
+    _indexKind = (wantHyperbolic && isHyperbolicReady()) ? 'hyperbolic' : 'euclidean';
+    const IndexClass = pickIndexClass(_indexKind);
+    _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
+    _trackDB = new IndexClass(TRACK_DIM, 'cosine');
+    _dynamicsDB = new IndexClass(DYNAMICS_DIM, 'cosine');
     _cnn = new CnnEmbedder(); // default 224×224, 512-dim, L2-normalized
     // Kick off GNN + LoRA loads in parallel with hydrate(). Best-effort: if
     // either resolves to null, the corresponding code path silently falls back
@@ -499,7 +568,12 @@ export function info() {
       reranker: _rerankerPolicy,
       adapter: _adapterMode,
       dynamics: !!_useDynamics,
-      index: 'euclidean', // locked — P3.A (hyperbolic) not yet shipped
+      // P3.A — live index kind, flipped by setIndexKind() or the
+      // `?hhnsw=1` URL flag at init. `hyperbolicLoaded` tells the UI
+      // whether the toggle is even usable (if the wasm fails to load we
+      // keep the button disabled so clicks don't silently no-op).
+      index: _indexKind,
+      hyperbolicLoaded: isHyperbolicReady(),
     },
   };
 }
@@ -800,9 +874,13 @@ export function hydrateFromFixture(fixture) {
   _trackMirror.clear();
   _dynamicsMirror.clear();
   _observations.clear();
-  _brainDB = new VectorDB(FLAT_LENGTH, 'cosine');
-  _trackDB = new VectorDB(TRACK_DIM, 'cosine');
-  _dynamicsDB = new VectorDB(DYNAMICS_DIM, 'cosine');
+  // P3.A — respect the current index kind when rebuilding from a fixture.
+  // bench-hnsw.html calls setIndexKind('hyperbolic') before hydrateFromFixture
+  // to exercise the hyperbolic path against the same archive.
+  const IndexClass = pickIndexClass(_indexKind);
+  _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
+  _trackDB = new IndexClass(TRACK_DIM, 'cosine');
+  _dynamicsDB = new IndexClass(DYNAMICS_DIM, 'cosine');
   const toF32 = (v) => (v instanceof Float32Array) ? v : new Float32Array(v);
   for (const row of (fixture.tracks || [])) {
     const vec = toF32(row.vec);

@@ -108,6 +108,11 @@
       oneLiner: 'Parents point to children; cycles rejected at insert. Powers the 🌳 Lineage viewer.',
       loader: function () { return import('./chapters/lineage-dag.js'); },
     },
+    'hyperbolic-space': {
+      title: 'Hyperbolic HNSW — why trees fit better on a saddle',
+      oneLiner: 'Swap the flat-space neighbour graph for a Poincaré-ball one; trees embed with less distortion.',
+      loader: function () { return import('./chapters/hyperbolic-space.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.

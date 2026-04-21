@@ -135,9 +135,9 @@
     '    <span class="rv-ablabel">index</span>',
     '    <div class="rv-abseg" role="radiogroup" aria-label="Vector index geometry" data-rv="ab-index">',
     '      <button type="button" class="rv-abbtn" data-rv="ab-index-opt" data-value="euclidean" role="radio" aria-checked="true">euclidean</button>',
-    '      <button type="button" class="rv-abbtn rv-abbtn-locked" data-rv="ab-index-opt" data-value="hyperbolic" role="radio" aria-checked="false" disabled title="ships with P3.A (hyperbolic HNSW)">hyperbolic 🔒</button>',
+    '      <button type="button" class="rv-abbtn" data-rv="ab-index-opt" data-value="hyperbolic" role="radio" aria-checked="false" title="Swap to Poincaré-ball HNSW (P3.A)">hyperbolic</button>',
     '    </div>',
-    '    <span data-eli15="vectordb-hnsw" role="button" tabindex="0" aria-label="Learn: HNSW index (hyperbolic variant planned for P3.A)"></span>',
+    '    <span data-eli15="hyperbolic-space" role="button" tabindex="0" aria-label="Learn: hyperbolic HNSW — why trees fit better on a saddle"></span>',
     '  </div>',
     '</div>',
     // Dynamics trajectory toggle (P1.C). Off by default — the plan keeps
@@ -258,11 +258,21 @@
       last.dynamicsEnabled = !on; // invalidate existing dynamics-row memo
     });
   });
-  // Index buttons: only 'euclidean' is clickable today. The locked
-  // 'hyperbolic' button is disabled in HTML — this listener is defensive.
+  // P3.A — both euclidean and hyperbolic are live. setIndexKind rebuilds the
+  // three stores in-place from the mirrors (no IDB round-trip), so flipping
+  // the toggle is instant. When the hyperbolic wasm hasn't loaded yet,
+  // setIndexKind returns false and we leave the policy as-is; renderAbstrip
+  // gates availability on info.policy.hyperbolicLoaded so the button shows
+  // its unavailable affordance instead of a silent no-op.
   el.abIndexBtns.forEach(function (btn) {
     btn.addEventListener('click', function () {
       if (btn.disabled) return;
+      const value = btn.getAttribute('data-value');
+      const b = window.__rvBridge;
+      if (b && typeof b.setIndexKind === 'function') {
+        try { b.setIndexKind(value); }
+        catch (e) { console.warn('[rv-panel] setIndexKind failed', e); }
+      }
       last.indexPolicy = null;
     });
   });
@@ -657,6 +667,19 @@
       if (btn.getAttribute('data-value') === 'sona') {
         btn.classList.toggle('rv-abbtn-unavailable', !sonaReadyFlag);
         btn.title = sonaReadyFlag ? '' : 'SONA wasm did not load — micro-lora behaviour will be used';
+      }
+    });
+    // P3.A — hyperbolic availability mirror. setIndexKind refuses to flip
+    // when the wasm isn't loaded, so we surface that upfront instead of
+    // letting the click silently no-op.
+    const hbLoaded = !!pol.hyperbolicLoaded;
+    el.abIndexBtns.forEach(function (btn) {
+      if (btn.getAttribute('data-value') === 'hyperbolic') {
+        btn.disabled = !hbLoaded;
+        btn.classList.toggle('rv-abbtn-unavailable', !hbLoaded);
+        btn.title = hbLoaded
+          ? 'Swap to Poincaré-ball HNSW (P3.A)'
+          : 'Hyperbolic wasm did not load — staying on euclidean';
       }
     });
   }

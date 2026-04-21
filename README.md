@@ -57,8 +57,11 @@ These are the friction points you may hit on a fresh clone:
   highlighting the matching UI element on each step (←/→ arrow keys navigate;
   `ESC` exits). The Vector Memory panel also shows an **A/B toggle strip** —
   flip *reranker* (auto/none/ema/gnn), *track adapter* (off/micro-lora/sona),
-  and *dynamics key* (off/on) to feel how each layer contributes. The *index*
-  control is locked to euclidean; hyperbolic HNSW ships with P3.A.
+  *dynamics key* (off/on), and *index* (euclidean/hyperbolic) to feel how
+  each layer contributes. The hyperbolic index ships as an opt-in
+  experiment — default stays euclidean; `?hhnsw=1` boots it selected, or
+  flip the toggle at runtime. See `tests/bench-hnsw.html` for the
+  recall@5 / p99-latency head-to-head.
 - **Track preset picker** appears top-left during phase 1 (editor phase);
   pick one of 5 pre-authored tracks or draw your own with left/right click.
   Loading a preset clears `bestBrain`/`progress` (the old brain is bound to

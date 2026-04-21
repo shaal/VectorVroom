@@ -1,0 +1,31 @@
+{
+  "name": "ruvector-hyperbolic-hnsw-wasm",
+  "type": "module",
+  "collaborators": [
+    "RuVector Team"
+  ],
+  "description": "WebAssembly bindings for hyperbolic HNSW embeddings - hierarchy-aware vector search in the browser",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "files": [
+    "ruvector_hyperbolic_hnsw_wasm_bg.wasm",
+    "ruvector_hyperbolic_hnsw_wasm.js",
+    "ruvector_hyperbolic_hnsw_wasm.d.ts"
+  ],
+  "main": "ruvector_hyperbolic_hnsw_wasm.js",
+  "types": "ruvector_hyperbolic_hnsw_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ],
+  "keywords": [
+    "wasm",
+    "hyperbolic",
+    "poincare",
+    "hnsw",
+    "vector-search"
+  ]
+}
