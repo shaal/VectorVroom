@@ -35,9 +35,9 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** `P4.E` (`uiPanels.js` + `style.css`: render the "similar past brains" sidebar and the "this track resembles…" badge into the existing `#rv-panel`). P4.D is done — track embeddings land on `window.currentTrackVec` on every track-finalize, and `recommendSeeds` returns `{id, vector, meta, score, trackSim}` so the sidebar can read fitness/lineage from `meta` and show `trackSim` as the badge %.
+> **Now ready to claim:** any of `P5.A`–`P5.D` — all four are parallelizable. Suggested starting point is **P5.A** (badge animation + 4s fade) because the P4.E badge it refines is already visible in the panel and easy to iterate on visually. P4.E is done — `uiPanels.js` renders the panel (empty-state copy, info header, badge, sidebar) and polls the bridge at 500 ms, so P5 tasks only need to edit `uiPanels.js` + `style.css`.
 >
-> **Phase 4 heads-up (still relevant for P4.E):** (a) `window.NeuralNetwork` and `window.Level` bridges are in `index.html` after `network.js` loads — don't duplicate them. (b) The sidecar exposes `window.__rvUnflatten` (for classic-script consumers that need to turn a seed `Float32Array` into a `NeuralNetwork`). (c) `main.js` uses `window.currentTrackVec` as the sole track-embedding source; `buttonResponse.js::embedCurrentTrack` owns it and re-runs on every `phase=3` transition.
+> **Phase 5 heads-up:** (a) The panel's render loop in `uiPanels.js` is memoised against `{ready, brains, tracks, observations, phase, trackVecId, seedIdsKey}` — if you add a new input (e.g., a "last-reranked-at" timestamp for P5.C's GNN/EMA indicator), extend both the `last` struct and the fast-path comparison. (b) `recommendSeeds` returns `{id, vector, meta, score, trackSim}` per hit; `meta.parentIds` is already a list, so the P5.B sparkline can walk lineage without touching the bridge. (c) `window.NeuralNetwork`/`Level` + `window.__rvUnflatten` are still exposed on the window for any classic-script needs — don't duplicate those bridges.
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
@@ -103,7 +103,7 @@ P4.A is the only one that has zero deps on the bridge — claim it first if you 
 | P4.B | `AI-Car-Racer/index.html`: sidecar `<script type="module">` imports bridge and exposes `window.__rvBridge`; `main.js` left classic to preserve globals (see 2026-04-20 working note for rationale). Added `NeuralNetwork`/`Level` globalThis bridge and `<div id="rv-panel">`. | `[x]` | sess-2026-04-20-ship-task-b | P3.B | edited `index.html` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8765/AI-Car-Racer/index.html`: boot renders track editor, `[ruvector] ready — brains=0 tracks=0 obs=0` logs, `#rv-panel` present, `window.__rvBridge.info().ready === true`, classic globals (`phase`, `begin`, `road`, etc.) intact. |
 | P4.C | `AI-Car-Racer/main.js`: in `begin()`, replace the `localStorage.bestBrain` block (lines 50-58) with `bridge.recommendSeeds(currentTrackVec, k=10)` and seed cars per the PRD (elitism + light/heavy mutation + novelty). In `nextBatch()`, call `bridge.archiveBrain(bestCar.brain, fitness, currentTrackVec, gen, parents)` and `bridge.observe(...)`. Keep cold-start fallback (random init when archive empty). Honor `?rv=0` URL flag to disable bridge. | `[x]` | sess-2026-04-20-ship-task-c | P3.A, P3.B, P4.B | edited `main.js`; added `window.__rvUnflatten` to `index.html` sidecar | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8765/AI-Car-Racer/index.html`: cold start shows `brains=0`, `archiveBrain`→reload→`brains=1` (IDB round-trip), `recommendSeeds(null,10)` returns the archived `vec_0` as 92-dim vector, `begin()` on hydrated archive logs `[ruvector] seeded 10 cars from 1 retrievals (elite=1, light=4, heavy=4, novel=1)` — matches PRD split. `?rv=0` → `rvDisabled=true`, `bridgeReady()` false, `currentSeedIds=[]`, no seeded-log. |
 | P4.D | `AI-Car-Racer/buttonResponse.js`: at track-finalize (`nextPhase()` case 3, after `submitTrack()`), re-rasterize the track paths at 224×224 with thick strokes (do NOT `drawImage`-downscale the 3200×1800 canvas — 2-px lines become invisible), call `bridge.embedTrack(rgb, 224, 224)`, publish on `window.currentTrackVec`. | `[x]` | sess-2026-04-20-ship-task-d | P3.B, P4.B | edited `buttonResponse.js` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8767/AI-Car-Racer/index.html`: two rectangle tracks with ≤20px point jitter → sim=0.994 (>0.9 gate). Rectangle vs triangle+pentagon → sim=0.711. UI click-path Next→Next→Next → `phase=3`, `window.currentTrackVec` is Float32Array(512). Archiving a brain with the vec → `bridge.info().tracks` 0→1. |
-| P4.E | Add `AI-Car-Racer/uiPanels.js`: render the "similar past brains" sidebar and "this track resembles…" badge into `#rv-panel`. Add styles in `style.css` (or a new `rv-panel.css`). | `[ ]` |  | P4.B | `uiPanels.js`, css edits | Panel renders; badge appears on track-finalize when archive is non-empty |
+| P4.E | Add `AI-Car-Racer/uiPanels.js`: render the "similar past brains" sidebar and "this track resembles…" badge into `#rv-panel`. Add styles in `style.css` (or a new `rv-panel.css`). | `[x]` | sess-2026-04-20-ship-task-e | P4.B | `uiPanels.js`, `style.css` (+ one `<script src>` line in `index.html`) | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8769/AI-Car-Racer/index.html`: empty-archive → info "0 brains · 0 tracks · 0 obs · ema", badge hidden, empty-state copy. After archiving a brain + reload: sidebar row "#1 vec_0 50% fit 42.0 g0 p0". After Next→Next (phase=3): badge reads "This track is 51% similar to one you've trained on — loading 1 candidate brain as seeds.". `?rv=0`: info "disabled (?rv=0)" (muted), list explains disabled state, badge hidden. Screenshots at `docs/validation/screenshots/p4e-panel-{phase3,rv0}.png`. |
 
 ---
 
@@ -444,4 +444,92 @@ Sessions: append a dated entry below — don't edit prior entries.
       window.currentTrackVec from a main-loop tick. Either works.
     - Archive will be empty on first run: recommendSeeds returns []. Hide
       the badge in that case rather than showing "0% match".
+
+2026-04-20 · sess-ship-task-e · P4.E complete.
+  Work:
+    - AI-Car-Racer/uiPanels.js (classic script, ~170 LOC). IIFE that mounts
+      header / badge / list into #rv-panel, polls at 500 ms, and only
+      re-renders when one of {bridge-ready, brains, tracks, observations,
+      phase, trackVec identity, currentSeedIds} changes. recommendSeeds()
+      runs at most once per tick and only when the memoised inputs move.
+    - style.css appended: #rv-panel placed in grid-column 2 / grid-row 2
+      (portrait media query moves it to row 3); scoped .rv-* class tree.
+      No new CSS file — styles live alongside existing ones to keep the
+      link count unchanged.
+    - index.html: one new <script src="uiPanels.js"> after main.js.
+      Placement matters: it must run after main.js so `phase`,
+      `rvDisabled`, and `currentSeedIds` globals exist when the IIFE does
+      its initial paint.
+
+  Deliberate design choices:
+    - Classic script (no ESM). The panel reads `phase`, `rvDisabled`,
+      `currentSeedIds`, `currentTrackVec` — all globals owned by
+      classic-script files. Making uiPanels a module would mean accessing
+      them as `window.*` which buys nothing; staying classic matches the
+      convention P4.B established.
+    - 500 ms polling vs. event-driven. Three separate files mutate the
+      inputs (main.js writes seed ids + phase, buttonResponse.js writes
+      currentTrackVec, the bridge mutates via async persist). An event
+      bus would add coupling; cheap memoised polling skips DOM writes
+      when nothing moved.
+    - Memo key on `trackVec` is identity (Float32Array reference), not
+      value. embedCurrentTrack() always assigns a fresh Float32Array on
+      phase=3 transitions, so identity is a free + sufficient change
+      detector (vs. a 512-float content compare).
+    - Badge visibility rule: `phase >= 3 && trackVec && seeds.length>0`.
+      Intentionally hidden on phase 1–2 and on an empty archive — the
+      panel as a whole stays visible (showing the empty-state copy in
+      the sidebar) so users see the feature exists even before training.
+
+  Verification (agent-browser, headless Chromium, http://127.0.0.1:8769):
+    - Boot clean: no page errors; console shows `[brainCodec] self-check
+      passed`, two expected wasm HNSW-fallback warnings, then
+      `[ruvector] ready — brains=0 tracks=0 obs=0`.
+    - Empty archive, phase=1:
+        info = "0 brains · 0 tracks · 0 obs · ema"
+        badge hidden
+        list = "No past brains yet — train once to populate the archive."
+    - After synthetic archiveBrain(new NeuralNetwork([6,8,4]), 42,
+      sin-wave Float32Array(512)) + persist + reload, phase=1:
+        info = "1 brain · 1 track · 0 obs · ema"
+        badge hidden (currentTrackVec not set at phase=1)
+        list row = "#1 vec_0 50% fit 42.0 g0 p0"
+    - Click Next → Next → phase=3:
+        currentTrackVec is Float32Array(512)
+        badge visible = "This track is 51% similar to one you've trained
+          on — loading 1 candidate brain as seeds."
+        list row updates to "#1 vec_0 51% fit 42.0 g0 p0"
+      The 51% is genuine (cosine ≈ 0.02 between the synthetic sin-vec and
+      the real rectangle-rendered vec, mapped by 0.5+0.5*sim), confirming
+      the trackVec is flowing end-to-end, not hardcoded.
+    - ?rv=0:
+        info = "disabled (?rv=0)" with rv-info-muted styling
+        list = "Bridge disabled via ?rv=0 — archive not consulted
+          this session."
+        badge hidden
+    - Screenshots: docs/validation/screenshots/p4e-panel-phase3.png and
+      p4e-panel-rv0.png captured.
+    - Archive reset via window.__rvBridge._debugReset() at the end so
+      no synthetic entries leak into future sessions.
+
+  Notes for P5:
+    - P5.A (fade-out badge) has two hooks: either add a CSS transition
+      on .rv-badge[hidden] → opacity, or add a short-lived timer in
+      uiPanels.js's renderBadge when the badge transitions from hidden
+      to visible. The latter gives you control over the "fades after 4s"
+      behaviour the PRD calls for.
+    - P5.B (lineage sparkline per seed): _brainMirror is keyed by id and
+      each entry carries meta.parentIds. A backward walk from the
+      displayed seed through parentIds gives the lineage; render as an
+      inline SVG sparkline inside .rv-item. No bridge changes needed.
+    - P5.C (GNN/EMA indicator): the bridge exposes info().gnn (always
+      false for now — P2.C is [!]) and info().observations. Simplest
+      indicator is a line in .rv-header when observations > 0:
+      "EMA reranker: N obs, last shift +/- M positions". The "last
+      shift" metric requires uiPanels to remember the previous
+      recommendSeeds result and diff against the current one — the
+      memoised `last` struct is the natural place to extend.
+    - P5.D (grapher.js annotations): unrelated to uiPanels.js. Use
+      main.js's `generation` global + currentSeedIds to flag the
+      seeded generations in the fitness-over-time plot.
 ```

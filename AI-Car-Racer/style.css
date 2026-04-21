@@ -174,3 +174,99 @@ h1{
     font-family: Verdana, sans-serif;
     /* white-space:nowrap; */
 }
+
+/* ─── Vector-memory panel (P4.E) ─────────────────────────────────────── */
+#rv-panel {
+    grid-column: 2 / span 1;
+    grid-row: 2 / span 1;
+    align-self: start;
+    margin: .5em 0 1em 0;
+    padding: .6em .8em;
+    background: #fafafa;
+    border-radius: .5em;
+    box-shadow: 0 0 .3em .05em rgba(0,0,0,.18);
+    font-family: Verdana, sans-serif;
+    font-size: .82rem;
+    color: #333;
+    min-width: 20ch;
+    max-height: 40vh;
+    overflow-y: auto;
+}
+@media (max-aspect-ratio: 1/1){
+    #rv-panel {
+        grid-column: 2 / span 1;
+        grid-row: 3 / span 1;
+    }
+}
+.rv-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid #e0d3bd;
+    padding-bottom: .35em;
+    margin-bottom: .4em;
+}
+.rv-title {
+    font-weight: bold;
+    color: #d38b4b;
+    letter-spacing: .02em;
+}
+.rv-info {
+    font-size: .75rem;
+    color: #666;
+}
+.rv-info-muted { color: #a07e5a; font-style: italic; }
+
+.rv-badge {
+    margin: .3em 0 .5em 0;
+    padding: .4em .55em;
+    background: #fff4e2;
+    border-left: 3px solid #d38b4b;
+    border-radius: .25em;
+    line-height: 1.3;
+    color: #824006;
+}
+.rv-badge[hidden] { display: none; }
+
+.rv-list-title {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #888;
+    margin: .4em 0 .2em 0;
+}
+.rv-list {
+    display: flex;
+    flex-direction: column;
+    gap: .2em;
+}
+.rv-empty {
+    color: #999;
+    font-style: italic;
+    padding: .2em 0;
+}
+.rv-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto auto auto;
+    gap: .45em;
+    align-items: baseline;
+    padding: .15em .25em;
+    background: #fff;
+    border-radius: .2em;
+    border: 1px solid #eee;
+    font-variant-numeric: tabular-nums;
+}
+.rv-rank { color: #d38b4b; font-weight: bold; }
+.rv-id {
+    color: #666;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .72rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+}
+.rv-sim { color: #2a7a2a; font-weight: bold; }
+.rv-fit { color: #333; font-size: .72rem; }
+.rv-gen { color: #555; font-size: .72rem; }
+.rv-parents { color: #888; font-size: .72rem; }
