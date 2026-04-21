@@ -35,9 +35,9 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** P2.A, P2.B, P2.C (vendoring — three parallel sessions), P3.A (codec — independent of vendoring).
+> **Now ready to claim:** `P3.B` (bridge — single session; `P2.A`, `P2.B`, `P3.A` are all `[x]`; `P2.C` is `[!]` so the bridge wires the EMA-reranker fallback path), and `P4.A` (delete `networkArchive.js` — one-line, no deps).
 >
-> **Recommended fan-out for first wave:** open 4 sessions, one per `P2.A / P2.B / P2.C / P3.A`. The bridge (`P3.B`) becomes claimable as soon as `P2.A` and `P2.B` are both `[x]`.
+> **Phase 4 heads-up:** because `network.js` declares `NeuralNetwork`/`Level` as classic-script top-level classes, those bindings are NOT on `globalThis`. Phase 4 `index.html` edits must add a one-line bridge after `network.js` loads: `<script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>`. Without it, `brainCodec.unflatten` (a module) cannot see the class. Validation page at `docs/validation/phase2-verify.html` is the reference pattern.
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
@@ -62,9 +62,9 @@ All three rows below have **no shared files** and **no order dependency** — fa
 
 | ID | Task | Status | Owner | Depends on | Outputs | Verification |
 |---|---|---|---|---|---|---|
-| P2.A | Build `ruvector-wasm` crate with `wasm-pack build --target web --release` and copy `pkg/` into `vendor/ruvector/ruvector_wasm/`. Commit the `.wasm` + glue `.js` + `.d.ts` (vendor pre-built). | `[ ]` |  | P1.1 | `vendor/ruvector/ruvector_wasm/{ruvector_wasm.js, ruvector_wasm_bg.wasm, *.d.ts, package.json}` | `import initVec, { VectorDB } from './vendor/ruvector/ruvector_wasm/ruvector_wasm.js'` resolves; `await initVec()` succeeds in browser; `new VectorDB(92, "cosine")` constructs without throwing |
-| P2.B | Copy contents of `ruvector/npm/packages/ruvector-cnn/` into `vendor/ruvector/ruvector_cnn_wasm/`. Already pre-built — no compilation. | `[ ]` |  | P1.1 | `vendor/ruvector/ruvector_cnn_wasm/{ruvector_cnn_wasm.js, ruvector_cnn_wasm_bg.wasm, *.d.ts, index.js}` | `import initCnn, { CnnEmbedder } from '...'` resolves; `await initCnn()` succeeds; `new CnnEmbedder()` constructs |
-| P2.C | (Optional) Vendor a pre-built `gnn-wasm` from `ruvector/npm/packages/`. If no pre-built artifact exists, mark `[!]` with reason and proceed — JS fallback is acceptable per PRD. | `[ ]` |  | P1.1 | `vendor/ruvector/ruvector_gnn_wasm/...` **OR** a `[!]` note explaining that the JS fallback path will be used | `await initGnn()` succeeds **OR** documented blocker that activates the EMA-reranker fallback |
+| P2.A | Build `ruvector-wasm` crate with `wasm-pack build --target web --release` and copy `pkg/` into `vendor/ruvector/ruvector_wasm/`. Commit the `.wasm` + glue `.js` + `.d.ts` (vendor pre-built). | `[x]` | sess-2026-04-21-mac (swarm) | P1.1 | `vendor/ruvector/ruvector_wasm/{ruvector_wasm.js, ruvector_wasm_bg.wasm, *.d.ts, package.json}` | `import initVec, { VectorDB } from './vendor/ruvector/ruvector_wasm/ruvector_wasm.js'` resolves; `await initVec()` succeeds in browser; `new VectorDB(92, "cosine")` constructs without throwing |
+| P2.B | Copy contents of `ruvector/npm/packages/ruvector-cnn/` into `vendor/ruvector/ruvector_cnn_wasm/`. Already pre-built — no compilation. | `[x]` | sess-2026-04-21-mac (swarm) | P1.1 | `vendor/ruvector/ruvector_cnn_wasm/{ruvector_cnn_wasm.js, ruvector_cnn_wasm_bg.wasm, *.d.ts, index.js}` | `import initCnn, { CnnEmbedder } from '...'` resolves; `await initCnn()` succeeds; `new CnnEmbedder()` constructs |
+| P2.C | (Optional) Vendor a pre-built `gnn-wasm` from `ruvector/npm/packages/`. If no pre-built artifact exists, mark `[!]` with reason and proceed — JS fallback is acceptable per PRD. | `[!]` | sess-2026-04-21-mac (swarm) | P1.1 | `vendor/ruvector/ruvector_gnn_wasm/...` **OR** a `[!]` note explaining that the JS fallback path will be used | `await initGnn()` succeeds **OR** documented blocker that activates the EMA-reranker fallback |
 
 ---
 
@@ -74,7 +74,7 @@ PRD ref: *Implementation phases → 3. Bridge + codec*; *Architecture overview*
 
 | ID | Task | Status | Owner | Depends on | Outputs | Verification |
 |---|---|---|---|---|---|---|
-| P3.A | Write `AI-Car-Racer/brainCodec.js`: `flatten(brain)` and `unflatten(float32, topology)` for the `[6, 8, 4]` topology (92 dims). Add a self-check at module load that round-trips a random brain and compares `feedForward` outputs. | `[ ]` |  | P1.1 | `AI-Car-Racer/brainCodec.js` | `unflatten(flatten(b))` is structurally equal to `b`; `feedForward` produces identical outputs on a fixed input vector |
+| P3.A | Write `AI-Car-Racer/brainCodec.js`: `flatten(brain)` and `unflatten(float32, topology)` for the `[6, 8, 4]` topology (92 dims). Add a self-check at module load that round-trips a random brain and compares `feedForward` outputs. | `[x]` | sess-2026-04-21-mac (swarm) | P1.1 | `AI-Car-Racer/brainCodec.js` | `unflatten(flatten(b))` is structurally equal to `b`; `feedForward` produces identical outputs on a fixed input vector |
 | P3.B | Write `AI-Car-Racer/ruvectorBridge.js`: exports `ready()`, `archiveBrain(brain, fitness, trackVec, gen, parentIds)`, `recommendSeeds(trackVec, k)`, `embedTrack(canvasImageData)`, `observe(retrievedIds, outcomeFitness)`, `persist()`, `hydrate()`. Loads VectorDB + CnnEmbedder. If GNN package vendored, wire it; else use EMA-weighted in-JS reranker. | `[ ]` |  | P2.A, P2.B, P3.A | `AI-Car-Racer/ruvectorBridge.js` | Manual REPL: `await bridge.ready(); bridge.archiveBrain(b, 100, trackVec, 0, [])` then refresh page → `bridge.recommendSeeds(trackVec, 1)` returns the same vector (round-trips through IndexedDB) |
 
 ---
@@ -117,7 +117,7 @@ The PRD's *Verification* section lists six gates. Re-run the relevant ones whene
 - [ ] **Boot**: page loads, no console errors, both WASM modules log `[ruvector] ready` (after P2 + P3.B)
 - [ ] **Cold start**: empty archive → behaves identically to stock AI-Car-Racer (after P4.C)
 - [ ] **Archive round-trip**: `archiveBrain` → refresh → `recommendSeeds` returns the same vector (after P3.B)
-- [ ] **Codec**: `unflatten(flatten(b))` is structurally equal to `b`; `feedForward` outputs match (after P3.A)
+- [x] **Codec**: `unflatten(flatten(b))` is structurally equal to `b`; `feedForward` outputs match (after P3.A) — verified 2026-04-21 via `docs/validation/phase2-verify.html`, `feedForward` output `[1,0,1,1]` matches on both brains.
 - [ ] **Track similarity**: similar tracks → cosine sim > 0.9 (after P4.D)
 - [ ] **Seeded GA improves**: with seeding ON, reaches a target fitness in fewer generations than `?rv=0` on a repeat track (after P5)
 - [ ] **GNN effect** (only if P2.C succeeded): retrieved IDs cluster around productive ancestors after 20+ generations (after P5)
@@ -137,4 +137,55 @@ Sessions: append a dated entry below — don't edit prior entries.
     - The "track-finalize" hook is not obvious in roadEditor.js itself — likely in buttonResponse.js
       where phase transitions are wired. P4.D will need to grep for the phase=2 → phase=3 transition.
     - There's a `slider tests/` directory in the cloned repo not mentioned in the PRD; appears unused, leave it.
+
+2026-04-21 · sess-mac (swarm) · Phase 2 + P3.A complete (4-agent fan-out).
+  Results:
+    - P2.A [x]: wasm-pack build ran in ~44s (warm target/ cache — budget 3-8 min on cold).
+              `vendor/ruvector/ruvector_wasm/` now has glue JS (42 KB) + .wasm (237 KB) + .d.ts.
+              Verified in a real browser: `new VectorDB(92, "cosine")` constructs.
+    - P2.B [x]: CNN package copied (~52 KB wasm + 28 KB glue + 7 KB wrapper).
+              TWO upstream bugs patched in the vendored copy (see below).
+    - P2.C [!]: SKIPPED — no pre-built GNN package in ruvector/npm/packages/; the crate
+              ruvector-gnn-wasm depends on ruvector-gnn which transitively pulls rayon +
+              dashmap + parking_lot (rayon is a known wasm32 headache). Per PRD risk #2,
+              ruvectorBridge.js will use the in-JS EMA-reranker fallback. Probe path for
+              future re-attempts: vendor/ruvector/ruvector_gnn_wasm/ruvector_gnn_wasm.js
+              (matches cnn-wasm naming so bridge can lazy-probe with try/catch).
+    - P3.A [x]: brainCodec.js written. Float32Array(92). Layout: L0 biases(8), L0 weights
+              row-major 6x8 (48), L1 biases(4), L1 weights row-major 8x4 (32). Round-trip
+              feedForward verified identical outputs on fixed input [0.1..0.6].
+
+  Patches applied to vendored @ruvector/cnn (documented here so future vendor re-pulls
+  know what to reapply):
+    (1) index.js converted from CommonJS `module.exports = {...}` to ESM
+        `export { init, CnnEmbedder, ... }; export default init;` with a guarded CJS
+        tail for Node compatibility. Upstream is authored for Node+bundler only; in a
+        no-bundler browser context the `module` global throws ReferenceError at parse.
+    (2) index.js CnnEmbedder constructor (line ~79-80): swap the order of
+        `this._embeddingDim = wasmConfig.embedding_dim; this._inner = new wasm.WasmCnnEmbedder(wasmConfig);`.
+        Upstream reads the field AFTER the ctor consumes wasmConfig, which panics
+        "null pointer passed to rust" because wasm-bindgen has taken the inner ptr.
+
+  Notes for downstream sessions:
+    - `class NeuralNetwork {}` in network.js is declared in a classic script. Classic-
+      script top-level class/let/const declarations do NOT land on globalThis (only
+      `var` and `function` do). Modules cannot see them by bare name OR via
+      globalThis.NeuralNetwork. Fix: add one-line bridge in index.html right after
+      `<script src="network.js">`:
+        <script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>
+      The validation page docs/validation/phase2-verify.html is the reference pattern
+      and is kept in-tree for re-runs.
+    - P3.B (bridge) is now fully unblocked: P2.A [x], P2.B [x], P3.A [x], P2.C [!]
+      (EMA fallback path required).
+    - P4.A (delete networkArchive.js) is also unblocked and independent of the bridge —
+      a zero-risk parallel claim.
+
+  Verification trail:
+    - docs/validation/phase2-verify.html — re-runnable verifier (serves from repo root).
+    - docs/validation/screenshots/phase2-verify.png — captured "all green" state.
+    - Browser console output (headless Chromium via agent-browser):
+        [P3.A] OK — flatten length=92, feedForward match=true, o1=[1,0,1,1] o2=[1,0,1,1]
+        [P2.A] OK — initVec() + new VectorDB(92,"cosine") constructed (type=VectorDB)
+        [P2.B] OK — initCnn() + new CnnEmbedder() constructed; embeddingDim=512
+        [verify] done
 ```

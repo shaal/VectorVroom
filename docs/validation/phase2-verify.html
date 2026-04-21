@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Phase 2 verify</title></head>
+<body>
+<h1>Phase 2 / P3.A verification</h1>
+<pre id="out">running...</pre>
+<script src="../../AI-Car-Racer/utils.js"></script>
+<script src="../../AI-Car-Racer/network.js"></script>
+<script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>
+<script type="module">
+const out = document.getElementById('out');
+const lines = [];
+const log = (msg) => { lines.push(msg); out.textContent = lines.join('\n'); console.log(msg); };
+
+try {
+  const codec = await import('../../AI-Car-Racer/brainCodec.js');
+  const b = new globalThis.NeuralNetwork(codec.TOPOLOGY);
+  const vec = codec.flatten(b);
+  const b2 = codec.unflatten(vec);
+  const testInput = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+  const o1 = globalThis.NeuralNetwork.feedForward(testInput, b);
+  const o2 = globalThis.NeuralNetwork.feedForward(testInput.slice(), b2);
+  const eq = o1.length === o2.length && o1.every((v, i) => v === o2[i]);
+  log(`[P3.A] ${eq ? 'OK' : 'FAIL'} — flatten length=${vec.length} (expected 92), feedForward match=${eq}, o1=[${o1}] o2=[${o2}]`);
+} catch (e) {
+  log('[P3.A] FAIL: ' + (e && e.stack ? e.stack : e));
+}
+
+try {
+  const mod = await import('../../vendor/ruvector/ruvector_wasm/ruvector_wasm.js');
+  await mod.default();
+  const vdb = new mod.VectorDB(92, 'cosine');
+  log(`[P2.A] OK — initVec() + new VectorDB(92,"cosine") constructed (type=${vdb.constructor.name})`);
+} catch (e) {
+  log('[P2.A] FAIL: ' + (e && e.stack ? e.stack : e));
+}
+
+try {
+  const mod = await import('../../vendor/ruvector/ruvector_cnn_wasm/index.js');
+  await mod.init();
+  const emb = new mod.CnnEmbedder();
+  log(`[P2.B] OK — initCnn() + new CnnEmbedder() constructed; embeddingDim=${emb.embeddingDim}`);
+} catch (e) {
+  log('[P2.B] FAIL: ' + (e && e.stack ? e.stack : e));
+}
+
+log('[verify] done');
+</script>
+</body>
+</html>
