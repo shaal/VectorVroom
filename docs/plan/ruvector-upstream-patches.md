@@ -1,6 +1,10 @@
 # ruvector upstream patches — workflow concerns
 
-**Status:** open concern, not yet resolved. Raised during P2.A ship on 2026-04-21.
+**Status:** Option 3 shipped 2026-04-21 — the repo is now reproducible on
+its own. Option 1 (upstream PR) is the outstanding next step; that
+requires pushing to `shaal/ruvector` and opening a PR against
+`ruvnet/ruvector`, so it's gated on explicit user approval rather than
+sitting in the backlog forever. See "Decision needed" at the bottom.
 
 ---
 
@@ -183,23 +187,69 @@ disappears — the emergency bunker option.
 
 ---
 
-## Decision needed
+## What shipped (2026-04-21)
 
-Who makes it and when:
+**Option 3 is live.** `scripts/ruvector-patches/sona-find-patterns.patch`
+holds the 40-line diff; `scripts/vendor-ruvector.sh` applies it before
+each build and reverts it on exit (idempotent: re-running against an
+already-patched tree detects the state via `git apply -R --check` and
+skips). `VENDORED.md` now lists applied patches in its own section, so
+any future reader of a vendored crate can tell at a glance what we
+diverge from upstream on. `scripts/ruvector-patches/README.md` documents
+the workflow for adding a second patch.
 
-- **Blocking today:** nothing. The current vendored WASM works; the
-  `-dirty` note in `VENDORED.md` is visible if anyone looks.
-- **Blocking next time ruvector has a bug we need fixed:** we'll have to
-  pick one of the above to avoid piling up a second informal patch.
-- **A soft trigger:** anything that changes `~/code/utilities/ruvector/`
-  (a `git pull`, a `cargo clean`, a laptop migration). If that tree ever
-  resets, the committed WASM still works (it's already built), but the
-  next re-vendor will regress.
+Why Option 3 first rather than jumping straight to Option 1 or 2:
+- **Option 3 is fully local.** No coordination with upstream, no GitHub
+  push, no fork-drift maintenance. Solves the reproducibility concern
+  *today*.
+- **Option 1 isn't a substitute** — it has PR-review latency and the
+  maintainers might want the fix reshaped. While that conversation
+  runs, Option 3 keeps us unblocked.
+- **Option 2 (fork-pin)** was tempting because the user already has
+  `shaal/ruvector` as a fork remote, but the fork's `main` is ahead of
+  `ruvnet/ruvector` by unrelated NAPI-binary bot commits. Branching
+  our patch on that head would entangle us with commits that weren't
+  user-written. A direct PR against origin is cleaner when we do go
+  external.
 
-Preferred starting move: **Option 1 first, Option 2 as plan B.** Send
-the `get_patterns` fix as an upstream PR; if it merges within a
-reasonable window, re-vendor from clean and retire this doc. If not,
-fork and pin.
+Verified end-to-end with a round-trip test on the upstream tree:
+clean → apply → dirty → reverse → clean, with five unrelated dirty
+files (`mcp-brain-server/*`, `learning-wasm/lora.rs`,
+`docs/research/...`) preserved untouched throughout.
+
+---
+
+## Decision needed (now that Option 3 is in place)
+
+**Blocking today:** nothing. Repo is reproducible on its own.
+
+**Next step pending user approval — Option 1 (upstream PR):**
+- Target: `ruvnet/ruvector`, against `main` (upstream is active; most
+  recent commit is days old as of this doc).
+- Push branch: `shaal/ruvector` (fork already configured as `fork`
+  remote in `~/code/utilities/ruvector/`).
+- Suggested branch name: `fix/sona-ephemeral-get-patterns`.
+- Suggested PR title: "fix(sona): `EphemeralAgent::get_patterns` returned
+  empty; expose `find_patterns(query, k)` + wasm binding".
+- PR body should lead with: the stub-shape nature of the bug
+  (`find_patterns(&[], 0)` always returns empty), the resulting invisible
+  regression (panels populate only via `getStats`, so empty is silent),
+  and the minimal surface-area fix (delegate to `get_all_patterns()`;
+  add public `find_patterns(query, k)` method + `wasm_bindgen` binding).
+
+Gate: this step requires pushing to `shaal/ruvector` and opening a
+public PR, so a future session should surface this checklist to the
+user and wait for explicit approval before running `git push fork …`
+or `gh pr create`. Once the PR merges, delete
+`scripts/ruvector-patches/sona-find-patterns.patch`, bump the vendored
+commit, and retire this doc.
+
+**Soft trigger for re-visiting:** any session that needs to patch
+ruvector *again* should add a second patch under
+`scripts/ruvector-patches/` rather than leaving the upstream tree
+dirty — Option 3 is scaled for that case. But >2 patches starts to
+feel heavy; at that point, re-evaluate Option 2 (fork-pin) as the
+maintenance model.
 
 ---
 
@@ -208,12 +258,14 @@ fork and pin.
 If a future Claude Code session picks this up, the minimum context it
 needs:
 
-- P2.A shipped with vendored WASM built from a dirty upstream tree.
-- The patch touches `crates/sona/src/training/federated.rs` (line ~234)
-  and `crates/sona/src/wasm.rs` (inside `impl WasmEphemeralAgent`).
-- The patch is recoverable via `git diff` in `~/code/utilities/ruvector/`
-  if the tree is still dirty, OR by regenerating it from the code in
-  this repo's vendored `vendor/ruvector/sona/ruvector_sona.js` (search
-  for `wasmephemeralagent_findPatterns`).
-- We need a decision between Options 1–4 above before taking the next
-  ruvector patch.
+- **Option 3 is shipped** (patch file + vendor-script integration +
+  VENDORED.md footer). The repo is reproducible; the local ruvector
+  tree's dirty state no longer matters for build correctness.
+- The patch file `scripts/ruvector-patches/sona-find-patterns.patch`
+  is the authoritative record of what we carry over upstream.
+- **Option 1 (upstream PR) is staged but not executed** — wait for
+  user approval to push and open. See "Decision needed" above for
+  the PR-ready checklist.
+- If a *second* ruvector bug needs fixing, add a second `.patch` file
+  to `scripts/ruvector-patches/` following the workflow in that
+  directory's `README.md`. Don't re-introduce a dirty-tree dependency.

@@ -1,0 +1,40 @@
+diff --git a/crates/sona/src/training/federated.rs b/crates/sona/src/training/federated.rs
+index eaf76d05..a95943f1 100644
+--- a/crates/sona/src/training/federated.rs
++++ b/crates/sona/src/training/federated.rs
+@@ -232,7 +232,12 @@ impl EphemeralAgent {
+ 
+     /// Get learned patterns from agent
+     pub fn get_patterns(&self) -> Vec<LearnedPattern> {
+-        self.engine.find_patterns(&[], 0)
++        self.engine.get_all_patterns()
++    }
++
++    /// Find top-k patterns most similar to a query embedding
++    pub fn find_patterns(&self, query: &[f32], k: usize) -> Vec<LearnedPattern> {
++        self.engine.find_patterns(query, k)
+     }
+ 
+     /// Export agent state for federation
+diff --git a/crates/sona/src/wasm.rs b/crates/sona/src/wasm.rs
+index 398561d4..d6658429 100644
+--- a/crates/sona/src/wasm.rs
++++ b/crates/sona/src/wasm.rs
+@@ -523,6 +523,17 @@ impl WasmEphemeralAgent {
+         let patterns = self.inner.get_patterns();
+         serde_wasm_bindgen::to_value(&patterns).unwrap_or(JsValue::NULL)
+     }
++
++    /// Find top-k patterns most similar to a query embedding
++    ///
++    /// # Arguments
++    /// * `query_embedding` - Query vector as Float32Array
++    /// * `k` - Number of patterns to return
++    #[wasm_bindgen(js_name = findPatterns)]
++    pub fn find_patterns(&self, query_embedding: Vec<f32>, k: usize) -> JsValue {
++        let patterns = self.inner.find_patterns(&query_embedding, k);
++        serde_wasm_bindgen::to_value(&patterns).unwrap_or(JsValue::NULL)
++    }
+ }
+ 
+ /// WASM-compatible Federated Coordinator
