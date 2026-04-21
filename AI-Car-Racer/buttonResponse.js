@@ -12,8 +12,41 @@ function save(){
     else{
         localStorage.setItem("progress",JSON.stringify([fastLap]));
     }
+    // P5.D: record per-batch graph annotations parallel to progress[]. Two
+    // signals per generation: (1) was this batch initialised from the vector
+    // archive (currentSeedIds non-empty); (2) how much did the top-K seed
+    // ordering shift vs the previous batch (captures EMA-reranker effect of
+    // the prior observe() call plus any archive-update reshuffle).
+    var seeded = (typeof currentSeedIds !== 'undefined' && currentSeedIds && currentSeedIds.length > 0);
+    var prev = (typeof window.__rvLastSeedIdsForGraph !== 'undefined' && window.__rvLastSeedIdsForGraph) || null;
+    var curr = seeded ? currentSeedIds : [];
+    var shift = prev ? rankShiftForGraph(prev, curr) : 0;
+    window.__rvLastSeedIdsForGraph = curr.slice();
+    var annArr = localStorage.getItem("rvAnnotations") ? JSON.parse(localStorage.getItem("rvAnnotations")) : [];
+    annArr.push({ seeded: seeded, shift: shift });
+    localStorage.setItem("rvAnnotations", JSON.stringify(annArr));
+
     localStorage.setItem("oldBestBrain",(localStorage.getItem("bestBrain")));
     localStorage.setItem("bestBrain",JSON.stringify(bestCar.brain));
+}
+
+// Spearman's-footrule shift over the union of top-K ids (mirrors the
+// computeRankShift in uiPanels.js used by the P5.C reranker indicator).
+// Ids present in only one list count as rank K, so a drop-out from
+// position i and a fresh promotion into position i both contribute K-i.
+function rankShiftForGraph(prev, curr){
+    if (!prev.length && !curr.length) return 0;
+    var K = Math.max(prev.length, curr.length);
+    var prevIdx = new Map(); for (var i=0;i<prev.length;i++) prevIdx.set(prev[i], i);
+    var currIdx = new Map(); for (var j=0;j<curr.length;j++) currIdx.set(curr[j], j);
+    var union = new Set(); prev.forEach(function(id){union.add(id);}); curr.forEach(function(id){union.add(id);});
+    var sum = 0;
+    union.forEach(function(id){
+        var pi = prevIdx.has(id) ? prevIdx.get(id) : K;
+        var ci = currIdx.has(id) ? currIdx.get(id) : K;
+        sum += Math.abs(pi - ci);
+    });
+    return sum;
 }
 function restoreOldBrain(){
     localStorage.setItem("bestBrain", localStorage.getItem("oldBestBrain"));
@@ -62,6 +95,8 @@ function deleteLastPoint(){
 function resetTrainCount(){
     localStorage.setItem("trainCount", JSON.stringify(0));
     localStorage.setItem("progress", JSON.stringify([]));
+    localStorage.setItem("rvAnnotations", JSON.stringify([]));
+    window.__rvLastSeedIdsForGraph = null;
 }
 function nextPhase(){
     phase+=1;

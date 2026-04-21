@@ -35,7 +35,7 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** `P5.D` only (final task in Phase 5). **P5.A + P5.B + P5.C are done.** P5.C added `info().observationEvents` (sum of per-id counts, ticks on every `observe()` call including repeats on the same id), a Spearman's-footrule `computeRankShift(prev, curr)` over the top-K union, and a `.rv-reranker` line rendered under the header that reads *"EMA reranker: N observations (M brains) · last shift K positions"*. The panel's render memo (`last` struct + fast-path compare) was extended with `observationEvents` so repeat observes don't fall through the fast path. `info().observations` kept its original semantics (distinct brain ids) for backwards-compat with existing logs.
+> **All Phase-5 tasks done.** P5.D landed three small files of changes (`grapher.js`, `buttonResponse.js`, `main.js`) plus one screenshot. The annotated graph now overlays cyan dots ("seeded from archive" — generations where `recommendSeeds` returned non-empty) and amber upward ticks ("reranker shift" — top-K seed-ordering displacement vs the previous batch, scaled by magnitude with an 18px cap). Annotations persist in `localStorage.rvAnnotations` parallel to `localStorage.progress` and are recorded inside `save()` so they stay length-aligned even with the manual "Save Best and Restart" button. `graphProgress()` is now also called from `nextBatch()` so the chart updates live during training rather than only on phase-4 (re)entry.
 >
 > **Phase 5 heads-up:** (a) The panel's render loop in `uiPanels.js` is memoised against `{ready, brains, tracks, observations, phase, trackVecId, seedIdsKey}` — if you add a new input (e.g., a "last-reranked-at" timestamp for P5.C's GNN/EMA indicator), extend both the `last` struct and the fast-path comparison. (b) `recommendSeeds` returns `{id, vector, meta, score, trackSim}` per hit. (c) `window.NeuralNetwork`/`Level` + `window.__rvUnflatten` are still exposed on the window for any classic-script needs — don't duplicate those bridges. (d) **P5.A pattern for one-shot CSS animations:** uiPanels.js uses `remove-class → force reflow (`void el.offsetWidth`) → re-add class` to restart `@keyframes` from frame 0, and listens for `animationend` to flip state after. Reuse this if P5.C wants the GNN/EMA indicator to pulse on observations tick. (e) **P5.B added `bridge.getLineage(id, maxDepth=6)`** — returns `[{id, fitness, generation}, ...]` oldest→newest, walks the highest-fitness parent at each step, visited-set + depth-cap both protect against cycles. Use this for any ancestry-aware rendering rather than walking `_brainMirror` from the UI. (f) **Narrow-sidebar gotcha**: the panel is in `grid-column: 2` and shares vertical space with the button strip; a single-row grid of many columns (>6) clips off the right edge. Prefer a two-row layout (header fields + a bottom row for visuals). The P5.B sidebar is the reference pattern — see `.rv-item-top` / `.rv-item-bottom` in `style.css`.
 
@@ -118,7 +118,7 @@ These items are independent of each other — each touches a different UI afford
 | P5.A | Track-match badge text & animation: *"This track is N% similar to one you've trained on — loading K best candidate brains as seeds."* Numbers come from the cosine similarity returned by `embedTrack` + `recommendSeeds`. | `[x]` | sess-2026-04-20-ship-task-5a | P4.D, P4.E | edits in `uiPanels.js`, `style.css` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8780/AI-Car-Racer/index.html`: driven to phase=3, badge shows correct 55% + "1 candidate brain" (singular). Sampled opacity at 200ms resolution across full animation: fade-in 0→1 in ~500ms, holds at 1.000 for ~3.8s, fades 1→0 in ~400ms, `animationend` sets `hidden=true` at ~4966ms. Observations-tick mid-hold (0→1) does NOT restart animation — identity guard works. Screenshot: `docs/validation/screenshots/p5a-badge-holding.png`. |
 | P5.B | "Similar past brains" sidebar: per seed, show fitness, fastest lap, generation, and a tiny sparkline of its lineage. | `[x]` | sess-2026-04-20-ship-task-5b | P4.C, P4.E | edits in `uiPanels.js`, `style.css`, `ruvectorBridge.js`, `main.js` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8790/AI-Car-Racer/index.html`: synthetic 3-brain lineage chain renders as "#1 50% fit 52.0 11.07s g2 p2 / LINEAGE [3pt-polyline]", "#2 fit 35.0 14.22s g1 p1 / [2pt-line]", "#3 fit 20.0 18.50s g0 p0 / [single-dot]". Legacy brain (no fastestLap meta) → lap renders `—`. `getLineage(id, 3)` truncates an 8-deep chain to the 3 newest; multi-parent walker picks fit=99 ancestor over fit=5. `?rv=0` unchanged. Phase-3 flow: badge + lap=12.34s + sparkline all present. Screenshots: `docs/validation/screenshots/p5b-sidebar-lineage.png`, `p5b-phase3-lap.png`. |
 | P5.C | GNN-observations indicator (or EMA-reranker indicator if P2.C was skipped): "GNN observations: N · last reranking shifted top-K by M positions." | `[x]` | sess-2026-04-20-ship-task-5c | P4.C | edits in `uiPanels.js`, `ruvectorBridge.js` (`info().observationEvents`), `style.css` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8795/AI-Car-Racer/index.html`: empty archive → "EMA reranker: idle (awaiting first observation)"; single observe that swaps two seeds → "last shift 2 positions"; repeat observe on the same id → events counter ticks (1→2) and shift recomputes; zero-effect observe on already-top seed → "last shift 0 positions"; non-reranker reshuffle (new brain archived) leaves `lastShift` unchanged; `?rv=0` hides the line; phase=4 visibility confirmed; real `nextBatch()` end-to-end shows events 6→10→11 and shifts 10→1 across two generations. Screenshots: `docs/validation/screenshots/p5c-reranker-indicator.png`, `p5c-reranker-idle.png`, `p5c-reranker-disabled.png`. |
-| P5.D | Annotated fitness-over-generations graph in `grapher.js`: mark generations where `recommendSeeds` returned a non-empty result, and where the GNN reranker promoted/demoted a seed. | `[ ]` |  | P4.C | edits in `grapher.js` | Graph shows annotations on the right generations |
+| P5.D | Annotated fitness-over-generations graph in `grapher.js`: mark generations where `recommendSeeds` returned a non-empty result, and where the GNN reranker promoted/demoted a seed. | `[x]` | sess-2026-04-20-ship-task-5d | P4.C | edits in `grapher.js`, `buttonResponse.js`, `main.js` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8800/AI-Car-Racer/index.html`: per-batch annotations record into `localStorage.rvAnnotations` parallel to `progress[]`. Cold-start batch correctly records `{seeded:false, shift:0}`; subsequent batches with growing archive record `seeded:true` and shift values matching Spearman's-footrule arithmetic on the top-K transitions (1, 3, 5, 7 across batches 1-5 of the rich-data run). `?rv=0` produces all-zero annotations (no false positives). `resetTrainCount()` clears `rvAnnotations` + the in-memory `__rvLastSeedIdsForGraph` baseline. Annotations persist across reload and re-hydrate cleanly. `graphProgress()` now refreshes per `nextBatch()` (was previously only rendered on phase-4 entry). Hardened pre-existing renderer fragility: numeric filter on min/max math + lifted-pen across non-numeric entries (the default `fastLap='--'` would otherwise NaN-poison every y-coord and silently blank the chart). Screenshot: `docs/validation/screenshots/p5d-graph-annotations.png`. |
 
 ---
 
@@ -785,4 +785,114 @@ Sessions: append a dated entry below — don't edit prior entries.
       can be lifted out of uiPanels.js to a shared helper. But see
       the limitation above — to isolate EMA-only shift from
       archive-also shift, you'd need a bridge-internal snapshot.
+
+2026-04-20 · sess-ship-task-5d · P5.D complete. Phase 5 now fully done.
+  Work:
+    - grapher.js: extended `graphProgress()` to read a parallel
+      `localStorage.rvAnnotations` array and overlay two glyph types per
+      progress[] index — cyan filled dots ("seeded from archive") at
+      generations where `recommendSeeds` returned non-empty, amber
+      upward ticks ("reranker shift") at generations where the top-K
+      seed ordering moved vs the prior batch (length scaled by shift
+      magnitude, capped at 18px so a single big reshuffle doesn't
+      blow past the chart top). Tiny dark-backdrop legend in the
+      upper-left so glyphs decode without docs.
+    - buttonResponse.js: extended `save()` to push one annotation
+      record `{seeded, shift}` per call, lockstep with the existing
+      `progress[]` push. `seeded` reads `currentSeedIds.length > 0`
+      (the batch's actual recommendSeeds outcome). `shift` is
+      Spearman's-footrule displacement vs `window.__rvLastSeedIdsForGraph`
+      (the previous batch's seed IDs). Inlined a small `rankShiftForGraph`
+      helper that mirrors the `computeRankShift` semantics from
+      uiPanels.js. Extended `resetTrainCount()` to also clear
+      `rvAnnotations` and the in-memory baseline.
+    - main.js: call `graphProgress()` at the end of `nextBatch()`
+      so the chart refreshes live during training (was previously
+      only rendered once on phase-4 entry — the graph stayed stale
+      until you flipped phases).
+    - Pre-existing rendering bug discovered + hardened (in scope as
+      "make the graph actually render annotations"): `fastLap`
+      defaults to the string `"--"` until a lap completes, and
+      `Math.min("--", 12.5)` returns `NaN`, NaN-poisoning every y
+      coordinate and silently blanking the chart. Fix: filter to
+      numeric values for min/max math + lift the pen across
+      non-numeric entries in the line loop.
+
+  Design decision log:
+    - Why a parallel localStorage key (`rvAnnotations`) and not a
+      richer `progress[]` of objects? Per the P5.C plan note at line
+      ~783: `grapher.js` reads `progress[]` with
+      `Math.min(...progressArray)` and existing data in user
+      localStorage is flat numbers. Migrating the schema would
+      require either a one-shot transform or a polymorphic
+      reader; a parallel key is zero-risk.
+    - Why record annotations inside `save()` rather than `nextBatch()`?
+      `save()` is also fired by the manual "Save Best and Restart"
+      button — keying annotations off `nextBatch()` would create
+      off-by-one drift on the manual path. Index parity is the
+      simpler invariant.
+    - Why `rankShiftForGraph` inlined instead of lifting
+      `computeRankShift` out of uiPanels.js? The function is 10
+      lines, classic-script land has no module system, and lifting
+      would need either a third file or another global. Two small
+      cousins is cheaper than one shared symbol with extra
+      coordination.
+    - Why is "shift" measured at batch N a diff against batch N-1's
+      seeds (and not "EMA-only contribution")? Same documented
+      limitation as P5.C's reranker indicator — `nextBatch()`
+      runs `archiveBrain()` and `observe()` in the same sync block,
+      so any externally-visible shift on the next batch
+      mixes both effects. To isolate EMA-only shift you'd need a
+      bridge-internal snapshot inside `observe()`. The amber tick
+      label is "reranker shift" for the same reason the panel uses
+      that wording: it captures what changed for the user, not the
+      mechanism breakdown.
+
+  Verification (agent-browser, headless Chromium, :8800):
+    - Cold start (clean IDB + clean localStorage):
+      Batch 0 → progress[0]="--", annotations[0]={seeded:false,
+      shift:0}, brains 0→1, currentSeedIds=['vec_0']
+      Batch 1 → progress=12.5, annotations[1]={seeded:true, shift:1}
+        (footrule for prev=[] vs curr=['vec_0']: K=1, vec_0
+        contributes |1-0|=1)
+      Batch 2 → annotations[2]={seeded:true, shift:3}
+        (prev=['vec_0'] vs curr=['vec_1','vec_0']: K=2, vec_0
+        contributes 1, vec_1 contributes 2)
+      Batch 3 → annotations[3]={seeded:true, shift:5}
+        (prev=['vec_1','vec_0'] vs curr=['vec_2','vec_1','vec_0']:
+        K=3, vec_0:1, vec_1:1, vec_2:3)
+    - Rich-data run (6 synthetic batches with descending fastLaps
+      15.0→11.9): all 5 post-cold batches recorded seeded=true with
+      shift values [1,3,5,3,7]. The screenshot at
+      docs/validation/screenshots/p5d-graph-annotations.png
+      captures the curve descending across 13 naturally-fired
+      batches (animate() resumed driving once `begin()` reset
+      pause=false), with every point annotated.
+    - ?rv=0 path: rvDisabled=true, currentSeedIds stays [],
+      annotations all {seeded:false, shift:0}. No false
+      positives — the bridge isn't even consulted.
+    - Persistence: localStorage retained 4 progress + 4 annotation
+      entries across reload; chart re-rendered the flatline at
+      bottom (all values 10) and applied the seeded=false
+      annotations correctly (no glyphs, since all annotations
+      were neutral).
+    - resetTrainCount(): clears `progress`, `rvAnnotations`, and
+      `__rvLastSeedIdsForGraph` so a subsequent run starts fresh.
+
+  Notes for downstream sessions / future polish:
+    - The chart currently uses `fastLap` as the y-axis (per the
+      pre-existing `save()` semantics: `progressArray.push(fastLap)`).
+      The variable named `progressVal` is computed but never pushed.
+      If a future task wants to switch to fitness, redirect the
+      push to `progressVal` — annotation alignment will still hold
+      because the array still grows by 1 per `save()` call.
+    - The legend backdrop is `rgba(20,24,32,0.78)` to read against
+      both the white chart background AND the orange line. If the
+      site theme ever changes to a dark page background, swap to a
+      lighter backdrop or remove it.
+    - To isolate EMA-only shift from archive-update shift (the
+      documented limitation), the cleanest path is to snapshot the
+      top-K inside `observe()` in `ruvectorBridge.js` before the EMA
+      writes, then expose `info().lastEmaShift`. The graph would
+      then read THAT instead of computing a same-batch diff.
 ```

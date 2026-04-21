@@ -186,6 +186,14 @@ function nextBatch(){
     }
     generation += 1;
 
+    // P5.D: refresh the fitness-over-generations graph in-place so the
+    // newly-appended progress point + annotation render immediately,
+    // rather than waiting for a phase re-entry. graphProgress() is a
+    // no-op if the graph canvas isn't mounted yet (phase < 4).
+    if (typeof graphProgress === 'function'){
+        try { graphProgress(); } catch (e) { /* canvas not ready */ }
+    }
+
     begin();
     // location.reload();
 }
