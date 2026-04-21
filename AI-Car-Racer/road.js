@@ -21,9 +21,12 @@ class Road{
             [topLeft,topRight],
             [bottomLeft,bottomRight]
         ];
-        
+        // Broad-phase grids. Built in getTrack() once track/checkpoints are
+        // finalised; Sensor + Car consume via road.borderGrid / road.cpGrid.
+        this.borderGrid = null;
+        this.cpGrid = null;
     }
-    
+
     getTrack(){
         this.innerList = this.roadEditor.points;
         this.outerList=this.roadEditor.points2;
@@ -33,6 +36,23 @@ class Road{
         }
         for(let i=0; i<this.outerList.length; i++){
             this.borders.push([this.outerList[i],this.outerList[(i+1)%this.outerList.length]]);
+        }
+        this.rebuildGrids();
+    }
+
+    // Rebuild the broad-phase grids from whatever's currently in
+    // this.borders + this.checkPointList. Safe to call repeatedly.
+    rebuildGrids(){
+        const w = this.right - this.left;
+        const h = this.bottom - this.top;
+        this.borderGrid = new SpatialGrid(w, h, 200);
+        this.borderGrid.addSegments(this.borders);
+        // Checkpoints are stored as 2-point segments too — reuse the same
+        // grid abstraction but a separate index so sensor queries don't trip
+        // on checkpoint geometry and vice versa.
+        this.cpGrid = new SpatialGrid(w, h, 200);
+        if (this.checkPointList && this.checkPointList.length){
+            this.cpGrid.addSegments(this.checkPointList);
         }
     }
 

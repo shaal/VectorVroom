@@ -1,11 +1,7 @@
 const canvas=document.getElementById("myCanvas");
 const ctx = canvas.getContext("2d");
-// canvas.width=window.innerWidth*.8;
-// canvas.height=window.innerHeight;
 canvas.width = 3200;
 canvas.height = 1800;
-// canvas.style.width="100px";
-// canvas.style.height="100px";
 
 const startInfo = {x: canvas.width - canvas.width/10, y: canvas.height/2, startWidth: canvas.width/40};
 const road=new Road(startInfo);
@@ -13,33 +9,35 @@ var batchSize = 10;
 var nextSeconds = 15;
 var seconds;
 var mutateValue = .3;
-var cars;
 var playerCar;
 var playerCar2;
-let bestCar;
+// AI population lives entirely inside sim-worker.js. bestCar on main is a
+// proxy object updated from snapshot messages — it mirrors just enough of the
+// worker's real bestCar (position, angle, sensor state, controls, lap data)
+// for rendering, perf HUD, and the save()/archive paths in buttonResponse.js.
+var bestCar = null;
+var bestBrainFlat = null;          // Float32Array(92) — updated on genEnd
+var _cachedBestBrainObj = null;    // inflated lazily via __rvUnflatten
+var _cachedBestBrainSeq = 0;       // bumped whenever bestBrainFlat replaced
+var latestSnapshot = null;
 var invincible=false;
 var traction=0.5;
 
-var frameCount = 0;
+var frameCount = 0;                // mirrors worker's frameCount via snapshots
 var fastLap = '--';
 
-// Sim-speed multiplier. The physics loop targets `simSpeed × dt × 60` steps
-// per rAF via a fractional accumulator. Tying stepping to wall-dt instead of
-// rAF count means 1× matches real time regardless of monitor refresh rate
-// (the game was designed assuming 60Hz, so on 120Hz displays the old frame-
-// locked loop ran everything at 2×). Render still fires once per rAF — no
-// point drawing intermediate sim states at 20× or 100×.
+// Sim-speed multiplier. Worker owns the AI-car accumulator; main owns a
+// parallel accumulator for the 2 player cars only. They drift slightly under
+// load, but the UX impact is nil — AI training is what the user watches at
+// 100×; player cars are only driven during phase-3 physics tuning at 1×.
 var simSpeed = 1;
-var _simStepAccum = 0;
+var _simStepAccum = 0;             // retained name so setSimSpeed stays stable
 var _lastTickWall = performance.now();
 
-// Wall-clock anchor reset every begin(); used purely for the `Sim Time`
-// display so users can see sim-sec vs wall-sec diverge under the multiplier.
 var wallStart = performance.now();
 
 var acceleration = .05;
 var breakAccel = .05;
-// cars[0].update(road.borders, road.checkPointList);//create polygon
 let pause=true;
 var phase = 0; //0 welcome, 1 track, 2 checkpoints, 3 physics, 4 training
 var maxSpeed = 15;
@@ -60,77 +58,362 @@ var rvDisabled = new URLSearchParams(location.search).get('rv') === '0';
 var currentSeedIds = [];
 var generation = 0;
 
+// Perf overlay — always on, disable with `?perf=0`. Reported ~6 Hz so the
+// DOM write doesn't contaminate the draw bucket it's trying to measure.
+// Buckets:
+//   frameDelta — time BETWEEN successive rAF fires. This is the *real* FPS
+//     source: the browser caps rAF at the monitor refresh, so callback
+//     duration alone would report fake FPS > 60.
+//   sim        — worker's reported per-step sim time (AI cars only).
+//   draw       — road + cars render on main.
+//   rAF        — total main-thread callback duration; with the worker
+//                refactor this should stay tiny regardless of N.
+//   steps      — physics steps the worker ran since the last snapshot.
+var perfEnabled = new URLSearchParams(location.search).get('perf') !== '0';
+var perfBuf = { frameDelta: [], sim: [], draw: [], rAF: [], steps: [] };
+var _lastRafWall = 0;
+var perfBufCap = 60;
+var perfTick = 0;
+var perfHud = null;
+
+// Hitch detector. Fires when the wall-time gap between expected events
+// (snapshot arrival, rAF fire) exceeds HITCH_MS. This is the primary tool
+// for diagnosing the periodic "freeze every few seconds" — averages in the
+// perf buffer smooth over spikes and hide them. Hitches are kept in a
+// small ring and rendered in the HUD + logged to console. Disable with
+// `?hitch=0`.
+var hitchEnabled = new URLSearchParams(location.search).get('hitch') !== '0';
+var HITCH_MS = 80;
+var hitches = [];
+var HITCH_MAX = 6;
+var _lastSnapWall = 0;
+function recordHitch(kind, ms, extra){
+    if (!hitchEnabled) return;
+    var entry = { t: performance.now(), kind: kind, ms: ms, extra: extra || '' };
+    hitches.push(entry);
+    if (hitches.length > HITCH_MAX) hitches.shift();
+    try { console.warn('[hitch]', kind, ms.toFixed(1) + 'ms', extra || ''); } catch(_){}
+}
+function perfPush(key, v){
+    var arr = perfBuf[key];
+    arr.push(v);
+    if (arr.length > perfBufCap) arr.shift();
+}
+function perfAvg(arr){
+    if (!arr.length) return 0;
+    var s = 0;
+    for (var i = 0; i < arr.length; i++) s += arr[i];
+    return s / arr.length;
+}
+function perfEnsureHud(){
+    if (perfHud) return perfHud;
+    perfHud = document.createElement('div');
+    perfHud.id = 'perf-hud';
+    perfHud.style.cssText = 'position:fixed;top:8px;right:8px;z-index:99998;' +
+        'background:rgba(12,14,18,.88);color:#a8e6a0;padding:8px 10px;' +
+        'border-radius:4px;font:11px/1.35 ui-monospace,Menlo,monospace;' +
+        'pointer-events:none;min-width:170px;';
+    document.body.appendChild(perfHud);
+    return perfHud;
+}
+var RENDER_TOP_K = (function(){
+    var p = new URLSearchParams(location.search).get('topK');
+    var n = p ? parseInt(p, 10) : 32;
+    return (isFinite(n) && n >= 0) ? n : 32;
+})();
+var FULL_RENDER = new URLSearchParams(location.search).get('fullRender') === '1';
+
+// Step cap mirrors worker's MAX_STEPS — applied here only to the main-thread
+// player-car accumulator so a frozen tab coming back doesn't stampede 2
+// player cars through a thousand backlogged physics steps.
+var MAX_STEPS_PER_RAF = 60;
+
+// Player-car sensor stride. AI-car stride lives inside the worker.
+var SENSOR_STRIDE = 1;
+function computeSensorStride(){
+    if (simSpeed <= 2) return 1;
+    if (simSpeed <= 5) return 2;
+    if (simSpeed <= 20) return 3;
+    return 4;
+}
+
+function perfRender(){
+    if (!perfEnabled) return;
+    var hud = perfEnsureHud();
+    var frameDelta = perfAvg(perfBuf.frameDelta);
+    var sim = perfAvg(perfBuf.sim);
+    var draw = perfAvg(perfBuf.draw);
+    var work = perfAvg(perfBuf.rAF);
+    var steps = perfAvg(perfBuf.steps);
+    var fps = frameDelta > 0 ? (1000 / frameDelta).toFixed(1) : '--';
+    var nCars = latestSnapshot ? latestSnapshot.N : 0;
+    var fpsColor = '#a8e6a0';
+    if (frameDelta > 0){
+        var fpsNum = 1000 / frameDelta;
+        if (fpsNum < 30) fpsColor = '#f07070';
+        else if (fpsNum < 55) fpsColor = '#f0c060';
+    }
+    var hitchHtml = '';
+    if (hitchEnabled && hitches.length){
+        var nowT = performance.now();
+        hitchHtml = '<div style="margin-top:6px;border-top:1px solid #334;padding-top:4px;color:#f0c060;font-size:.95em;">hitches</div>';
+        for (var i = hitches.length - 1; i >= 0; i--){
+            var h = hitches[i];
+            var ago = ((nowT - h.t) / 1000).toFixed(1);
+            var col = h.ms > 300 ? '#f07070' : '#f0c060';
+            hitchHtml += '<div style="color:' + col + ';opacity:.9;">' +
+                h.ms.toFixed(0) + 'ms ' + h.kind +
+                (h.extra ? ' <span style="opacity:.7;">' + h.extra + '</span>' : '') +
+                ' <span style="opacity:.55;">-' + ago + 's</span></div>';
+        }
+    }
+    hud.innerHTML =
+        '<div style="color:#fff;margin-bottom:3px;"><b>perf</b></div>' +
+        '<div style="font-size:1.4em;line-height:1.1;color:' + fpsColor + ';">' + fps + ' <span style="font-size:.6em;opacity:.7;">fps</span></div>' +
+        '<div style="margin-top:4px;opacity:.85;">N=' + nCars + '</div>' +
+        '<div style="margin-top:3px;">sim   ' + sim.toFixed(2) + ' ms <span style="opacity:.55;font-size:.85em">(worker)</span></div>' +
+        '<div>draw  ' + draw.toFixed(2) + ' ms</div>' +
+        '<div>main  ' + work.toFixed(2) + ' ms</div>' +
+        '<div>steps ' + steps.toFixed(1) + '/snap</div>' +
+        hitchHtml;
+}
+
 function bridgeReady(){
     if (rvDisabled) return false;
     var b = window.__rvBridge;
     return !!(b && b.info && b.info().ready && window.__rvUnflatten);
 }
 
-function begin(){
-    seconds = nextSeconds;
-    pause=false;
-    playerCar = new Car(startInfo.x,startInfo.y,30,50,"KEYS",maxSpeed);
-    playerCar2 = new Car(startInfo.x,startInfo.y,30,50,"WASD",maxSpeed);
-    cars=generateCars(batchSize);
-    // cars[0].update(road.borders, road.checkPointList);//create polygon
-    frameCount=0;
-    wallStart = performance.now();
-    // Prime the accumulator to 1 so the first rAF after begin() is guaranteed
-    // to run at least one physics step. Without this, dt≈0 on the opening
-    // rAF yields stepsThisFrame=0, and the car-draw path then reads empty
-    // sensor.rays (rays are populated in update()) → TypeError kills the
-    // rAF chain and the whole training loop freezes silently.
-    _simStepAccum = 1;
-    _lastTickWall = performance.now();
-    currentSeedIds = [];
+// -----------------------------------------------------------------------------
+// Worker bootstrap + message plumbing
+// -----------------------------------------------------------------------------
+const simWorker = new Worker('sim-worker.js');
+var workerReady = false;
+var workerInited = false;
+var pendingBegin = null;
 
-    var seededFromBridge = false;
+simWorker.onmessage = (ev) => {
+    const m = ev.data;
+    switch (m.type){
+        case 'ready':
+            workerReady = true;
+            if (pendingBegin){ const pb = pendingBegin; pendingBegin = null; performBegin(pb.N); }
+            break;
+        case 'snapshot':
+            handleSnapshot(m);
+            break;
+        case 'genEnd':
+            handleGenEnd(m);
+            break;
+        case 'debug':
+            if (hitchEnabled && m.event === 'beginBuilt' && m.ms > 30){
+                recordHitch('workerBegin', m.ms, 'N=' + m.N);
+            }
+            break;
+    }
+};
+simWorker.onerror = (err) => {
+    console.error('[sim-worker] error', err.message || err, err.filename, err.lineno);
+};
+
+// bestCar identity epoch: the worker increments bestEpoch each time a new
+// car is promoted. Main creates a fresh proxy object on every change so the
+// dynamics embedder's identity-based reset (_owningCar !== car) fires
+// correctly at generation boundaries.
+var _bestProxyEpoch = -1;
+function handleSnapshot(m){
+    if (hitchEnabled){
+        const now = performance.now();
+        if (_lastSnapWall > 0){
+            const gap = now - _lastSnapWall;
+            if (gap > HITCH_MS) recordHitch('snapGap', gap);
+        }
+        _lastSnapWall = now;
+    }
+    latestSnapshot = m;
+    frameCount = m.frameCount;
+    if (m.bestIdx >= 0){
+        if (m.bestEpoch !== _bestProxyEpoch || !bestCar){
+            bestCar = makeBestCarProxy();
+            _bestProxyEpoch = m.bestEpoch;
+        }
+        updateBestCarProxy(bestCar, m);
+        // Sample rate: ~60Hz regardless of simSpeed. Old code ran recordFrame
+        // inside the per-step loop (so at simSpeed=100 × N=big, thousands of
+        // calls/sec); now it's one per snapshot. The temporal embedder summary
+        // stats don't need the extra resolution — spacing is uniform.
+        if (window.__rvDynamics){
+            try { window.__rvDynamics.recordFrame(bestCar); } catch (_) {}
+        }
+    }
+}
+
+function makeBestCarProxy(){
+    const proxy = {
+        x: 0, y: 0, angle: 0, damaged: false,
+        speed: 0, maxSpeed: 0,
+        checkPointsCount: 0, laps: 0, lapTimes: '--',
+        controls: { forward: false, left: false, right: false, reverse: false },
+        sensor: { rayCount: 5, rays: [], readings: [] }
+    };
+    // Lazy-inflated brain — save() and archiveBrain() both read bestCar.brain.
+    // We key the cache on _cachedBestBrainSeq so a stale inflate survives only
+    // until the next genEnd overwrites bestBrainFlat. Uses the inline
+    // inflater rather than window.__rvUnflatten so save() keeps working even
+    // when the ruvector sidecar failed to load (wasm 404, etc).
+    Object.defineProperty(proxy, 'brain', {
+        get(){
+            if (!bestBrainFlat) return null;
+            if (_cachedBestBrainObj && proxy.__brainSeq === _cachedBestBrainSeq){
+                return _cachedBestBrainObj;
+            }
+            _cachedBestBrainObj = inflateBrainInline(bestBrainFlat);
+            proxy.__brainSeq = _cachedBestBrainSeq;
+            return _cachedBestBrainObj;
+        },
+        configurable: true
+    });
+    return proxy;
+}
+
+function updateBestCarProxy(p, m){
+    const i = m.bestIdx;
+    const pos = m.positions;
+    p.x = pos[i*5];
+    p.y = pos[i*5 + 1];
+    p.angle = pos[i*5 + 2];
+    p.damaged = !!m.bestDamaged;
+    p.speed = m.bestSpeed;
+    p.maxSpeed = m.bestMaxSpeed;
+    p.checkPointsCount = m.bestCheckpoints;
+    p.laps = m.bestLaps;
+    p.lapTimes = (m.bestLapTimes && m.bestLapTimes.length) ? m.bestLapTimes : '--';
+    p.controls.forward = !!(m.bestControls && m.bestControls[0]);
+    p.controls.left    = !!(m.bestControls && m.bestControls[1]);
+    p.controls.right   = !!(m.bestControls && m.bestControls[2]);
+    p.controls.reverse = !!(m.bestControls && m.bestControls[3]);
+
+    // Rebuild rays/readings in the shape sensor.draw() and dynamicsEmbedder
+    // expect: rays = Array<[{x,y},{x,y}]>, readings = Array<null|{x,y,offset}>.
+    const rays = [], readings = [];
+    if (m.bestRays){
+        const R = m.bestRays;
+        const nRays = R.length / 4;
+        for (let i = 0; i < nRays; i++){
+            rays.push([
+                {x: R[i*4],     y: R[i*4 + 1]},
+                {x: R[i*4 + 2], y: R[i*4 + 3]}
+            ]);
+        }
+    }
+    if (m.bestReadings){
+        const R = m.bestReadings;
+        const nR = R.length / 3;
+        for (let i = 0; i < nR; i++){
+            const offset = R[i*3 + 2];
+            if (offset < 0){
+                readings.push(null);
+            } else {
+                readings.push({x: R[i*3], y: R[i*3 + 1], offset});
+            }
+        }
+    }
+    p.sensor.rays = rays;
+    p.sensor.readings = readings;
+}
+
+function handleGenEnd(m){
+    bestBrainFlat = m.bestBrain;
+    _cachedBestBrainSeq++;
+    if (bestCar){
+        bestCar.laps = m.laps;
+        bestCar.lapTimes = m.lapTimes && m.lapTimes.length ? m.lapTimes : '--';
+        bestCar.checkPointsCount = m.checkPointsCount;
+    }
+    performNextBatch(m);
+}
+
+// -----------------------------------------------------------------------------
+// Brain buffer builder — produces the N×92 Float32Array shipped to the worker.
+// Applies ruvector seeding / localStorage fallback + mutation directly on flat
+// weights (no intermediate NeuralNetwork objects for the bulk of the population).
+// -----------------------------------------------------------------------------
+const FLAT_LENGTH = 92;
+
+function flattenBrainInline(brain){
+    const out = new Float32Array(FLAT_LENGTH);
+    let k = 0;
+    for (let L = 0; L < brain.levels.length; L++){
+        const level = brain.levels[L];
+        for (let j = 0; j < level.biases.length;  j++) out[k++] = level.biases[j];
+        for (let w = 0; w < level.weights.length; w++) out[k++] = level.weights[w];
+    }
+    return out;
+}
+// Mirror of brainCodec.unflatten — standalone so bestCar.brain keeps working
+// when the ES-module sidecar fails to load.
+function inflateBrainInline(flat){
+    if (!flat) return null;
+    const NN = globalThis.NeuralNetwork;
+    if (!NN) return null;
+    const net = new NN([6, 8, 4]);
+    let k = 0;
+    for (let L = 0; L < net.levels.length; L++){
+        const level = net.levels[L];
+        for (let j = 0; j < level.biases.length;  j++) level.biases[j]  = flat[k++];
+        for (let w = 0; w < level.weights.length; w++) level.weights[w] = flat[k++];
+    }
+    return net;
+}
+function copyFlat(dst, dstOff, src){
+    for (let i = 0; i < FLAT_LENGTH; i++) dst[dstOff + i] = src[i];
+}
+function fillMutated(dst, dstOff, src, amt){
+    if (amt <= 0){ copyFlat(dst, dstOff, src); return; }
+    for (let i = 0; i < FLAT_LENGTH; i++){
+        dst[dstOff + i] = lerp(src[i], Math.random() * 2 - 1, amt);
+    }
+}
+function fillRandom(dst, dstOff){
+    for (let i = 0; i < FLAT_LENGTH; i++) dst[dstOff + i] = Math.random() * 2 - 1;
+}
+
+function buildBrainsBuffer(N){
+    const out = new Float32Array(N * FLAT_LENGTH);
+    currentSeedIds = [];
+    let seededFromBridge = false;
+
     if (bridgeReady()){
         try {
-            var bridge = window.__rvBridge;
-            var trackVec = window.currentTrackVec || null;
-            // Stage the mid-training dynamics query vector. On begin() it's
-            // from the *previous* generation's trajectory (captured up to
-            // nextBatch). First-ever call: nothing staged → setQueryDynamicsVec
-            // null → the bridge silently skips the dynamics term. This is
-            // the P1.C "currently running generation's mid-training
-            // dynamics" signal, frozen at the moment we reseed.
+            const bridge = window.__rvBridge;
+            const trackVec = window.currentTrackVec || null;
             if (window.__rvDynamics && typeof bridge.setQueryDynamicsVec === 'function'){
                 try {
-                    var qDyn = window.__rvDynamics.queryVector();
+                    const qDyn = window.__rvDynamics.queryVector();
                     bridge.setQueryDynamicsVec(qDyn);
-                } catch (_) { /* embedder is best-effort */ }
+                } catch (_) {}
             }
-            var seeds = bridge.recommendSeeds(trackVec, 10);
+            const seeds = bridge.recommendSeeds(trackVec, 10);
             if (seeds && seeds.length > 0){
-                currentSeedIds = seeds.map(function(s){ return s.id; });
-                // PRD seeding: elitism + light mutation + heavy mutation + novelty.
-                // Generalised from N=10 to the user's configurable batchSize:
-                //   - 1 elite (unmutated top retrieval)
-                //   - ~half of the remainder: light mutation, cycling through seeds
-                //   - ~half of the remainder: heavy mutation, cycling through seeds
-                //   - at least 1 novelty slot: random init (leave Car's default brain)
-                var N = cars.length;
-                var nElite = Math.min(1, N);
-                var nNovel = Math.max(1, Math.floor(N * 0.1));
-                var remaining = N - nElite - nNovel;
-                var nLight = Math.max(0, Math.floor(remaining / 2));
-                var nHeavy = Math.max(0, remaining - nLight);
-                var lightAmt = mutateValue * 0.5;
-                var heavyAmt = Math.min(1, mutateValue * 1.8);
-                for (var i = 0; i < N; i++){
+                currentSeedIds = seeds.map(s => s.id);
+                const nElite = Math.min(1, N);
+                const nNovel = Math.max(1, Math.floor(N * 0.1));
+                const remaining = N - nElite - nNovel;
+                const nLight = Math.max(0, Math.floor(remaining / 2));
+                const nHeavy = Math.max(0, remaining - nLight);
+                const lightAmt = mutateValue * 0.5;
+                const heavyAmt = Math.min(1, mutateValue * 1.8);
+                for (let i = 0; i < N; i++){
+                    const off = i * FLAT_LENGTH;
                     if (i < nElite){
-                        cars[i].brain = window.__rvUnflatten(seeds[0].vector);
+                        copyFlat(out, off, seeds[0].vector);
                     } else if (i < nElite + nLight){
-                        var s1 = seeds[(i - nElite) % seeds.length];
-                        cars[i].brain = window.__rvUnflatten(s1.vector);
-                        NeuralNetwork.mutate(cars[i].brain, lightAmt);
+                        fillMutated(out, off, seeds[(i - nElite) % seeds.length].vector, lightAmt);
                     } else if (i < nElite + nLight + nHeavy){
-                        var s2 = seeds[(i - nElite - nLight) % seeds.length];
-                        cars[i].brain = window.__rvUnflatten(s2.vector);
-                        NeuralNetwork.mutate(cars[i].brain, heavyAmt);
+                        fillMutated(out, off, seeds[(i - nElite - nLight) % seeds.length].vector, heavyAmt);
+                    } else {
+                        fillRandom(out, off);
                     }
-                    // else: novelty slot — keep the random brain from `new Car(...)`
                 }
                 console.log('[ruvector] seeded ' + N + ' cars from ' + seeds.length +
                     ' retrievals (elite=' + nElite + ', light=' + nLight +
@@ -142,91 +425,126 @@ function begin(){
         }
     }
 
-    // Stock path: used for ?rv=0, for "bridge not ready yet" (e.g. phase-1 boot),
-    // and as graceful fallback when the vector archive is empty but the user
-    // already has a localStorage.bestBrain from a prior run.
-    if (!seededFromBridge && localStorage.getItem("bestBrain")){
-        for(let i = 0; i<cars.length;i++){
-            cars[i].brain=JSON.parse(localStorage.getItem("bestBrain"));
-            if(i!=0){
-                NeuralNetwork.mutate(cars[i].brain,mutateValue);
+    if (!seededFromBridge){
+        if (localStorage.getItem("bestBrain")){
+            const savedBrain = JSON.parse(localStorage.getItem("bestBrain"));
+            const savedNN = reviveBrain(savedBrain);
+            const savedFlat = flattenBrainInline(savedNN);
+            for (let i = 0; i < N; i++){
+                const off = i * FLAT_LENGTH;
+                if (i === 0) copyFlat(out, off, savedFlat);
+                else fillMutated(out, off, savedFlat, mutateValue);
+            }
+        } else {
+            fillRandom(out, 0);
+            for (let i = 1; i < N; i++){
+                const off = i * FLAT_LENGTH;
+                fillRandom(out, off);
             }
         }
     }
-    bestCar = cars[0];
+    return out;
 }
 
-// if(localStorage.getItem("bestBrain")){
-//     for(let i = 0; i<cars.length;i++){
-//         cars[i].brain=JSON.parse(localStorage.getItem("bestBrain"));
-//         if(i!=1){
-//             NeuralNetwork.mutate(cars[i].brain,.2);
-//         }
-//     }
-//     // bestCar.brain=JSON.parse(localStorage.getItem("bestBrain"));
-// }
+// -----------------------------------------------------------------------------
+// begin() / nextBatch() — lifecycle
+// -----------------------------------------------------------------------------
+function begin(){
+    seconds = nextSeconds;
+    pause = false;
+    playerCar = new Car(startInfo.x, startInfo.y, 30, 50, "KEYS", maxSpeed);
+    playerCar2 = new Car(startInfo.x, startInfo.y, 30, 50, "WASD", maxSpeed);
+    frameCount = 0;
+    wallStart = performance.now();
+    _simStepAccum = 1;
+    _lastTickWall = performance.now();
+    bestCar = null;
+    _bestProxyEpoch = -1;
+    latestSnapshot = null;
 
-// graphProgress();
-begin();
-animate();
-function generateCars(N){
-    const cars = [];
-    for(let i=0; i<N; i++){
-        cars.push(new Car(startInfo.x,startInfo.y,30,50,"AI",maxSpeed));
+    if (phase !== 4) return;  // worker only engages during phase-4 training
+
+    if (!workerReady){
+        pendingBegin = { N: batchSize };
+        return;
     }
-    return cars;
+    performBegin(batchSize);
 }
 
+function performBegin(N){
+    if (!workerInited){
+        // Copy borders + checkpoints to plain {x,y} objects so postMessage can
+        // structured-clone them. The live Road objects contain references to
+        // the road editor's mutable point array — transferring raw refs would
+        // break structured clone if those ever grow non-plain properties.
+        const borders = road.borders.map(b => [{x:b[0].x,y:b[0].y},{x:b[1].x,y:b[1].y}]);
+        const checkPointList = (road.checkPointList || []).map(c => [{x:c[0].x,y:c[0].y},{x:c[1].x,y:c[1].y}]);
+        simWorker.postMessage({
+            type: 'init',
+            canvasW: canvas.width,
+            canvasH: canvas.height,
+            borders, checkPointList
+        });
+        workerInited = true;
+    }
+    const brains = buildBrainsBuffer(N);
+    simWorker.postMessage({
+        type: 'begin',
+        N, seconds, maxSpeed, traction,
+        startInfo: { x: startInfo.x, y: startInfo.y },
+        brains
+    }, [brains.buffer]);
+}
 
-function nextBatch(){
-    if(localStorage.getItem("trainCount")){
+// Invalidate cached worker state when the track changes (phase 1→4 cycle
+// reuses road.borders but with different geometry).
+function invalidateWorkerInit(){ workerInited = false; }
+
+// Called from the Reset Brain button — user-initiated restart, no archive.
+function nextBatch(){ begin(); }
+
+// Called from the worker's genEnd message — full archive + observe + begin.
+function performNextBatch(genData){
+    const _genT0 = performance.now();
+    const _times = {};
+    if (localStorage.getItem("trainCount")){
         localStorage.setItem("trainCount", JSON.stringify(JSON.parse(localStorage.getItem("trainCount"))+1));
-    }
-    else{
+    } else {
         localStorage.setItem("trainCount", JSON.stringify(1));
     }
-    if(bestCar){
-        save();
+    const _tSave = performance.now();
+    if (bestBrainFlat){
+        try { save(); } catch (e) { console.warn('save failed', e); }
     }
-    if(bestCar.laps>0 && (Math.min(...bestCar.lapTimes) < fastLap || fastLap=='--')){
-        fastLap = Math.min(...bestCar.lapTimes);
-        localStorage.setItem('fastLap', JSON.stringify(fastLap));
+    _times.save = performance.now() - _tSave;
+    if (genData.laps > 0 && genData.lapTimes && genData.lapTimes.length){
+        const minLap = Math.min.apply(null, genData.lapTimes);
+        if (fastLap === '--' || minLap < fastLap){
+            fastLap = minLap;
+            localStorage.setItem('fastLap', JSON.stringify(fastLap));
+        }
     }
 
-    // Vector-memory archive + GNN-fallback feedback. Fitness matches the
-    // `testBestCar` tiebreaker used in animate(): total checkpoints passed
-    // across completed laps + progress on the current lap.
-    if (bridgeReady() && bestCar){
+    const _tArchive = performance.now();
+    if (bridgeReady() && bestBrainFlat){
         try {
-            var fitness = bestCar.checkPointsCount +
-                (bestCar.laps || 0) * (road.checkPointList ? road.checkPointList.length : 0);
-            var trackVec = window.currentTrackVec || null;
-            // Per-batch best lap for the archived brain — only meaningful if the
-            // car actually completed a lap this generation. Not to be confused
-            // with the global `fastLap` (all-time best across all training).
-            var batchFastest = (bestCar.laps > 0 && bestCar.lapTimes && bestCar.lapTimes.length)
-                ? Math.min.apply(null, bestCar.lapTimes) : undefined;
-            // Finalise the trajectory the best car just drove. finalizeVector
-            // returns null when no frames were captured (very short runs or
-            // the bestCar never had a sensor update); archiveBrain tolerates
-            // that by skipping the dynamicsId write. We reset the embedder
-            // *after* finalising so the next generation starts with a clean
-            // ring buffer regardless of which car turns out to be best.
-            var dynamicsVec = null;
+            const fitness = genData.fitness;
+            const trackVec = window.currentTrackVec || null;
+            const batchFastest = (genData.laps > 0 && genData.lapTimes && genData.lapTimes.length)
+                ? Math.min.apply(null, genData.lapTimes) : undefined;
+            let dynamicsVec = null;
             if (window.__rvDynamics){
-                try { dynamicsVec = window.__rvDynamics.finalizeVector(); } catch (_) { dynamicsVec = null; }
+                try { dynamicsVec = window.__rvDynamics.finalizeVector(); } catch (_) {}
             }
+            const brainObj = window.__rvUnflatten(bestBrainFlat);
             window.__rvBridge.archiveBrain(
-                bestCar.brain, fitness, trackVec, generation, currentSeedIds.slice(), batchFastest, dynamicsVec
+                brainObj, fitness, trackVec, generation, currentSeedIds.slice(), batchFastest, dynamicsVec
             );
-            // P2.A — track the running session-best so backPhase() can close
-            // the SONA trajectory with a meaningful final fitness. Per-gen
-            // fitness resets when the session restarts (nextPhase case 4).
-            if (!window.__rvSessionBestFitness || fitness > window.__rvSessionBestFitness) {
+            if (!window.__rvSessionBestFitness || fitness > window.__rvSessionBestFitness){
                 window.__rvSessionBestFitness = fitness;
             }
             if (window.__rvDynamics){
-                try { window.__rvDynamics.reset(); } catch (_) { /* best-effort */ }
+                try { window.__rvDynamics.reset(); } catch (_) {}
             }
             if (currentSeedIds.length){
                 window.__rvBridge.observe(currentSeedIds, fitness);
@@ -237,24 +555,52 @@ function nextBatch(){
             console.warn('[ruvector] archive/observe failed', e);
         }
     }
+    _times.archive = performance.now() - _tArchive;
     generation += 1;
 
-    // P5.D: refresh the fitness-over-generations graph in-place so the
-    // newly-appended progress point + annotation render immediately,
-    // rather than waiting for a phase re-entry. graphProgress() is a
-    // no-op if the graph canvas isn't mounted yet (phase < 4).
+    const _tGraph = performance.now();
     if (typeof graphProgress === 'function'){
-        try { graphProgress(); } catch (e) { /* canvas not ready */ }
+        try { graphProgress(); } catch (e) {}
     }
+    _times.graph = performance.now() - _tGraph;
 
+    const _tBegin = performance.now();
     begin();
-    // location.reload();
+    _times.begin = performance.now() - _tBegin;
+
+    const totalMs = performance.now() - _genT0;
+    if (hitchEnabled && totalMs > 30){
+        const extra = 'save=' + _times.save.toFixed(0) +
+            ' arch=' + _times.archive.toFixed(0) +
+            ' graph=' + _times.graph.toFixed(0) +
+            ' begin=' + _times.begin.toFixed(0);
+        recordHitch('genEnd', totalMs, extra);
+    }
 }
+
+begin();
+animate();
+
+// -----------------------------------------------------------------------------
+// Main-thread rAF — renders road, snapshot-driven AI cars, and local player cars.
+// -----------------------------------------------------------------------------
 function animate(){
+    var _perfFrameStart = perfEnabled ? performance.now() : 0;
+    if (perfEnabled){
+        if (_lastRafWall > 0){
+            var _delta = _perfFrameStart - _lastRafWall;
+            if (_delta > 0 && _delta < 1000) perfPush('frameDelta', _delta);
+            if (hitchEnabled && _delta > HITCH_MS && _delta < 1500 && phase === 4 && !pause){
+                recordHitch('rafGap', _delta);
+            }
+        }
+        _lastRafWall = _perfFrameStart;
+    }
+    var _perfDraw = 0;
+    var _perfT0 = perfEnabled ? performance.now() : 0;
     road.draw(ctx);
-    // canvas.style.width = String(Math.min(window.innerWidth*.8, 16/9*window.innerHeight)) + "px";
-    // canvas.style.height = String(Math.min(9/16*window.innerWidth*.8, window.innerHeight)) + "px";
-    // road.draw(ctx);
+    if (perfEnabled) _perfDraw += performance.now() - _perfT0;
+
     if(phase==3){
         playerCar.update(road.borders, road.checkPointList);
         playerCar.draw(ctx,"red",true);
@@ -267,83 +613,134 @@ function animate(){
         const wallSecs = ((performance.now() - wallStart)/1000).toFixed(2);
         timer.innerHTML = "<p>Sim Time: " + simSecs + "s " +
             "<span style='opacity:.65;font-size:.85em'>(wall " + wallSecs + "s &middot; " + simSpeed + "&times;)</span></p>";
-        // fastLap defaults to '--' until a lap completes (main.js:24).
-        // Call toFixed only when it's numeric — otherwise the TypeError
-        // throws out of animate(), kills the rAF chain, and the training
-        // loop silently freezes with no visible movement on phase 4.
         timer.innerHTML += "<p>Fast Lap: " + (typeof fastLap === 'number' ? fastLap.toFixed(2) : fastLap) + "</p>";
         ctx.save();
 
         if(!pause){
-            // Wall-time-based stepping: target `simSpeed × dt × 60` physics
-            // steps per rAF (60 steps = 1 sim-second by convention). The
-            // accumulator handles fractional output so 0.5× cleanly runs
-            // one step every ~2 rAFs and 100× bursts 100+ steps per rAF.
-            // dt is clamped to 250ms so a backgrounded tab resuming doesn't
-            // try to catch up with a huge burst of physics at once.
+            // Local player-car accumulator. Runs in parallel with the worker's;
+            // exact lockstep isn't needed because player cars only matter when
+            // the user is actually driving (usually simSpeed=1).
             const now = performance.now();
             let dt = (now - _lastTickWall) / 1000;
             _lastTickWall = now;
             if (dt > 0.25) dt = 0.25;
             _simStepAccum += simSpeed * dt * 60;
-            let stepsThisFrame = Math.floor(_simStepAccum);
-            _simStepAccum -= stepsThisFrame;
-
-            let genEnded = false;
-            for (let s = 0; s < stepsThisFrame; s++){
-                // Generation-end check inside the loop + `>=` (not `==`) so a
-                // multi-step frame can't sail past the trigger. nextBatch()
-                // resets frameCount via begin(), so the next iteration starts
-                // fresh from 0 — but we break anyway to let the next rAF paint.
-                if (frameCount >= 60*seconds){
-                    nextBatch();
-                    genEnded = true;
-                    break;
-                }
-                frameCount+=1;
-                for(let i=0;i<cars.length;i++){
-                    cars[i].update(road.borders, road.checkPointList);
-                }
+            let playerSteps = Math.floor(_simStepAccum);
+            _simStepAccum -= playerSteps;
+            if (playerSteps > MAX_STEPS_PER_RAF){ playerSteps = MAX_STEPS_PER_RAF; _simStepAccum = 0; }
+            SENSOR_STRIDE = computeSensorStride();
+            for (let s = 0; s < playerSteps; s++){
                 playerCar.update(road.borders, road.checkPointList);
                 playerCar2.update(road.borders, road.checkPointList);
-
-                testBestCar=cars.find(
-                    c=>(c.checkPointsCount+c.laps*road.checkPointList.length)==Math.max(
-                        ...cars.map(c=>c.checkPointsCount+c.laps*road.checkPointList.length)
-                ));
-                if (testBestCar.checkPointsCount+testBestCar.laps*road.checkPointList.length > bestCar.checkPointsCount+bestCar.laps*road.checkPointList.length){
-                    bestCar = testBestCar;
-                }
-                // P1.C — record the current best car's sensor/control state into
-                // the dynamics trajectory. The embedder detects bestCar identity
-                // changes internally and resets its ring buffer, so a late swap
-                // doesn't pollute the trajectory of the brain we ultimately archive.
-                // Recording is per sim-step (not per rAF) so trajectories stay
-                // dense at high simSpeed.
-                if (window.__rvDynamics && bestCar){
-                    try { window.__rvDynamics.recordFrame(bestCar); } catch (_) { /* best-effort */ }
-                }
             }
 
-            // Render once per rAF regardless of how many sim steps ran.
-            if (!genEnded){
-                ctx.globalAlpha=.2;
-                for(let i=0;i<cars.length;i++){
-                    cars[i].draw(ctx,"rgb(227, 138, 15)");
-                }
-                ctx.globalAlpha=1;
-                if(bestCar){
-                    inputVisual(bestCar.controls);
-                    bestCar.draw(ctx,"rgb(227, 138, 15)",true);
-                }
-                playerCar.draw(ctx,"red",true);
-                playerCar2.draw(ctx,"blue",true);
+            const _perfDrawT0 = perfEnabled ? performance.now() : 0;
+            if (latestSnapshot){
+                drawFromSnapshot(latestSnapshot);
             }
+            if (bestCar){
+                inputVisual(bestCar.controls);
+                drawBestCar(bestCar);
+            }
+            playerCar.draw(ctx,"red",true);
+            playerCar2.draw(ctx,"blue",true);
+            if (perfEnabled) _perfDraw += performance.now() - _perfDrawT0;
         }
         ctx.restore();
+    }
+    if (perfEnabled){
+        try {
+            var simMs = latestSnapshot ? latestSnapshot.simMs : 0;
+            var steps = latestSnapshot ? latestSnapshot.steps : 0;
+            perfPush('sim', simMs);
+            perfPush('draw', _perfDraw);
+            perfPush('rAF', performance.now() - _perfFrameStart);
+            perfPush('steps', steps);
+            if ((++perfTick % 10) === 0) perfRender();
+        } catch (e){
+            console.error('[perf] HUD error — disabling instrumentation', e);
+            perfEnabled = false;
+        }
     }
     requestAnimationFrame(animate);
 }
 
-//'{"levels":[{"inputs":[0.495606189201673,0.15726215616367423,0,0.6062034072393743,0.7496399637888809],"outputs":[1,0,1,0,0,1],"biases":[-0.013740731634192205,0.6951143976529082,-0.5697816444261132,0.1256929635933952,0.49673130416849576,0.6373846513146026],"weights":[[0.9240140833302606,0.25091394484609575,-0.4077179156441786,0.21592532139427467,-0.6862378192394485,0.697398523618745],[0.3211162914201262,0.2615854303788545,0.4746093050272915,0.8033437683176308,-0.7341054748796783,-0.916951464044971],[-0.18507903730366992,0.42927022661166125,0.306261891088051,-0.3837882586456778,0.952567592490035,0.8542800790925975],[0.22172773706975413,-0.5215198285643297,-0.4920542534845125,-0.9291969638628683,-0.8856946763484408,0.3938602710681609],[-0.8410642961250265,0.7579906650045083,0.32516678866065174,-0.30754302421501567,0.8750073921299881,0.4999127605665361]]},{"inputs":[1,0,1,0,0,1],"outputs":[1,0,0,0],"biases":[-0.8566061993749825,0.4250344074205392,0.4059436542760504,0.9283323169289042],"weights":[[-0.03284571525471147,-0.07174304448134672,0.9705226282848525,0.4786108058481413],[-0.5219072138022529,0.6678782301476365,0.4635492145127511,-0.776407850244115],[-0.04195812585225989,0.3497316343546939,-0.1768704063971387,-0.32871733563395233],[0.23344650987322257,0.09045178035212231,0.4046143644666751,0.09849445965256542],[-0.6279687724901417,0.8853891662508939,0.3327718864420204,-0.17241258720460628],[0.35115347757846305,0.0889499918491552,-0.9644183785501652,-0.6884814126502978]]}]}'
-//'{"levels":[{"inputs":[0.6395045484555228,0.4359628418308088,0.07340465472849844,0,0.5535612099823177,0.990906584451451],"outputs":[1,0,0,1,1,1,1,1],"biases":[-0.014753822021949163,0.04896634890272357,0.17863768300993674,-0.049642725490895226,0.08749957520037199,-0.012076978772172313,-0.024113772931165768,-0.0824189041813355],"weights":[[0.004229355580572908,0.000057785402906351027,0.10202159780807353,0.09153950174283897,-0.07499968554856666,0.05564797190966312,0.1674938026016347,-0.058192893467054176],[-0.03776941179254002,0.02041705942976021,0.032273336905924085,0.11818418505990481,0.15377965457906564,-0.1596019978693655,0.10187209329255824,0.03959848238860798],[-0.2174667597309811,-0.07272935607093334,-0.06465008743518509,0.11144079503383379,0.17604593586544665,0.08052515820563311,-0.07377492573213228,-0.07299743852666632],[-0.08001452281427013,-0.05627433517866529,0.1323809223215508,0.06883154729866059,-0.1069947772202646,0.017189481890519113,0.06646921038871915,-0.10954474392674232],[0.10324057404054585,-0.033169402656589804,0.1243432482177765,0.2911866883255414,0.10710591144952915,-0.06791835003015999,-0.15711745229792942,-0.07939053369353453],[0.00713515703851305,0.04375518955271324,0.009546386053716866,0.12836467415280342,0.0004795055449842196,0.11041345561610985,0.07979696667846176,0.10848388629251672]]},{"inputs":[1,0,0,1,1,1,1,1],"outputs":[1,0,1,0],"biases":[-0.071187096884142,-0.11687737138672825,-0.06599828084390714,-0.014383456122405847],"weights":[[0.17954521532131484,-0.0008988777384373932,-0.01595166196304911,-0.008515858675526226],[-0.16087191702292633,-0.05851075061941579,0.0072468339910833224,0.02166515761043868],[-0.20319128977863793,0.10329997860690525,0.041146891092939536,0.12659916059847753],[0.15803835303689934,-0.018908640750950365,-0.044571817776129556,0.2662485368606925],[-0.029798744533117212,-0.0235886279849129,0.05718211675393633,-0.07455804284353565],[-0.040516174435908076,0.042343716704855816,-0.005914512722737507,-0.1577147593553106],[-0.010486600089340629,-0.11350580663223411,0.10351770538874087,-0.062077254056490914],[0.042770330368817125,-0.020104603820007422,0.13634648255306495,-0.0216467940618405]]}]}'
+// -----------------------------------------------------------------------------
+// Snapshot rendering — reads Float32Array positions and issues minimal canvas
+// calls. Top-K path sorts live cars by fitness (field 4 of the 5-wide stride)
+// and draws the rest as a single batched dot fill.
+// -----------------------------------------------------------------------------
+function drawFromSnapshot(snap){
+    const N = snap.N;
+    const pos = snap.positions;
+
+    if (FULL_RENDER){
+        ctx.globalAlpha = 0.2;
+        for (let i = 0; i < N; i++){
+            const base = i * 5;
+            ctx.fillStyle = pos[base + 3] !== 0 ? "gray" : "rgb(227, 138, 15)";
+            drawCarQuad(pos[base], pos[base + 1], pos[base + 2]);
+        }
+        ctx.globalAlpha = 1;
+        return;
+    }
+
+    const liveIdx = [];
+    for (let i = 0; i < N; i++){
+        if (pos[i * 5 + 3] === 0) liveIdx.push(i);
+    }
+    liveIdx.sort((a, b) => pos[b * 5 + 4] - pos[a * 5 + 4]);
+    const kDraw = Math.min(RENDER_TOP_K, liveIdx.length);
+
+    if (liveIdx.length > kDraw){
+        ctx.fillStyle = "rgba(227, 138, 15, 0.55)";
+        ctx.beginPath();
+        for (let i = kDraw; i < liveIdx.length; i++){
+            const idx = liveIdx[i];
+            ctx.rect(pos[idx * 5] - 2, pos[idx * 5 + 1] - 2, 4, 4);
+        }
+        ctx.fill();
+    }
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = "rgb(227, 138, 15)";
+    for (let i = 0; i < kDraw; i++){
+        const idx = liveIdx[i];
+        drawCarQuad(pos[idx * 5], pos[idx * 5 + 1], pos[idx * 5 + 2]);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// Pre-computed quad geometry — cars are 30×50 so rad/alpha are constants.
+const _CAR_RAD = Math.hypot(30, 50) / 2;
+const _CAR_ALPHA = Math.atan2(30, 50);
+function drawCarQuad(x, y, angle){
+    ctx.beginPath();
+    ctx.moveTo(x - Math.sin(angle - _CAR_ALPHA) * _CAR_RAD, y - Math.cos(angle - _CAR_ALPHA) * _CAR_RAD);
+    ctx.lineTo(x - Math.sin(angle + _CAR_ALPHA) * _CAR_RAD, y - Math.cos(angle + _CAR_ALPHA) * _CAR_RAD);
+    ctx.lineTo(x - Math.sin(Math.PI + angle + _CAR_ALPHA) * _CAR_RAD, y - Math.cos(Math.PI + angle + _CAR_ALPHA) * _CAR_RAD);
+    ctx.lineTo(x - Math.sin(Math.PI + angle - _CAR_ALPHA) * _CAR_RAD, y - Math.cos(Math.PI + angle - _CAR_ALPHA) * _CAR_RAD);
+    ctx.fill();
+}
+
+function drawBestCar(bc){
+    ctx.fillStyle = bc.damaged ? "gray" : "rgb(227, 138, 15)";
+    drawCarQuad(bc.x, bc.y, bc.angle);
+    if (bc.sensor && bc.sensor.rays && bc.sensor.rays.length){
+        for (let i = 0; i < bc.sensor.rays.length; i++){
+            const ray = bc.sensor.rays[i];
+            const reading = bc.sensor.readings[i];
+            const end = reading ? reading : ray[1];
+            ctx.beginPath();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = "yellow";
+            ctx.moveTo(ray[0].x, ray[0].y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.strokeStyle = "black";
+            ctx.moveTo(ray[1].x, ray[1].y);
+            ctx.lineTo(end.x, end.y);
+            ctx.stroke();
+        }
+    }
+}

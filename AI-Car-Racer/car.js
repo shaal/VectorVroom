@@ -43,6 +43,12 @@ class Car{
     }
 
     update(roadBorders, checkPointList){
+        // Damaged AI cars contribute nothing for the rest of the generation —
+        // skip sensor raycasts + NN inference entirely. At end-of-gen this is
+        // usually >80% of the population, so it dominates total sim cost.
+        if(this.damaged && this.controlType == "AI"){
+            return;
+        }
         if(!this.damaged){
             this.#move();
             this.polygon=this.#createPolygon();
@@ -87,21 +93,46 @@ class Car{
  
         }
         if(this.sensor){
-            this.sensor.update(roadBorders);
-            var offsets=this.sensor.readings.map(
-                s=>s==null?0:1-s.offset
-            );
-            offsets.push(this.speed/this.maxSpeed);
-            const outputs=NeuralNetwork.feedForward(offsets,this.brain);
-            if(this.useBrain){
-                this.controls.forward=outputs[0];
-                this.controls.left=outputs[1];
-                this.controls.right=outputs[2];
-                this.controls.reverse=outputs[3];
+            // Perception LOD. At high simSpeed, non-privileged AI cars skip
+            // sensor + NN and keep last-frame controls — they're fodder
+            // anyway. bestCar + player cars always run fresh so the training
+            // signal stays clean and player input feels responsive. Reference
+            // equality `this === bestCar` is cheap and survives bestCar
+            // reassignment between steps.
+            const isPrivileged = (this === bestCar) || (this.controlType !== 'AI');
+            const skipPerception = !isPrivileged
+                && typeof SENSOR_STRIDE !== 'undefined'
+                && SENSOR_STRIDE > 1
+                && (frameCount % SENSOR_STRIDE !== 0);
+            if (!skipPerception){
+                this.sensor.update(roadBorders);
+                var offsets=this.sensor.readings.map(
+                    s=>s==null?0:1-s.offset
+                );
+                offsets.push(this.speed/this.maxSpeed);
+                const outputs=NeuralNetwork.feedForward(offsets,this.brain);
+                if(this.useBrain){
+                    this.controls.forward=outputs[0];
+                    this.controls.left=outputs[1];
+                    this.controls.right=outputs[2];
+                    this.controls.reverse=outputs[3];
+                }
             }
         }
     }
     #assessDamage(roadBoarders){
+        // Broad-phase: only test borders whose AABB overlaps the car polygon's
+        // AABB. Car polygon is tiny (~30×50px) so this typically reduces the
+        // candidate set to 1-2 borders out of dozens.
+        const grid = (typeof road !== 'undefined' && road && road.borderGrid) ? road.borderGrid : null;
+        if (grid){
+            const ids = grid.queryPolygon(this.polygon);
+            for (let k = 0; k < ids.length; k++){
+                const b = roadBoarders[ids[k]];
+                if (b && polysIntersect(this.polygon, b)) return true;
+            }
+            return false;
+        }
         for(let i=0; i<roadBoarders.length;i++){
             if(polysIntersect(this.polygon,roadBoarders[i])){
                 return true;
@@ -110,6 +141,17 @@ class Car{
         return false;
     }
     #assessCheckpoint(checkpoints){
+        const grid = (typeof road !== 'undefined' && road && road.cpGrid) ? road.cpGrid : null;
+        if (grid){
+            const ids = grid.queryPolygon(this.polygon);
+            for (let k = 0; k < ids.length; k++){
+                const idx = ids[k];
+                if (idx < checkpoints.length && polysIntersect(this.polygon, checkpoints[idx])){
+                    return idx;
+                }
+            }
+            return -1;
+        }
         for(let i=0; i<checkpoints.length;i++){
             if(polysIntersect(this.polygon,checkpoints[i])){
                 return i;

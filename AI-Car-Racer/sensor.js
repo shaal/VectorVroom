@@ -20,27 +20,34 @@ class Sensor{
     }
 
     #getReading(ray,roadBorders){
-        let touches=[];
-
-        for(let i=0;i<roadBorders.length;i++){
-            const touch=getIntersection(
-                ray[0],
-                ray[1],
-                roadBorders[i][0],
-                roadBorders[i][1]
-            );
-            if(touch){
-                touches.push(touch);
+        // Track the nearest intersection inline rather than collecting all
+        // touches + `Math.min(...offsets)`. The spread was allocating an array
+        // per query — painful at cars×rays×stepsPerFrame.
+        let best = null;
+        let bestOffset = Infinity;
+        // Broad-phase cull: if the grid is built, only test borders whose AABB
+        // overlaps the ray's AABB. Falls back to full scan when the grid isn't
+        // available yet (e.g. pre-track phases).
+        const grid = (typeof road !== 'undefined' && road && road.borderGrid) ? road.borderGrid : null;
+        if (grid){
+            const ids = grid.queryRay(ray[0], ray[1]);
+            for (let k = 0; k < ids.length; k++){
+                const b = roadBorders[ids[k]];
+                if (!b) continue;
+                const touch = getIntersection(ray[0], ray[1], b[0], b[1]);
+                if (touch && touch.offset < bestOffset){
+                    best = touch; bestOffset = touch.offset;
+                }
+            }
+        } else {
+            for(let i=0;i<roadBorders.length;i++){
+                const touch=getIntersection(ray[0],ray[1],roadBorders[i][0],roadBorders[i][1]);
+                if (touch && touch.offset < bestOffset){
+                    best = touch; bestOffset = touch.offset;
+                }
             }
         }
-
-        if(touches.length==0){
-            return null;
-        }else{
-            const offsets=touches.map(e=>e.offset);
-            const minOffset=Math.min(...offsets);
-            return touches.find(e=>e.offset==minOffset);
-        }
+        return best;
     }
 
     #castRays(){

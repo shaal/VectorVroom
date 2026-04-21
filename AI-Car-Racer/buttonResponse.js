@@ -1,6 +1,12 @@
 function pauseGame(){
     pause=!pause;
     document.getElementById("pause").textContent = pause?"Play":"Pause";
+    // Halt / resume the worker's AI step loop too. Without this, sim-worker
+    // would keep burning CPU while the user has paused — and on resume the
+    // accumulator would stampede a huge backlog of physics steps at once.
+    if (typeof simWorker !== 'undefined' && simWorker){
+        simWorker.postMessage({ type: 'setPause', pause });
+    }
 }
 function save(){
     const progressVal = bestCar.checkPointsCount+bestCar.laps*road.checkPointList.length/seconds;
@@ -27,7 +33,10 @@ function save(){
     localStorage.setItem("rvAnnotations", JSON.stringify(annArr));
 
     localStorage.setItem("oldBestBrain",(localStorage.getItem("bestBrain")));
-    localStorage.setItem("bestBrain",JSON.stringify(bestCar.brain));
+    // serializeBrain converts Float32Array weights/biases to plain arrays so
+    // JSON.stringify produces clean output (Float32Array serialises as
+    // {"0":x,"1":y,...} otherwise, which doesn't revive with .length).
+    localStorage.setItem("bestBrain",JSON.stringify(serializeBrain(bestCar.brain)));
 }
 
 // Spearman's-footrule shift over the union of top-K ids (mirrors the
@@ -121,6 +130,11 @@ function nextPhase(){
 
             break;
         case 4:
+            // Force the sim worker to re-ingest road geometry. The track may
+            // have been reshaped in phases 1-2 since the last phase-4 entry;
+            // without this the worker would keep using stale borders and
+            // AI cars would phase through the current visible track.
+            if (typeof invalidateWorkerInit === 'function') invalidateWorkerInit();
             begin();
             road.roadEditor.checkPointModeChange(false);
             road.roadEditor.editModeChange(false);
@@ -141,6 +155,13 @@ function nextPhase(){
     }
 }
 function backPhase(){
+    // Stop the sim worker from burning CPU in the background while the user
+    // edits the track / tunes physics. The worker resumes automatically on
+    // the next phase-4 entry because performBegin() posts a new 'begin'
+    // which implicitly unpauses stepping.
+    if (phase === 4 && typeof simWorker !== 'undefined' && simWorker) {
+        try { simWorker.postMessage({ type: 'setPause', pause: true }); } catch (_) {}
+    }
     // P2.A — if we're leaving phase 4, close the SONA trajectory first so its
     // steps get clustered into ReasoningBank patterns before the session state
     // tears down. Uses the running session-best fitness that main.js maintains
@@ -168,7 +189,14 @@ function setSimSpeed(value){
     simSpeed = (Number.isFinite(n) && n > 0) ? n : 1;
     _simStepAccum = 0;
     _lastTickWall = performance.now();
+    // Forward to the sim worker so its AI-car accumulator tracks the same
+    // multiplier. Guarded because buttonResponse.js loads before main.js
+    // in the script order — simWorker may not exist during phase-3 boot.
+    if (typeof simWorker !== 'undefined' && simWorker){
+        simWorker.postMessage({ type: 'setSimSpeed', v: simSpeed });
+    }
 }
+
 function restartBatch(){
     begin();
 }

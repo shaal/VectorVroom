@@ -112,7 +112,7 @@ function phaseToLayout(phase){
             <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
 
             <div id="inputsContainer">
-                <input min="0" max="2000" id="batchSizeInput" step="10" onkeydown="return false;" type="range" onchange='setN(this.value)' oninput="document.getElementById('batchSizeOutput').value = 'Batch Size: ' + this.value" >
+                <input min="0" max="10000" id="batchSizeInput" step="50" onkeydown="return false;" type="range" onchange='setN(this.value)' oninput="document.getElementById('batchSizeOutput').value = 'Batch Size: ' + this.value" >
                 <output  id="batchSizeOutput" name="Batch Size"></output>
                 <input min="5" max="100" id="secondsInput" step="5" onkeydown="return false;" type="range" onchange='setSeconds(this.value)' oninput="document.getElementById('secondsOutput').value = 'Round Length: ' + this.value" >
                 <output id="secondsOutput" name="Round Length"></output>
@@ -149,7 +149,6 @@ function phaseToLayout(phase){
                 document.getElementById(idArray[i]+"Output").value = document.getElementById(idArray[i]+"Output").name + ": " +  window[idArray[i]];
                 document.getElementById(idArray[i]+"Input").setAttribute("value", window[idArray[i]]);
             }
-            
             showInputCanvas();
             showGraphCanvas();
             graphProgress();

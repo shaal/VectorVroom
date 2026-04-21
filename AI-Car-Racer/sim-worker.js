@@ -1,0 +1,347 @@
+// sim-worker.js
+// AI-car sim running off the main thread. Main owns rendering + UI + ruvector
+// bridge + player cars; the worker owns the AI population, physics stepping,
+// sensor raycasts, NN forward, damage + checkpoint detection, bestCar
+// selection, the step-cap accumulator, and the generation-end trigger.
+//
+// Message protocol (main ↔ worker):
+//
+//   main → worker
+//     { type: 'init',   canvasW, canvasH, borders, checkPointList }
+//     { type: 'begin',  N, seconds, maxSpeed, traction, startInfo,
+//                        brains: Float32Array(N*FLAT_LENGTH) }
+//     { type: 'setSimSpeed', v }
+//     { type: 'setPause', pause }
+//     { type: 'setTraction', v }
+//     { type: 'setMaxSpeed', v }
+//
+//   worker → main
+//     { type: 'ready' }
+//     { type: 'snapshot', ...see postSnapshot }   — throttled to ~60Hz
+//     { type: 'genEnd', bestBrain, fitness, laps, lapTimes, checkPointsCount, frameCount }
+//
+// The worker keeps an identity-stable bestEpoch counter that increments each
+// time it promotes a new `bestCar`. Main uses that to refresh the dynamics-
+// embedder identity guard; without it, recording would reset on every
+// snapshot.
+
+importScripts('utils.js', 'spatialGrid.js', 'network.js', 'controls.js', 'sensor.js', 'car.js');
+
+// Worker-scope globals that sensor.js / car.js read directly by name.
+self.frameCount = 0;
+self.bestCar = null;
+self.road = null;
+self.traction = 0.5;
+self.maxSpeed = 15;
+self.invincible = false;
+self.SENSOR_STRIDE = 1;
+
+// Sim state owned entirely by the worker.
+let cars = [];
+let pause = true;
+let simSpeed = 1;
+let seconds = 15;
+let startInfo = null;
+let _accum = 1;
+let _lastTickWall = 0;
+const MAX_STEPS = 60;
+let _loopHandle = null;
+let bestEpoch = 0;
+
+// Per-tick wall-time budget. A single tick runs steps until it's been
+// stepping for ~TICK_BUDGET_MS, then yields + posts a snapshot. Two regimes:
+//   - Heavy sim (N=10k, perStep≈10ms): budget hits after ~2 steps →
+//     snapshots flow at ~50Hz, visuals stay smooth. Sim throughput is
+//     whatever the CPU permits; worker just doesn't hog it.
+//   - Light sim (N<500, perStep<1ms): hundreds of steps fit in one budget →
+//     full simSpeed reached without being throttled by setTimeout(0)'s
+//     ~4ms clamp. Critical for the N≈100, simSpeed=100× "fast training"
+//     use case that the old main-thread loop could hit but a naive
+//     "few steps per tick" worker cannot.
+const TICK_BUDGET_MS = 20;
+
+// Flat-brain layout — see brainCodec.js on the main side. Hard-coded here so
+// the worker doesn't have to importScripts a module (importScripts only loads
+// classic scripts). If TOPOLOGY changes upstream, bump both sides.
+const FLAT_LENGTH = 92;
+const TOPOLOGY = [6, 8, 4];
+
+// --- message handling --------------------------------------------------------
+
+self.onmessage = (ev) => {
+    const m = ev.data;
+    switch (m.type) {
+        case 'init':        handleInit(m);        break;
+        case 'begin':       handleBegin(m);       break;
+        case 'setSimSpeed': simSpeed = m.v;       break;
+        case 'setPause':    handlePause(m.pause); break;
+        case 'setTraction': self.traction = m.v;  break;
+        case 'setMaxSpeed': self.maxSpeed = m.v;  break;
+    }
+};
+
+function handleInit(m) {
+    // Build a bare `road` object compatible with sensor/car's global reads.
+    // The main-side Road class drags in DOM dependencies (roadEditor,
+    // canvas), so we can't just instantiate it here.
+    self.road = {
+        left: 0, right: m.canvasW, top: 0, bottom: m.canvasH,
+        borders: m.borders, checkPointList: m.checkPointList,
+        borderGrid: null, cpGrid: null
+    };
+    self.road.borderGrid = new SpatialGrid(m.canvasW, m.canvasH, 200);
+    self.road.borderGrid.addSegments(self.road.borders);
+    self.road.cpGrid = new SpatialGrid(m.canvasW, m.canvasH, 200);
+    if (self.road.checkPointList && self.road.checkPointList.length) {
+        self.road.cpGrid.addSegments(self.road.checkPointList);
+    }
+}
+
+function handleBegin(m) {
+    const _t0 = performance.now();
+    self.frameCount = 0;
+    self.bestCar = null;
+    bestEpoch = 0;
+    seconds = m.seconds;
+    self.maxSpeed = m.maxSpeed;
+    self.traction = m.traction;
+    startInfo = m.startInfo;
+
+    const N = m.N;
+    const flat = m.brains;
+    cars = new Array(N);
+    for (let i = 0; i < N; i++) {
+        const c = new Car(startInfo.x, startInfo.y, 30, 50, 'AI', m.maxSpeed);
+        assignBrainFromFlat(c.brain, flat, i * FLAT_LENGTH);
+        cars[i] = c;
+    }
+    self.bestCar = cars.length ? cars[0] : null;
+    if (self.bestCar) bestEpoch = 1;
+
+    _accum = 1;                               // match main's "guarantee one step" priming
+    _lastTickWall = performance.now();
+    pause = false;
+    startLoop();
+
+    self.postMessage({
+        type: 'debug',
+        event: 'beginBuilt',
+        N,
+        ms: performance.now() - _t0
+    });
+}
+
+function handlePause(p) {
+    pause = p;
+    if (!pause) {
+        _lastTickWall = performance.now();
+        startLoop();
+    }
+}
+
+// --- brain helpers -----------------------------------------------------------
+
+function assignBrainFromFlat(brain, flat, offset) {
+    let k = offset;
+    for (let L = 0; L < brain.levels.length; L++) {
+        const level = brain.levels[L];
+        for (let j = 0; j < level.biases.length;  j++) level.biases[j]  = flat[k++];
+        for (let w = 0; w < level.weights.length; w++) level.weights[w] = flat[k++];
+    }
+}
+
+function flattenBrain(brain) {
+    const out = new Float32Array(FLAT_LENGTH);
+    let k = 0;
+    for (let L = 0; L < brain.levels.length; L++) {
+        const level = brain.levels[L];
+        for (let j = 0; j < level.biases.length;  j++) out[k++] = level.biases[j];
+        for (let w = 0; w < level.weights.length; w++) out[k++] = level.weights[w];
+    }
+    return out;
+}
+
+// --- main loop ---------------------------------------------------------------
+
+function startLoop() {
+    if (_loopHandle != null) return;
+    const tick = () => {
+        _loopHandle = setTimeout(tick, 0);
+        if (pause) return;
+        stepOnce();
+    };
+    _loopHandle = setTimeout(tick, 0);
+}
+
+function computeStride(ss) {
+    if (ss <= 2) return 1;
+    if (ss <= 5) return 2;
+    if (ss <= 20) return 3;
+    return 4;
+}
+
+function stepOnce() {
+    const now = performance.now();
+    let dt = (now - _lastTickWall) / 1000;
+    _lastTickWall = now;
+    if (dt > 0.25) dt = 0.25;
+    _accum += simSpeed * dt * 60;
+    // Cap accumulator against runaway catch-up after a stall. MAX_STEPS
+    // bounds the worst-case backlog we'll try to absorb; anything beyond
+    // that is dropped so sim-time falls behind wall-time gracefully.
+    if (_accum > MAX_STEPS) _accum = MAX_STEPS;
+    // Drain up to floor(_accum) steps, but break as soon as we've burned
+    // TICK_BUDGET_MS of wall time. Remaining steps go back into the
+    // accumulator and drain on subsequent ticks. This keeps snapshots
+    // flowing at ~50Hz under heavy load while still letting a light sim
+    // rip through hundreds of steps per tick for high simSpeed.
+    let steps = Math.floor(_accum);
+    _accum -= steps;
+    self.SENSOR_STRIDE = computeStride(simSpeed);
+
+    const simStart = performance.now();
+    const cpLen = self.road.checkPointList.length;
+    let stepsRun = 0;
+    for (let s = 0; s < steps; s++) {
+        if (self.frameCount >= 60 * seconds) {
+            postSnapshot(performance.now() - simStart, stepsRun);
+            endGen();
+            return;
+        }
+        self.frameCount++;
+        for (let i = 0; i < cars.length; i++) {
+            cars[i].update(self.road.borders, self.road.checkPointList);
+        }
+        // O(N) bestCar scan — mirror of main.js's pre-worker logic.
+        let bestFit = -Infinity, bestC = null;
+        for (let i = 0; i < cars.length; i++) {
+            const c = cars[i];
+            const f = c.checkPointsCount + c.laps * cpLen;
+            if (f > bestFit) { bestFit = f; bestC = c; }
+        }
+        if (bestC) {
+            const currentFit = self.bestCar
+                ? (self.bestCar.checkPointsCount + self.bestCar.laps * cpLen)
+                : -Infinity;
+            if (self.bestCar !== bestC && bestFit > currentFit) {
+                self.bestCar = bestC;
+                bestEpoch++;
+            }
+        }
+        stepsRun++;
+        if (performance.now() - simStart > TICK_BUDGET_MS) {
+            // Budget tripped — hand remaining steps back to the accumulator
+            // so next tick catches up.
+            _accum += (steps - stepsRun);
+            break;
+        }
+    }
+    const simMs = performance.now() - simStart;
+
+    // Always snapshot at the end of a tick. Main rAF pulls at 60Hz and
+    // keeps only the latest — overshoot is dropped for free.
+    if (stepsRun > 0) postSnapshot(simMs, stepsRun);
+}
+
+// --- snapshots ---------------------------------------------------------------
+
+function postSnapshot(simMs, steps) {
+    const N = cars.length;
+    const cpLen = self.road.checkPointList.length || 1;
+
+    const positions = new Float32Array(N * 5);
+    for (let i = 0; i < N; i++) {
+        const c = cars[i];
+        const o = i * 5;
+        positions[o]     = c.x;
+        positions[o + 1] = c.y;
+        positions[o + 2] = c.angle;
+        positions[o + 3] = c.damaged ? 1 : 0;
+        positions[o + 4] = c.checkPointsCount + c.laps * cpLen;
+    }
+
+    let bestIdx = -1;
+    if (self.bestCar) {
+        for (let i = 0; i < N; i++) {
+            if (cars[i] === self.bestCar) { bestIdx = i; break; }
+        }
+    }
+
+    let bestRays = null, bestReadings = null, bestControls = null;
+    let bestSpeed = 0, bestMaxSpeed = self.maxSpeed, bestDamaged = 0;
+    let bestCheckpoints = 0, bestLaps = 0, bestLapTimes = null;
+    if (self.bestCar && self.bestCar.sensor && self.bestCar.sensor.rays.length) {
+        const bc = self.bestCar;
+        const rays = bc.sensor.rays;
+        bestRays = new Float32Array(rays.length * 4);
+        for (let i = 0; i < rays.length; i++) {
+            bestRays[i * 4]     = rays[i][0].x;
+            bestRays[i * 4 + 1] = rays[i][0].y;
+            bestRays[i * 4 + 2] = rays[i][1].x;
+            bestRays[i * 4 + 3] = rays[i][1].y;
+        }
+        const readings = bc.sensor.readings;
+        bestReadings = new Float32Array(rays.length * 3);
+        for (let i = 0; i < rays.length; i++) {
+            const r = readings[i];
+            if (r) {
+                bestReadings[i * 3]     = r.x;
+                bestReadings[i * 3 + 1] = r.y;
+                bestReadings[i * 3 + 2] = r.offset;
+            } else {
+                bestReadings[i * 3]     = 0;
+                bestReadings[i * 3 + 1] = 0;
+                bestReadings[i * 3 + 2] = -1;
+            }
+        }
+        const ctrl = bc.controls;
+        bestControls = [
+            ctrl.forward ? 1 : 0,
+            ctrl.left    ? 1 : 0,
+            ctrl.right   ? 1 : 0,
+            ctrl.reverse ? 1 : 0
+        ];
+        bestSpeed = bc.speed;
+        bestMaxSpeed = bc.maxSpeed;
+        bestDamaged = bc.damaged ? 1 : 0;
+        bestCheckpoints = bc.checkPointsCount;
+        bestLaps = bc.laps;
+        bestLapTimes = Array.isArray(bc.lapTimes) ? bc.lapTimes.slice() : null;
+    }
+
+    const transfer = [positions.buffer];
+    if (bestRays)     transfer.push(bestRays.buffer);
+    if (bestReadings) transfer.push(bestReadings.buffer);
+
+    self.postMessage({
+        type: 'snapshot',
+        frameCount: self.frameCount,
+        bestIdx, bestEpoch,
+        positions, N,
+        bestRays, bestReadings, bestControls,
+        bestSpeed, bestMaxSpeed, bestDamaged,
+        bestCheckpoints, bestLaps, bestLapTimes,
+        simMs, steps
+    }, transfer);
+}
+
+function endGen() {
+    if (!self.bestCar) return;
+    const bc = self.bestCar;
+    const flat = flattenBrain(bc.brain);
+    const cpLen = self.road.checkPointList.length || 0;
+    self.postMessage({
+        type: 'genEnd',
+        bestBrain: flat,
+        fitness: bc.checkPointsCount + bc.laps * cpLen,
+        laps: bc.laps,
+        lapTimes: Array.isArray(bc.lapTimes) ? bc.lapTimes.slice() : [],
+        checkPointsCount: bc.checkPointsCount,
+        frameCount: self.frameCount
+    }, [flat.buffer]);
+    // Wait for main's next `begin` — stepping is paused until then.
+    pause = true;
+}
+
+// Ready signal so main can sync init before posting begin().
+self.postMessage({ type: 'ready' });

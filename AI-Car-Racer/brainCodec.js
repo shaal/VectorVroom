@@ -16,13 +16,14 @@ export function flatten(brain) {
   let k = 0;
   for (let L = 0; L < brain.levels.length; L++) {
     const level = brain.levels[L];
+    // level.biases + level.weights are Float32Arrays in the typed-array
+    // network; legacy nested-array brains would have reached here only via
+    // reviveBrain which also normalises to flat Float32Array.
     for (let j = 0; j < level.biases.length; j++) {
       out[k++] = level.biases[j];
     }
-    for (let i = 0; i < level.weights.length; i++) {
-      for (let j = 0; j < level.weights[i].length; j++) {
-        out[k++] = level.weights[i][j];
-      }
+    for (let w = 0; w < level.weights.length; w++) {
+      out[k++] = level.weights[w];
     }
   }
   return out;
@@ -41,18 +42,9 @@ export function unflatten(float32, topology = TOPOLOGY) {
     const level = net.levels[L];
     const inC = topology[L];
     const outC = topology[L + 1];
-    const biases = new Array(outC);
-    for (let j = 0; j < outC; j++) biases[j] = float32[k++];
-    level.biases = biases;
-    const weights = new Array(inC);
-    for (let i = 0; i < inC; i++) {
-      const row = new Array(outC);
-      for (let j = 0; j < outC; j++) row[j] = float32[k++];
-      weights[i] = row;
-    }
-    level.weights = weights;
-    level.inputs = new Array(inC);
-    level.outputs = new Array(outC);
+    for (let j = 0; j < outC; j++) level.biases[j] = float32[k++];
+    const weightCount = inC * outC;
+    for (let w = 0; w < weightCount; w++) level.weights[w] = float32[k++];
   }
   return net;
 }

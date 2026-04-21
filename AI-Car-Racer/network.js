@@ -1,133 +1,160 @@
+// Typed-array neural network. Weights + biases stored in Float32Array for
+// cache-friendly flat access in the feedForward hot path. Original nested
+// `Array<Array<number>>` layout accessed the column of a column-major logical
+// matrix via `weights[j][i]` — every inner-loop iteration dereferenced a
+// different inner array, so V8 couldn't optimize the inner loop into a tight
+// FMA sequence. Flat Float32Array indexed as `weights[j * outputCount + i]`
+// sits in contiguous memory and the JIT generates much better code.
+//
+// Wire format (for JSON.stringify / ruvector / brainCodec) stays stable via
+// serializeBrain / reviveBrain helpers below. Old saved brains (nested
+// arrays) load transparently.
+
 class NeuralNetwork{
     constructor(neuronCounts){
         this.levels=[];
         for(let i=0;i<neuronCounts.length-1;i++){
-            //adding a new level 
             this.levels.push(new Level(
                 neuronCounts[i],neuronCounts[i+1]
             ));
         }
     }
-    
-    // feedForward: putting in the outputs of the previous level into the new level as the input
-    // final outputs will tell if the car should go forward, backward, left ot right
+
     static feedForward(givenInputs,network){
-        //get the output by calling feedForward from Level class with giveninputs and network of the first level
-        //first level to produce the output
         let outputs=Level.feedForward(givenInputs,network.levels[0]);
-            
-        // Looping through the remaining levels
         for(let i=1;i<network.levels.length;i++){
-            outputs=Level.feedForward(
-                outputs,network.levels[i]);
+            outputs=Level.feedForward(outputs,network.levels[i]);
         }
         return outputs;
     }
 
+    // mutate in place — flat Float32Array walk is ~3× the old nested loop
+    // and doesn't allocate. Called once per generation per car, so amortised
+    // cost is tiny, but keeping it tight keeps V8 happy about inlining.
     static mutate(network,amount=1){
-        network.levels.forEach(level => {
-            for(let i=0;i<level.biases.length;i++){
-                level.biases[i]=lerp(biases[i],Math.random()*2-1,amount);
+        for(let L=0;L<network.levels.length;L++){
+            const level = network.levels[L];
+            const b = level.biases, w = level.weights;
+            for(let i=0;i<b.length;i++){
+                b[i] = lerp(b[i], Math.random()*2-1, amount);
             }
-            for(let i=0;i<level.weights.length;i++){
-                for(let j=0; j<level.weights[i]; j++){
-                    level.weights[i][j]=lerp(level.weights[i][j],Math.random()*2-1,amount);
-                }
+            for(let i=0;i<w.length;i++){
+                w[i] = lerp(w[i], Math.random()*2-1, amount);
             }
-        })
-    }
-
-    // mutate is like the randomize method, but it's random all network
-    static mutate(network,amount=1){
-        network.levels.forEach(level=>{
-            for(let i=0;i<level.biases.length;i++){
-                level.biases[i]=lerp(
-                    level.biases[i],
-                    Math.random()*2-1,
-                    amount
-                )
-            }
-            for(let i=0;i<level.weights.length;i++){
-                for(let j=0;j<level.weights[i].length;j++){
-                    level.weights[i][j]=lerp(
-                        level.weights[i][j],
-                        Math.random()*2-1,
-                        amount
-                    )
-                }
-            }
-    });
+        }
     }
 }
 
-// Create 1 level
 class Level{
     constructor(inputCount,outputCount){
-        // inputs are getting from the sensor of the car
-        // but the outputs will be computed by "Weights & Biases" that we defined that is randomize (In smart brain, they're not random, it has structure)
-        this.inputs = new Array(inputCount);
-        this.outputs = new Array(outputCount);
-        this.biases=new Array(outputCount);
-
-        this.weights=[];
-        for(let i=0;i<inputCount;i++){
-            this.weights[i]=new Array(outputCount);
-            // the weight of each input is the size of the output count 
-        }
-
+        this.inputCount  = inputCount;
+        this.outputCount = outputCount;
+        // Flat layouts. `weights[j * outputCount + i]` = weight from input j
+        // to output i. Inputs/outputs are scratch buffers, reused each call.
+        this.inputs  = new Float32Array(inputCount);
+        this.outputs = new Float32Array(outputCount);
+        this.biases  = new Float32Array(outputCount);
+        this.weights = new Float32Array(inputCount * outputCount);
         Level.#randomize(this);
     }
-    //use "static" to serialize this "Object" afterwards 
-    //                  and the "Method" don't serialize.
-    static #randomize(level){
-        // for each i/o pair
-        for(let i=0;i<level.inputs.length;i++){
-            for(let j=0;j<level.outputs.length;j++){
-                // give them a random weight between [-1,1]                                   
-                level.weights[i][j]=Math.random()*2-1;   
-                    //  Math.random() gives a number between 0 though 1 
-                    //  Math.random()*2 = [0,2] (close bracelet, number never reaches 0 or 2)  
-            }
-        }
 
-        for(let i=0;i<level.biases.length;i++){
-            level.biases[i]=Math.random()*2-1;
-        }
+    static #randomize(level){
+        const w = level.weights, b = level.biases;
+        for(let k=0;k<w.length;k++) w[k] = Math.random()*2-1;
+        for(let k=0;k<b.length;k++) b[k] = Math.random()*2-1;
     }
 
     static feedForward(givenInputs,level){
-        // 1. Go through all level inputs 
-        // 2. Set them givenInputs
-        for(let i=0;i<level.inputs.length;i++){
-            level.inputs[i] = givenInputs[i];
-        }
-
-        for(let i=0;i<level.outputs.length;i++){
-            let sum=0
-            for(let j=0;j<level.inputs.length;j++){
-                sum+=level.inputs[j]*level.weights[j][i];
+        const inC = level.inputCount, outC = level.outputCount;
+        const inputs = level.inputs, outputs = level.outputs;
+        const weights = level.weights, biases = level.biases;
+        // Copy inputs into scratch (givenInputs may be a plain Array from the
+        // sensor path — we want the contiguous Float32Array for the loop).
+        for(let i=0;i<inC;i++) inputs[i] = givenInputs[i];
+        for(let i=0;i<outC;i++){
+            let sum = 0;
+            // Flat index: weight from input j to output i lives at j*outC+i.
+            let k = i;
+            for(let j=0;j<inC;j++){
+                sum += inputs[j] * weights[k];
+                k += outC;
             }
-            if(sum>level.biases[i]){
-                //if sum grater than the bias of this output neuron,
-                //turn output neuron off
-                level.outputs[i]=1;
-            }else{
-                //turn output neuron on
-                level.outputs[i]=0;
-            } 
+            outputs[i] = sum > biases[i] ? 1 : 0;
         }
-        // return those outputs
-        return level.outputs;
+        return outputs;
     }
 }
 
+// -----------------------------------------------------------------------------
+// Wire-format helpers. JSON can't round-trip Float32Array cleanly
+// (`JSON.stringify(new Float32Array([1]))` → `{"0":1}`, which doesn't revive
+// with `.length`), so we convert to/from plain arrays at the boundary.
+//
+// reviveBrain accepts both the new shape (flat `weights` array, `inputCount`,
+// `outputCount`) AND the legacy nested shape (`weights[i][j]`) so existing
+// `localStorage.bestBrain` values keep working across this change.
+// -----------------------------------------------------------------------------
 
-// biases = outputCount 
+function serializeBrain(nn){
+    if (!nn || !nn.levels) return nn;
+    return {
+        levels: nn.levels.map(function(L){
+            return {
+                inputCount: L.inputCount,
+                outputCount: L.outputCount,
+                biases: Array.from(L.biases),
+                weights: Array.from(L.weights)
+            };
+        })
+    };
+}
+
+function reviveBrain(obj){
+    if (!obj || !obj.levels) return obj;
+    const out = { levels: [] };
+    for (let L = 0; L < obj.levels.length; L++){
+        const src = obj.levels[L];
+        let inputCount  = src.inputCount;
+        let outputCount = src.outputCount;
+        let weightsFlat;
+        if (Array.isArray(src.weights) && Array.isArray(src.weights[0])){
+            // Legacy nested format: src.weights[j][i].
+            inputCount  = src.weights.length;
+            outputCount = src.weights[0].length;
+            weightsFlat = new Float32Array(inputCount * outputCount);
+            for (let j=0;j<inputCount;j++){
+                for (let i=0;i<outputCount;i++){
+                    weightsFlat[j * outputCount + i] = src.weights[j][i];
+                }
+            }
+        } else {
+            // New flat format.
+            if (outputCount == null && inputCount != null && src.weights){
+                outputCount = src.weights.length / inputCount;
+            }
+            weightsFlat = Float32Array.from(src.weights || []);
+        }
+        if (inputCount == null && src.inputs) inputCount = src.inputs.length;
+        if (outputCount == null && src.biases) outputCount = src.biases.length;
+        out.levels.push({
+            inputCount: inputCount,
+            outputCount: outputCount,
+            inputs:  new Float32Array(inputCount  || 0),
+            outputs: new Float32Array(outputCount || 0),
+            biases:  Float32Array.from(src.biases || []),
+            weights: weightsFlat
+        });
+    }
+    return out;
+}
+
+
+// biases = outputCount
 // 2nd output layer             *     *   *    *
-//                            /     /   /    / 
+//                            /     /   /    /
  //                         /    /  /     /
  // Connections           /   /  /    /
  //                     /  /  /   /
- //                   / /  /  /          
+ //                   / /  /  /
 //                  /// / /
 // 1st input layer *        *     *     *      *
