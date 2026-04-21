@@ -22,6 +22,14 @@
         <div id="rv-panel"></div>
     </div>
 
+    <div id="track-preset-picker" style="position:fixed; top:8px; left:8px; z-index:1000; background:rgba(28,32,40,0.92); color:#eee; padding:8px 10px; border-radius:6px; font:12px/1.4 system-ui,-apple-system,sans-serif; display:none; box-shadow:0 2px 8px rgba(0,0,0,0.35);">
+        <label for="track-preset-select" style="display:block; margin-bottom:4px; opacity:0.85;">Load preset track:</label>
+        <select id="track-preset-select" style="margin-right:6px; background:#1a1d23; color:#eee; border:1px solid #3a3f48; border-radius:3px; padding:2px 4px;">
+            <option value="">&mdash; select &mdash;</option>
+        </select>
+        <button id="track-preset-load" type="button" style="background:#3a7bd5; color:#fff; border:none; border-radius:3px; padding:3px 10px; cursor:pointer;">Load</button>
+    </div>
+
     <script src="inputVisual.js"></script>
     <script src="grapher.js"></script>
     <script src="roadEditor.js"></script>
@@ -37,6 +45,7 @@
     <script src="buttonResponse.js"></script>
     <script src="main.js"></script>
     <script src="uiPanels.js"></script>
+    <script src="trackPresets.js"></script>
     <script type="module">
       // Sidecar module: warms the ruvector bridge and exposes handles on
       // window.__rvBridge / window.__rvUnflatten for classic-script consumers
