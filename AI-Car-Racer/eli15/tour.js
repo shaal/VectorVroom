@@ -196,6 +196,13 @@
     if (window.ELI15 && typeof window.ELI15.closeDrawer === 'function') {
       window.ELI15.closeDrawer();
     }
+    // Body is `overflow: hidden` in this app (fullscreen grid). If an earlier
+    // scrollIntoView pushed the document down, the user has no scrollbar to
+    // recover — reset defensively so closing the tour always returns to the
+    // original top-of-page view.
+    const se = document.scrollingElement || document.documentElement;
+    if (se && se.scrollTop) se.scrollTop = 0;
+    if (document.body && document.body.scrollTop) document.body.scrollTop = 0;
   }
 
   function next() {
@@ -222,12 +229,21 @@
     const step = STEPS[_idx];
     if (!step) { stop(); return; }
 
-    // Open the chapter in the drawer. openChapter no-ops if the id is
-    // missing from the registry — we log so a future author adding a step
-    // with a typo gets a visible warning instead of a silent no-op.
-    if (window.ELI15 && typeof window.ELI15.openChapter === 'function') {
-      try { window.ELI15.openChapter(step.id); }
-      catch (e) { console.warn('[tour] openChapter failed for ' + step.id, e); }
+    // Drawer policy: anchored steps CLOSE the drawer so it doesn't cover the
+    // ringed target (the drawer docks to the right and `#rv-panel` sits under
+    // it, so leaving the drawer open meant ringing a square the user couldn't
+    // see). Conceptual-only steps (anchor: null) open the drawer with the
+    // chapter, since there's nothing to point at — the reading IS the step.
+    // Users who want the full chapter on an anchored step can click the
+    // ringed `[data-eli15]` badge, which opens the drawer on demand.
+    const hasAnchor = !!step.anchor;
+    if (window.ELI15) {
+      if (!hasAnchor && typeof window.ELI15.openChapter === 'function') {
+        try { window.ELI15.openChapter(step.id); }
+        catch (e) { console.warn('[tour] openChapter failed for ' + step.id, e); }
+      } else if (hasAnchor && typeof window.ELI15.closeDrawer === 'function') {
+        window.ELI15.closeDrawer();
+      }
     } else {
       console.warn('[tour] ELI15 framework not ready; continuing without drawer');
     }
@@ -245,12 +261,19 @@
     cardEl.hidden = false;
     positionCard();
 
-    // Ring + anchor scroll. A missing anchor hides the ring but leaves the
-    // card visible (useful for conceptual-only steps like fitness-function).
-    const target = step.anchor ? document.querySelector(step.anchor) : null;
+    // Ring placement. We deliberately do NOT call scrollIntoView: body is
+    // `overflow: hidden` in this app, so programmatic scroll works one-way
+    // (scrolls down, no user scrollbar to scroll back). If the target is
+    // clipped off-screen at the current window size, the step stays readable
+    // via the card — we just suppress the ring rather than trap the viewport.
+    const target = hasAnchor ? document.querySelector(step.anchor) : null;
     if (target) {
-      try { target.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (_) {}
-      positionRing(target);
+      const rect = target.getBoundingClientRect();
+      const inViewport =
+        rect.bottom > 0 && rect.top < window.innerHeight &&
+        rect.right > 0 && rect.left < window.innerWidth;
+      if (inViewport) positionRing(target);
+      else ringEl.hidden = true;
     } else {
       ringEl.hidden = true;
     }
@@ -274,10 +297,12 @@
   }
 
   function positionRing(target) {
+    // Ring is `position: fixed` (see style.css) so coordinates are viewport-
+    // relative — no `+ window.scrollY`. Using fixed also keeps the ring from
+    // extending the document's scrollHeight when it's placed at a large y.
     const rect = target.getBoundingClientRect();
-    // Clamp to viewport so the ring doesn't fly off during smooth scroll.
-    const top = Math.max(8, rect.top - 6) + window.scrollY;
-    const left = Math.max(8, rect.left - 6) + window.scrollX;
+    const top = Math.max(8, rect.top - 6);
+    const left = Math.max(8, rect.left - 6);
     const width = Math.max(24, rect.width + 12);
     const height = Math.max(24, rect.height + 12);
     ringEl.style.top = top + 'px';

@@ -632,7 +632,7 @@ h1{
     transform: translateY(-1px);
 }
 .eli15-tour-ring {
-    position: absolute;
+    position: fixed;
     pointer-events: none;
     z-index: 1150;
     border: 3px solid #3a7bd5;
