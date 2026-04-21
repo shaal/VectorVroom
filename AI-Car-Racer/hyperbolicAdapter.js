@@ -99,8 +99,25 @@ export class HyperbolicVectorDB {
       throw new Error(`HyperbolicVectorDB.insert: expected dim=${this._dim}, got ${vector.length}`);
     }
     const projected = projectToBall(vector, CURVATURE);
+    let strId;
+    if (id != null) {
+      strId = String(id);
+      // If the caller hands us an `hb_N` id (e.g. rebuildIndicesFromMirror
+      // replaying a previously-persisted archive into a fresh instance),
+      // bump the counter past N so a subsequent null-id insert can't
+      // collide. Without this, an archive → index-flip → flip-back →
+      // archive sequence would mint a second `hb_0` and silently alias
+      // the two entries in the mirror.
+      if (strId.startsWith('hb_')) {
+        const n = parseInt(strId.slice(3), 10);
+        if (Number.isFinite(n) && n >= this._idCounter) {
+          this._idCounter = n + 1;
+        }
+      }
+    } else {
+      strId = `hb_${this._idCounter++}`;
+    }
     const numId = this._index.insert(projected);
-    const strId = id != null ? String(id) : `hb_${this._idCounter++}`;
     this._numToString.set(numId, strId);
     this._stringToNum.set(strId, numId);
     // Keep the ORIGINAL pre-projection vector in the mirror so callers that
