@@ -895,4 +895,75 @@ Sessions: append a dated entry below — don't edit prior entries.
       top-K inside `observe()` in `ruvectorBridge.js` before the EMA
       writes, then expose `info().lastEmaShift`. The graph would
       then read THAT instead of computing a same-batch diff.
+
+2026-04-21 · sess-ship-task-presets · Track presets + render/crash fixes.
+  Scope: UX delivery + two bugfixes discovered while validating the
+  "Seeded GA improves" verification gate. The gate itself was DEFERRED
+  (not marked [x]) per user direction — the two arms of the A/B
+  experiment both returned invalid results (Arm A ran on a track whose
+  corridor did not contain startInfo; Arm B crashed inside the
+  agent-browser daemon on a parallel session).
+
+  Work:
+    - NEW AI-Car-Racer/trackPresets.js — 5 hand-designed tracks
+      (Rectangle, Oval, Triangle, Hexagon, Pentagon) each guaranteed
+      by construction to contain startInfo (2880, 900) in the corridor.
+      Exports window.TRACK_PRESETS + window.loadTrackPreset(idxOrName).
+      Writes localStorage.{trackInner,trackOuter,checkPointList} AND
+      clears bestBrain/progress/rvAnnotations so a preset load starts
+      fresh (the ruvector archive is intentionally NOT cleared —
+      cross-track seed recall is exactly what the bridge is for).
+      Adds a phase-1/2-only floating dropdown UI (#track-preset-picker)
+      in index.html.
+    - FIX AI-Car-Racer/roadEditor.js drawLines() — walls rendered at
+      lineWidth=2 canvas-px, but canvas is 3200x1800 downscaled to
+      ~1028 CSS px (3.1x shrink), so 2-px strokes collapsed to ~0.65
+      CSS px and became invisible on the gameplay view. Bumped to
+      wallW=12 / closeW=12 / checkW=8 when editMode=false. Editor
+      phase (editMode=true) still uses 2px/0.75px so the feel of
+      dragging vertices is unchanged.
+    - FIX AI-Car-Racer/main.js:218 — `fastLap.toFixed(2)` threw
+      TypeError on first phase-4 frame whenever fastLap was still
+      the string '--' (its default per main.js:24, before any lap
+      completes). Uncaught exceptions in rAF callbacks do NOT
+      re-schedule the next frame, so the animation loop silently
+      died after frame 1 — manifesting to the user as "Train Your
+      Model page not moving". One-line type guard: only call
+      toFixed when typeof fastLap === 'number'.
+
+  Why two bugs stacked into one user-visible symptom:
+    - fastLap fix alone → animation loops but walls invisible (no
+      movement cue for the user besides car pixels)
+    - line-width fix alone → walls visible but animation frozen
+      after frame 1 (no movement at all)
+    - Both needed simultaneously. The fastLap bug was latent because
+      prior-session leftover state in localStorage ('fastLap' = 12.34)
+      meant developers running with residual state never hit it; a
+      user on a clean state or after `localStorage.clear()` would
+      see the freeze immediately.
+
+  Verification trail (agent-browser, headed mode at :8800):
+    - docs/validation/screenshots/debug-train-t{0,5,15,20}.png
+      (pre-fix baseline showing invisible walls + tiny car)
+    - docs/validation/screenshots/debug-train-postfix-{phase1,phase4}.png
+      (line-width fix validated, phase-1 editor unchanged)
+    - docs/validation/screenshots/train-phase-fix-verified.png
+      (fastLap fix validated; 9/10 cars moving, frameCount=831,
+       no console errors, fresh localStorage state)
+    - Pixel sampling at the outer top wall returned RGBA
+      (255,255,255,255) — walls survive the CSS downscale now.
+
+  Deferred — "Seeded GA improves" gate:
+    The empirical A/B test was invalidated twice over and was set
+    aside on user direction. Next session that picks this up should:
+      1. Use the Rectangle preset (widest corridor).
+      2. Run both arms SEQUENTIALLY in a single headed Chromium
+         (parallel agent-browser sessions broke the daemon in the
+         2026-04-20 attempt).
+      3. Record end-of-batch `bestCar.checkPointsCount +
+         bestCar.laps * road.checkPointList.length`.
+      4. Consider whether `fastLap='Infinity'` sentinel would be a
+         cleaner default than the string '--' — if so, update
+         main.js:24/158 and buttonResponse.js:56/61 together to
+         avoid re-breaking the type-guard.
 ```

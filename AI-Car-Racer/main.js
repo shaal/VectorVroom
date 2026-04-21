@@ -211,7 +211,11 @@ function animate(){
     if(phase==4){        
         const timer = document.getElementById("timer");
         timer.innerHTML = "<p>Game Time: " + String((frameCount/60).toFixed(2)) + "</p>";
-        timer.innerHTML += "<p>Fast Lap: " + fastLap.toFixed(2) + "</p>";
+        // fastLap defaults to '--' until a lap completes (main.js:24).
+        // Call toFixed only when it's numeric — otherwise the TypeError
+        // throws out of animate(), kills the rAF chain, and the training
+        // loop silently freezes with no visible movement on phase 4.
+        timer.innerHTML += "<p>Fast Lap: " + (typeof fastLap === 'number' ? fastLap.toFixed(2) : fastLap) + "</p>";
         if(frameCount==60*seconds){
             nextBatch();
         }

@@ -75,15 +75,22 @@ class roadEditor{
        this.drawStartPos(this.startInfo, this.ctx);
     }
     drawLines() {
+        // Canvas is 3200x1800 but the layout downscales it ~3x in CSS pixels,
+        // so sub-3px strokes vanish after downsample. Use 10–12 canvas px
+        // during gameplay (editMode=false) so walls remain legible to the eye.
+        const wallW = this.editMode ? 2 : 12;
+        const closeW = this.editMode ? .75 : 12;
+        const checkW = this.editMode ? 2 : 8;
+
         this.ctx.beginPath();
         this.ctx.moveTo(this.points[0].x, this.points[0].y);
         this.ctx.strokeStyle = "white";
-        this.ctx.lineWidth = 2;
+        this.ctx.lineWidth = wallW;
         this.points.forEach((p) => {
             this.ctx.lineTo(p.x, p.y);
         })
         this.ctx.stroke();
-        this.ctx.lineWidth = this.editMode?.75:2;
+        this.ctx.lineWidth = closeW;
         this.ctx.globalAlpha = this.editMode?.2:1;
         this.ctx.lineTo(this.points[0].x,this.points[0].y);
         this.ctx.stroke();
@@ -92,19 +99,19 @@ class roadEditor{
         this.ctx.beginPath();
         this.ctx.moveTo(this.points2[0].x, this.points2[0].y);
         this.ctx.strokeStyle = "white";
-        this.ctx.lineWidth = 2;
+        this.ctx.lineWidth = wallW;
         this.points2.forEach((p) => {
             this.ctx.lineTo(p.x, p.y);
         })
         this.ctx.stroke();
-        this.ctx.lineWidth = this.editMode?.75:2;
+        this.ctx.lineWidth = closeW;
         this.ctx.globalAlpha = this.editMode?.2:1;
         this.ctx.lineTo(this.points2[0].x,this.points2[0].y);
         this.ctx.stroke();
         this.ctx.globalAlpha = 1;
 
         this.ctx.strokeStyle = "green";
-        this.ctx.lineWidth = 2;
+        this.ctx.lineWidth = checkW;
         this.checkPointListEditor.forEach((p)=>{
             this.ctx.beginPath();
             this.ctx.moveTo(p[0].x,p[0].y);
