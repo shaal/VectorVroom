@@ -362,6 +362,19 @@ have two parents but never a time-loop."
   randomly-sampled brains from a seeded archive.
 - Viewer renders without errors on the largest saved archive.
 
+**Shipped notes.** `tests/lineage-dag-equivalence.html` drives a seeded
+80-brain fixture (`lineage-forest.json`: 5 lineage spines + 20 isolates, with
+multi-parent DAG nodes on every 4th generation) through both the new DAG path
+and the retained `getLineageLegacy()`. 50 reproducible random samples (PRNG
+seed=42) pass structural equality on every step (id, fitness, generation).
+The viewer lives inside `#rv-panel` as a collapsed section (`🌳 Lineage DAG`);
+expanding triggers a canvas layout pass in `AI-Car-Racer/lineage/viewer.js`.
+`ruvector-dag-wasm` is vendored into `vendor/ruvector/ruvector_dag_wasm/`;
+`VENDORED.md` records the same upstream commit as the P2.A SONA vendor
+(`v2.2.0-21-gd5d3296c-dirty`). The legacy walker stays reachable through
+`ruvectorBridge.getLineageLegacy()` and the test-only
+`setForceLegacyLineage()` switch, so future regressions can replay this gate.
+
 ---
 
 ## Wave 4 — teaching capstone
@@ -427,5 +440,5 @@ Fill in as phases ship. `ship-task` writes back here on completion.
 | P1.C | ✅ shipped | claude-opus-4-7 | (see git log) | `dynamics-embedding` |
 | P2.A | ✅ shipped | claude-opus-4-7 | (this commit) | `sona-trajectory`, `reasoningbank`, `ewc` |
 | P3.A | ☐ | — | — | — |
-| P3.B | ☐ | — | — | — |
+| P3.B | ✅ shipped | claude-opus-4-7 | (this commit) | `lineage-dag` |
 | P4.A | ☐ | — | — | — |

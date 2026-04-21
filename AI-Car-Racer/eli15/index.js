@@ -103,6 +103,11 @@
       oneLiner: 'A penalty term that pins "important" weights so fine-tuning on a new track doesn\'t clobber prior skills.',
       loader: function () { return import('./chapters/ewc.js'); },
     },
+    'lineage-dag': {
+      title: 'Lineage as a DAG — a family tree with no time-loops',
+      oneLiner: 'Parents point to children; cycles rejected at insert. Powers the 🌳 Lineage viewer.',
+      loader: function () { return import('./chapters/lineage-dag.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.

@@ -49,7 +49,9 @@ These are the friction points you may hit on a fresh clone:
   directly. Closes with `ESC` or by clicking the backdrop. Chapters now cover
   every existing AI feature — sensors, neural network, genetic algorithm,
   fitness function, CNN embedder, HNSW vector DB, EMA reranker, brain
-  lineage, cross-track similarity, the GNN reranker, and the LoRA track adapter.
+  lineage, cross-track similarity, the GNN reranker, the LoRA track adapter,
+  SONA trajectories / ReasoningBank / EWC, and the lineage DAG viewer
+  (🌳 Lineage DAG section in the Vector Memory panel).
 - **Track preset picker** appears top-left during phase 1 (editor phase);
   pick one of 5 pre-authored tracks or draw your own with left/right click.
   Loading a preset clears `bestBrain`/`progress` (the old brain is bound to

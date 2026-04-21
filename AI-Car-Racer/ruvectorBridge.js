@@ -9,6 +9,22 @@ import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_was
 import initCnn, { CnnEmbedder } from '../vendor/ruvector/ruvector_cnn_wasm/index.js';
 import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY } from './brainCodec.js';
 import { loadGnn, isReady as gnnIsReady, gnnScore } from './gnnReranker.js';
+// P3.B — lineage DAG. Replaces the hand-walked parentIds traversal in
+// getLineage() with a cycle-safe DAG structure (ruvector_dag_wasm) shadowed
+// by a JS-side adjacency list for O(depth) queries. Same fallback discipline
+// as gnnReranker: when the wasm module doesn't load, the bridge keeps the
+// legacy in-function walk around (exposed as getLineageLegacy for the P3.B
+// equivalence harness). See AI-Car-Racer/lineage/dag.js for the wrapper.
+import {
+  loadDag,
+  isReady as dagIsReady,
+  addBrain as dagAddBrain,
+  getLineage as dagGetLineage,
+  hydrateFromMirror as dagHydrateFromMirror,
+  getGraphSnapshot as dagGetGraphSnapshot,
+  info as dagInfo,
+  _debugReset as dagDebugReset,
+} from './lineage/dag.js';
 // P2.A — the SONA engine is a façade that subsumes the P1.B MicroLoRA
 // adapter (unchanged call shape: adapt / reward / drift) and adds trajectory
 // recording + ReasoningBank pattern extraction. We keep the `lora*` local
@@ -112,12 +128,23 @@ export function ready() {
     // either resolves to null, the corresponding code path silently falls back
     // (EMA reranker for GNN; identity transform for LoRA).
     const gnnPromise = loadGnn();
+    // P3.B — boot the DAG wasm in parallel with everything else. Loading it
+    // here (before hydrate() resolves) means the hydrateDagFromMirror() call
+    // at the tail of ready() can populate it in one go; if loadDag fails we
+    // silently leave isReady() false and the bridge falls back to the legacy
+    // walk.
+    const dagPromise = loadDag();
     // P2.A — loadSonaEngine boots the LoRA adapter AND the SONA ephemeral
     // agent in parallel. Either side can fail independently without taking
     // the other down; we log+fall through in both cases.
     const sonaPromise = loadSonaEngine();
     await hydrate();
     try { await gnnPromise; } catch (_) { /* already logged inside loadGnn */ }
+    try { await dagPromise; } catch (_) { /* already logged inside loadDag */ }
+    // Once the mirror + DAG are both live, one-shot-populate the DAG from
+    // whatever hydrate() just loaded. Skipped when the wasm didn't load.
+    try { if (dagIsReady()) dagHydrateFromMirror(_brainMirror); }
+    catch (e) { console.warn('[lineage-dag] hydrate failed', e); }
     try {
       await sonaPromise;
       // Hydrate adapter B-matrices after the wasm engines are live. Done
@@ -176,6 +203,11 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   if (dynamicsId !== null) meta.dynamicsId = dynamicsId;
   const id = _brainDB.insert(vec, null, meta);
   _brainMirror.set(id, { vector: vec, meta });
+  // P3.B — incremental DAG add. Safe no-op when the dag wasm didn't load.
+  // The DAG uses meta.parentIds to wire edges; unknown parents (not yet in
+  // the mirror) are silently skipped — same relaxed contract as the legacy
+  // walk, which just returns shorter trails when an ancestor is missing.
+  try { dagAddBrain(id, meta); } catch (e) { console.warn('[lineage-dag] addBrain failed', e); }
   // Feed the LoRA reward signal: the most-recent adapt() input (cached inside
   // trackAdapter) is the gradient direction; fitness gates whether it fires.
   // No-op when the adapter isn't ready or `recommendSeeds` hasn't been called
@@ -396,6 +428,11 @@ export function info() {
       count: _dynamicsMirror.size,
       hasQuery: !!_queryDynamicsVec,
     },
+    // P3.B — lineage DAG stats. `lineageDag.ready` is the canonical flag for
+    // the viewer's "is the graph live?" check. `nodeCount` / `edgeCount` come
+    // straight from the wasm side; `droppedEdges` is >0 only if malformed
+    // parent ids somehow produced a cycle.
+    lineageDag: dagInfo(),
   };
 }
 
@@ -419,12 +456,38 @@ export function findSimilarCircuits(trackVec, k = 5) {
   try { return sonaFindPatterns(trackVec, k); } catch (e) { console.warn('[sona] findPatterns failed', e); return []; }
 }
 
+// P3.B — lineage assembly. When the DAG wasm is loaded we route through
+// lineage/dag.js (cycle-safe, O(depth) via JS-side adjacency); otherwise we
+// fall back to the legacy in-function walk over _brainMirror. Both paths
+// share the same contract: return [{id, fitness, generation}] oldest→newest,
+// pick highest-fitness non-visited parent at each step, cap at maxDepth.
+//
+// Test-only override `_forceLegacyLineage` lets the equivalence harness
+// capture both outputs from a single archive snapshot without tearing state
+// down in between.
+let _forceLegacyLineage = false;
+export function setForceLegacyLineage(on) { _forceLegacyLineage = !!on; }
+
+export function getLineage(id, maxDepth = 6) {
+  if (!_forceLegacyLineage && dagIsReady()) {
+    const t = dagGetLineage(id, maxDepth);
+    if (t && t.length > 0) return t;
+    // Empty result can legitimately mean "id unknown to the DAG" — fall
+    // through to the legacy path, which also answers [] for unknown ids but
+    // using the mirror as source of truth. This way the API never silently
+    // mismatches between paths on brains that exist in the mirror but aren't
+    // yet mirrored in the DAG (e.g. an archive hydrated before the wasm
+    // finished loading).
+  }
+  return getLineageLegacy(id, maxDepth);
+}
+
 // Walk meta.parentIds backwards to assemble a lineage trail.
 // At each step, when a brain has multiple parents, we pick the highest-fitness
 // ancestor — that is "the line of descent we credit this genome to". Cycle-safe
 // via a visited set; depth-capped so pathological graphs can't blow the stack.
 // Returns entries oldest→newest (i.e. ancestor first, queried id last).
-export function getLineage(id, maxDepth = 6) {
+export function getLineageLegacy(id, maxDepth = 6) {
   if (!id || !_brainMirror.has(id)) return [];
   const seen = new Set();
   const trail = [];
@@ -454,6 +517,17 @@ export function getLineage(id, maxDepth = 6) {
   }
   return trail.reverse();
 }
+
+// P3.B — surface the DAG structure to the viewer panel. Returns `{nodes,
+// edges}` or empty lists when the wasm isn't ready. Viewer keeps its last
+// non-empty snapshot so it doesn't blank out during hot-reload races.
+export function getLineageGraph() {
+  if (!dagIsReady()) return { nodes: [], edges: [], droppedEdges: 0, ready: false };
+  const snap = dagGetGraphSnapshot();
+  snap.ready = true;
+  return snap;
+}
+export function getLineageDagInfo() { return dagInfo(); }
 
 // ─── persistence (native IndexedDB) ──────────────────────────────────────────
 
@@ -675,6 +749,14 @@ export function hydrateFromFixture(fixture) {
     _observations.set(row.id, { weight: row.weight || 0, count: row.count | 0 });
   }
   _rerankerMode = 'none';
+  // P3.B — rebuild the lineage DAG from scratch so its state matches the
+  // just-hydrated mirror. Skipped silently when the wasm didn't load.
+  try {
+    if (dagIsReady()) {
+      dagDebugReset();
+      dagHydrateFromMirror(_brainMirror);
+    }
+  } catch (e) { console.warn('[lineage-dag] fixture rehydrate failed', e); }
 }
 
 // Danger-knob: purge everything. Exposed for the verifier + dev console; the
@@ -686,6 +768,7 @@ export async function _debugReset() {
   _observations.clear();
   _queryDynamicsVec = null;
   sonaEngineDebugReset();
+  try { dagDebugReset(); } catch (_) { /* safe to ignore */ }
   if (typeof indexedDB !== 'undefined') {
     await new Promise((resolve) => {
       const req = indexedDB.deleteDatabase(IDB_NAME);

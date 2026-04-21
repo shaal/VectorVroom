@@ -105,6 +105,21 @@
     '  <span data-eli15="dynamics-embedding" role="button" tabindex="0" aria-label="Learn: dynamics trajectory embedding"></span>',
     '</div>',
     '<div class="rv-list" data-rv="list"></div>',
+    // P3.B — lineage DAG viewer. Collapsed by default so the panel doesn't
+    // get taller for users who never open it; expanding switches the section
+    // from `hidden` → `visible` and triggers the first render via the tick
+    // loop. The `🌳` is intentional — the section is literally a family tree.
+    '<div class="rv-lineage" data-rv="lineage" hidden>',
+    '  <div class="rv-lineage-header">',
+    '    <button type="button" class="rv-lineage-toggle" data-rv="lineage-toggle" aria-expanded="false">🌳 Lineage DAG ▸</button>',
+    '    <span class="rv-lineage-status" data-rv="lineage-status">—</span>',
+    '    <span data-eli15="lineage-dag" role="button" tabindex="0" aria-label="Learn: lineage as a DAG"></span>',
+    '  </div>',
+    '  <div class="rv-lineage-body" data-rv="lineage-body" hidden>',
+    '    <canvas class="rv-lineage-canvas" data-rv="lineage-canvas"></canvas>',
+    '    <div class="rv-lineage-tooltip" data-rv="lineage-tooltip" hidden></div>',
+    '  </div>',
+    '</div>',
   ].join('');
 
   const el = {
@@ -126,7 +141,36 @@
     sonaStats: root.querySelector('[data-rv="sona-stats"]'),
     circuits: root.querySelector('[data-rv="circuits"]'),
     circuitsList: root.querySelector('[data-rv="circuits-list"]'),
+    lineage: root.querySelector('[data-rv="lineage"]'),
+    lineageToggle: root.querySelector('[data-rv="lineage-toggle"]'),
+    lineageStatus: root.querySelector('[data-rv="lineage-status"]'),
+    lineageBody: root.querySelector('[data-rv="lineage-body"]'),
+    lineageCanvas: root.querySelector('[data-rv="lineage-canvas"]'),
+    lineageTooltip: root.querySelector('[data-rv="lineage-tooltip"]'),
   };
+
+  // P3.B — mount the lineage viewer once; rendering is driven from tick().
+  // We don't *expand* the section by default — the DAG costs a real layout
+  // pass, and the panel has plenty of other rows. The expand toggle below
+  // makes expanding a one-click action. Mounting is cheap (just attaches
+  // listeners) so we do it unconditionally.
+  let lineageExpanded = false;
+  if (el.lineageCanvas && window.LineageViewer) {
+    window.LineageViewer.mount({
+      canvas: el.lineageCanvas,
+      statusEl: el.lineageStatus,
+      tooltipEl: el.lineageTooltip,
+    });
+  }
+  if (el.lineageToggle) {
+    el.lineageToggle.addEventListener('click', function () {
+      lineageExpanded = !lineageExpanded;
+      el.lineageToggle.setAttribute('aria-expanded', String(lineageExpanded));
+      el.lineageToggle.textContent = lineageExpanded ? '🌳 Lineage DAG ▾' : '🌳 Lineage DAG ▸';
+      if (el.lineageBody) el.lineageBody.hidden = !lineageExpanded;
+      if (lineageExpanded && window.LineageViewer) window.LineageViewer.render();
+    });
+  }
 
   // Dynamics toggle wiring (P1.C). The checkbox owns UI state; the bridge
   // stores the flag so recommendSeeds() can read it without a round-trip
@@ -476,6 +520,37 @@
     el.circuitsList.innerHTML = html;
   }
 
+  function renderLineage(info) {
+    if (!el.lineage) return;
+    if (window.rvDisabled) { el.lineage.hidden = true; return; }
+    const dag = info && info.lineageDag;
+    // We show the header whenever the bridge is ready, even if the DAG
+    // wasm failed to load — that way the user sees "lineage DAG: unavailable"
+    // instead of silently hiding the feature. Only fully-hidden case is a
+    // not-ready bridge (loading) or rv=0.
+    if (!info || !info.ready) { el.lineage.hidden = true; return; }
+    el.lineage.hidden = false;
+    if (!dag || !dag.ready) {
+      if (el.lineageStatus) el.lineageStatus.textContent = 'DAG wasm unavailable — falling back to legacy walker.';
+      if (el.lineageBody) el.lineageBody.hidden = true;
+      if (el.lineageToggle) { el.lineageToggle.disabled = true; el.lineageToggle.style.opacity = '0.5'; }
+      return;
+    }
+    if (el.lineageToggle) { el.lineageToggle.disabled = false; el.lineageToggle.style.opacity = ''; }
+    // Only render the canvas when the section is actually expanded — keeps
+    // the default-collapsed path free.
+    if (lineageExpanded && window.LineageViewer) {
+      try { window.LineageViewer.render(); }
+      catch (e) { console.warn('[rv-panel] lineage render failed', e); }
+    } else if (el.lineageStatus) {
+      // Still update the header status so the user sees archive size growing
+      // even when the body is collapsed. This mirrors the info row behaviour.
+      el.lineageStatus.textContent = (dag.nodeCount | 0) + ' node' +
+        (dag.nodeCount === 1 ? '' : 's') + ' · ' + (dag.edgeCount | 0) + ' edge' +
+        (dag.edgeCount === 1 ? '' : 's');
+    }
+  }
+
   function renderList(seeds, info) {
     if (window.rvDisabled) {
       el.list.innerHTML = '<div class="rv-empty">Bridge disabled via ?rv=0 — archive not consulted this session.</div>';
@@ -667,6 +742,7 @@
     renderDynamics(info);
     renderBadge(trackVec, seeds);
     renderList(seeds, info || { ready: false, brains: 0 });
+    renderLineage(info);
 
     last = {
       ready: ready,

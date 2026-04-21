@@ -457,4 +457,64 @@ h1{
     font-family: ui-monospace, "SF Mono", Menlo, monospace;
     color: #dde;
 }
+/* P3.B — lineage DAG viewer. Collapsible to keep the panel short by default;
+   expanded body hosts a canvas that gets redrawn by lineage/viewer.js. */
+.rv-lineage {
+    margin-top: .3em;
+    padding-top: .25em;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.rv-lineage[hidden] { display: none; }
+.rv-lineage-header {
+    display: flex;
+    align-items: center;
+    gap: .4em;
+    font-size: .7rem;
+    color: #8aa;
+}
+.rv-lineage-toggle {
+    background: rgba(58, 123, 213, 0.15);
+    color: #cfd;
+    border: 1px solid rgba(58, 123, 213, 0.35);
+    border-radius: 4px;
+    padding: .15em .5em;
+    font: inherit;
+    cursor: pointer;
+}
+.rv-lineage-toggle:hover { background: rgba(58, 123, 213, 0.3); }
+.rv-lineage-toggle:disabled { cursor: default; }
+.rv-lineage-status {
+    color: #aab;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: .68rem;
+}
+.rv-lineage-body {
+    margin-top: .3em;
+    background: rgba(0, 0, 0, 0.18);
+    border-radius: 4px;
+    padding: .2em;
+    position: relative;
+}
+.rv-lineage-body[hidden] { display: none; }
+.rv-lineage-canvas {
+    display: block;
+    width: 100%;
+    height: 140px;
+    background: rgba(255, 255, 255, 0.88);
+    border-radius: 3px;
+    cursor: pointer;
+}
+.rv-lineage-tooltip {
+    position: fixed;
+    background: rgba(28, 32, 40, 0.95);
+    color: #eee;
+    padding: .2em .5em;
+    border-radius: 3px;
+    font: .7rem ui-monospace, "SF Mono", Menlo, monospace;
+    pointer-events: none;
+    z-index: 2000;
+    white-space: nowrap;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+}
+.rv-lineage-tooltip[hidden] { display: none; }
 .rv-circuit-members, .rv-circuit-quality { color: #bcd; }

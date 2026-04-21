@@ -198,10 +198,72 @@ const __filename = fileURLToPath(import.meta.url);
 const OUT_DIR = dirname(__filename);
 mkdirSync(OUT_DIR, { recursive: true });
 
+// ─── Fixture 4: lineage-forest (P3.B equivalence harness) ──────────────────
+// 80 brains across several mini-lineages + side branches so getLineage()
+// has enough structural variety for the 50-sample equivalence check to be
+// meaningful. Some brains have two parents (proper DAG nodes, not trees);
+// some have zero; deeper main spines let the maxDepth cap actually trigger.
+function fixtureLineageForest() {
+  const rand = mulberry32(4);
+  const trackId = 'TL';
+  const trackVec = makeTrackVec(rand);
+  const brains = [];
+  // Five "spines" of 12 brains each (60 total). Each spine's fitness ramps
+  // deterministically; spines differ in starting fitness so side-by-side
+  // dominance varies. Every 4th brain in a spine also gets a second parent
+  // from the previous spine's contemporaneous brain, so some children have
+  // two parents — exactly the shape lineage-as-DAG is supposed to handle.
+  const SPINES = 5;
+  const SPINE_LEN = 12;
+  for (let s = 0; s < SPINES; s++) {
+    for (let g = 0; g < SPINE_LEN; g++) {
+      const id = 'S' + s + 'G' + g;
+      const parents = [];
+      if (g > 0) parents.push('S' + s + 'G' + (g - 1));
+      if (s > 0 && g > 0 && g % 4 === 0) parents.push('S' + (s - 1) + 'G' + (g - 1));
+      brains.push({
+        id, vec: makeBrainVec(rand),
+        meta: {
+          fitness: 50 + s * 12 + g * 7 + Math.floor(rand() * 6),
+          trackId,
+          generation: g,
+          parentIds: parents,
+          timestamp: Date.now() - (SPINE_LEN - g) * 1000 - s,
+        },
+      });
+    }
+  }
+  // 20 isolated brains with varying fitness. These exist to exercise the
+  // "no parents" branch of getLineage() — trail length = 1.
+  for (let i = 0; i < 20; i++) {
+    const id = 'I' + i;
+    brains.push({
+      id, vec: makeBrainVec(rand),
+      meta: {
+        fitness: 10 + Math.floor(rand() * 80),
+        trackId,
+        generation: Math.floor(rand() * SPINE_LEN),
+        parentIds: [],
+        timestamp: Date.now() - (20 - i) * 500,
+      },
+    });
+  }
+  return {
+    _doc: {
+      description: '80 brains: 5 lineages × 12 brains (some nodes have 2 parents) + 20 isolates. Used by lineage-dag-equivalence.html to assert DAG-path getLineage() matches legacy output on 50 random samples.',
+      expectedBrainCount: 80,
+    },
+    tracks: [{ id: trackId, vec: trackVec, meta: { firstSeen: Date.now() } }],
+    brains,
+    observations: [],
+  };
+}
+
 const fixtures = [
   ['baseline.json', fixtureBaseline()],
   ['peer-pressure.json', fixturePeerPressure()],
   ['adversarial.json', fixtureAdversarial()],
+  ['lineage-forest.json', fixtureLineageForest()],
 ];
 
 for (const [name, data] of fixtures) {
