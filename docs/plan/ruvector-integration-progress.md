@@ -35,9 +35,9 @@ This file is the coordination point for multiple Claude Code sessions implementi
 
 ## What's next (quick pointer)
 
-> **Now ready to claim:** `P4.D` (`roadEditor.js` + `buttonResponse.js`: rasterize canvas at track-finalize, call `bridge.embedTrack(imageData)`, store result on `window.currentTrackVec`). Main.js already reads `window.currentTrackVec` on every `begin()`/`nextBatch()` — just set it and the seeding/archival picks up the track embedding automatically with no further main.js changes.
+> **Now ready to claim:** `P4.E` (`uiPanels.js` + `style.css`: render the "similar past brains" sidebar and the "this track resembles…" badge into the existing `#rv-panel`). P4.D is done — track embeddings land on `window.currentTrackVec` on every track-finalize, and `recommendSeeds` returns `{id, vector, meta, score, trackSim}` so the sidebar can read fitness/lineage from `meta` and show `trackSim` as the badge %.
 >
-> **Phase 4 heads-up (still relevant for P4.D/E):** (a) `window.NeuralNetwork` and `window.Level` bridges are in `index.html` after `network.js` loads — don't duplicate them. (b) The sidecar now also exposes `window.__rvUnflatten` (for classic-script consumers that need to turn a seed `Float32Array` into a `NeuralNetwork`). (c) `main.js` uses `window.currentTrackVec` as the sole track-embedding source — that's the one variable P4.D needs to own.
+> **Phase 4 heads-up (still relevant for P4.E):** (a) `window.NeuralNetwork` and `window.Level` bridges are in `index.html` after `network.js` loads — don't duplicate them. (b) The sidecar exposes `window.__rvUnflatten` (for classic-script consumers that need to turn a seed `Float32Array` into a `NeuralNetwork`). (c) `main.js` uses `window.currentTrackVec` as the sole track-embedding source; `buttonResponse.js::embedCurrentTrack` owns it and re-runs on every `phase=3` transition.
 
 (Maintainers: keep this paragraph 1–3 sentences; it is the only thing a fresh session needs to read to get moving.)
 
@@ -51,6 +51,7 @@ Short, high-leverage list — read before you touch these areas:
 4. **Re-run the verifier after any vendor change:** `python3 -m http.server 8765` from repo root, then open `http://localhost:8765/docs/validation/phase2-verify.html` (phase-2) and `phase3-verify.html` (phase-3 bridge round-trip). All checks should read `OK`.
 5. **Upstream `VectorDB.saveToIndexedDB` / `loadFromIndexedDB` are stubs** — `save` is a no-op that resolves `true`, `load` always rejects `"Not yet implemented"` (see `ruvector/crates/ruvector-wasm/src/lib.rs:402-421`). `ruvectorBridge.js` therefore owns persistence itself via `window.indexedDB` under the DB name `rv_car_learning` with stores `brains_6_8_4`, `tracks`, `observations`. Don't waste time debugging why ruvector's own persistence "isn't working" — it was never implemented upstream.
 6. **VectorDB's `.score` is cosine DISTANCE, not similarity.** For the `"cosine"` metric, `score = 1 - cosine_similarity` (range `[0, 2]`; lower is better). If you pass a `score` into a formula expecting similarity, negative fitness weights will appear and low-distance matches will look "bad". Convert with `sim = 1 - score` before ranking. The bridge already does this in `recommendSeeds`.
+7. **Don't `drawImage`-downscale the game canvas into the CNN.** The game canvas is 3200×1800 with 2-px track lines; scaling to 224×224 (the CNN input) collapses the lines to ~0.14-px intensity and the embedder returns a near-constant vector regardless of track shape (sim ≈ 0.99 between *any* two tracks — the original P4.D bug). Re-rasterise at the target resolution with thick strokes instead. `buttonResponse.js::embedCurrentTrack` is the canonical example; any future canvas→CNN work (track badges, replay thumbnails) must do the same or the embeddings will be useless.
 
 ---
 
@@ -101,7 +102,7 @@ P4.A is the only one that has zero deps on the bridge — claim it first if you 
 | P4.A | Delete `AI-Car-Racer/networkArchive.js` (orphan dead code, not loaded by `index.html`). | `[x]` | sess-2026-04-20-ship-task | P1.1 | `networkArchive.js` removed | Verified 2026-04-20: game boots at `http://localhost:8766/AI-Car-Racer/index.html`, track-editor buttons (Next/Save Track/Delete Track/Delete Point) render correctly. |
 | P4.B | `AI-Car-Racer/index.html`: sidecar `<script type="module">` imports bridge and exposes `window.__rvBridge`; `main.js` left classic to preserve globals (see 2026-04-20 working note for rationale). Added `NeuralNetwork`/`Level` globalThis bridge and `<div id="rv-panel">`. | `[x]` | sess-2026-04-20-ship-task-b | P3.B | edited `index.html` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8765/AI-Car-Racer/index.html`: boot renders track editor, `[ruvector] ready — brains=0 tracks=0 obs=0` logs, `#rv-panel` present, `window.__rvBridge.info().ready === true`, classic globals (`phase`, `begin`, `road`, etc.) intact. |
 | P4.C | `AI-Car-Racer/main.js`: in `begin()`, replace the `localStorage.bestBrain` block (lines 50-58) with `bridge.recommendSeeds(currentTrackVec, k=10)` and seed cars per the PRD (elitism + light/heavy mutation + novelty). In `nextBatch()`, call `bridge.archiveBrain(bestCar.brain, fitness, currentTrackVec, gen, parents)` and `bridge.observe(...)`. Keep cold-start fallback (random init when archive empty). Honor `?rv=0` URL flag to disable bridge. | `[x]` | sess-2026-04-20-ship-task-c | P3.A, P3.B, P4.B | edited `main.js`; added `window.__rvUnflatten` to `index.html` sidecar | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8765/AI-Car-Racer/index.html`: cold start shows `brains=0`, `archiveBrain`→reload→`brains=1` (IDB round-trip), `recommendSeeds(null,10)` returns the archived `vec_0` as 92-dim vector, `begin()` on hydrated archive logs `[ruvector] seeded 10 cars from 1 retrievals (elite=1, light=4, heavy=4, novel=1)` — matches PRD split. `?rv=0` → `rvDisabled=true`, `bridgeReady()` false, `currentSeedIds=[]`, no seeded-log. |
-| P4.D | `AI-Car-Racer/roadEditor.js`: at track-finalize (the transition from `phase=2` track-editing into `phase=3/4` — find the exact hook in `buttonResponse.js`), rasterize the canvas to ~224×224, call `bridge.embedTrack(imageData)`, store the result on a module-level `currentTrackVec`. | `[ ]` |  | P3.B, P4.B | edited `roadEditor.js` (and likely `buttonResponse.js`) | Drawing two near-identical tracks → cosine sim of the resulting vectors > 0.9. Wildly different track → sim drops. |
+| P4.D | `AI-Car-Racer/buttonResponse.js`: at track-finalize (`nextPhase()` case 3, after `submitTrack()`), re-rasterize the track paths at 224×224 with thick strokes (do NOT `drawImage`-downscale the 3200×1800 canvas — 2-px lines become invisible), call `bridge.embedTrack(rgb, 224, 224)`, publish on `window.currentTrackVec`. | `[x]` | sess-2026-04-20-ship-task-d | P3.B, P4.B | edited `buttonResponse.js` | Verified 2026-04-20 via agent-browser at `http://127.0.0.1:8767/AI-Car-Racer/index.html`: two rectangle tracks with ≤20px point jitter → sim=0.994 (>0.9 gate). Rectangle vs triangle+pentagon → sim=0.711. UI click-path Next→Next→Next → `phase=3`, `window.currentTrackVec` is Float32Array(512). Archiving a brain with the vec → `bridge.info().tracks` 0→1. |
 | P4.E | Add `AI-Car-Racer/uiPanels.js`: render the "similar past brains" sidebar and "this track resembles…" badge into `#rv-panel`. Add styles in `style.css` (or a new `rv-panel.css`). | `[ ]` |  | P4.B | `uiPanels.js`, css edits | Panel renders; badge appears on track-finalize when archive is non-empty |
 
 ---
@@ -129,7 +130,7 @@ The PRD's *Verification* section lists six gates. Re-run the relevant ones whene
 - [x] **Cold start**: empty archive → behaves identically to stock AI-Car-Racer (after P4.C) — verified 2026-04-20: with empty archive, `begin()` falls through the bridge branch (`seededFromBridge=false`) and uses the original `localStorage.bestBrain` path unchanged (or random init if no bestBrain). On first-ever boot, `begin()` runs before the async `bridge.ready()` resolves, so `bridgeReady()` returns false and the stock path runs regardless of archive state — this is what preserves the "identical to stock" property at the phase-1 welcome screen.
 - [x] **Archive round-trip**: `archiveBrain` → refresh → `recommendSeeds` returns the same vector (after P3.B) — verified 2026-04-20 via `docs/validation/phase3-verify.html`. Bridge owns persistence directly via native IndexedDB; upstream `VectorDB.saveToIndexedDB/loadFromIndexedDB` are stubs.
 - [x] **Codec**: `unflatten(flatten(b))` is structurally equal to `b`; `feedForward` outputs match (after P3.A) — verified 2026-04-21 via `docs/validation/phase2-verify.html`, `feedForward` output `[1,0,1,1]` matches on both brains.
-- [ ] **Track similarity**: similar tracks → cosine sim > 0.9 (after P4.D)
+- [x] **Track similarity**: similar tracks → cosine sim > 0.9 (after P4.D) — verified 2026-04-20: near-identical rectangle tracks sim=0.994; rectangle vs triangle+pentagon sim=0.711. Required a non-obvious implementation fix (re-rasterize at 224×224 target resolution rather than downscaling 3200×1800 — see working note below).
 - [ ] **Seeded GA improves**: with seeding ON, reaches a target fitness in fewer generations than `?rv=0` on a repeat track (after P5)
 - [ ] **GNN effect** (only if P2.C succeeded): retrieved IDs cluster around productive ancestors after 20+ generations (after P5)
 
@@ -383,4 +384,64 @@ Sessions: append a dated entry below — don't edit prior entries.
     - P4.C stores lineage in archived brains (parentIds = currentSeedIds),
       so the sparkline from P5.B can walk meta.parentIds backwards through
       _brainMirror without touching the bridge.
+
+2026-04-20 · sess-ship-task-d · P4.D complete.
+  Work:
+    - buttonResponse.js: added embedCurrentTrack() + drawPolyline() helpers,
+      wired into nextPhase() case 3 immediately after submitTrack(). Ships
+      as a single-file change — no edits to roadEditor.js (the PRD row said
+      "and likely buttonResponse.js" and that's where the phase transitions
+      actually live; roadEditor.js only manages point state).
+    - The hook reads road.roadEditor.{points, points2, checkPointListEditor}
+      and rasterises them directly at 224×224 with lineWidth=3 (track) and
+      lineWidth=2 (checkpoints). The 3200×1800 game canvas is never scaled
+      down — see rasterisation lesson below for why.
+    - window.currentTrackVec is set to the returned Float32Array(512). On
+      failure (bridge unready, exception) it is cleared to null; main.js's
+      bridgeReady() gate covers the null case and falls through to the
+      stock localStorage path.
+
+  Rasterisation lesson (non-obvious, worth preserving — future sessions
+  doing any canvas→CNN work should read this):
+    The first attempt used drawImage(myCanvas, 0, 0, 224, 224) to scale
+    the game canvas down. That produced sim ≈ 0.99 across totally
+    different tracks — at first I thought the CNN was broken. Diagnosed
+    by counting non-black pixels: on a 50,176-pixel scaled image, only
+    300 were non-black and 208 were "bright". The cause is geometric:
+      - Game canvas is 3200×1800, track lines are 2 px wide.
+      - Downscale factor is 3200/224 ≈ 14.3.
+      - A 2-px stroke under 14× bilinear downsampling contributes
+        ≈ 2/14 ≈ 0.14 px of intensity per pixel along the line.
+      - That's below the visible threshold for the embedder; it sees
+        an almost-uniformly-black image and returns the same "black"
+        vector regardless of track shape.
+    Fix: render the tracks directly at 224×224 with thick strokes
+    (lineWidth=3). Three-track validation after the fix:
+      sim(rectangle, jittered-rectangle) = 0.994   (> 0.9 gate)
+      sim(rectangle, triangle+pentagon)  = 0.711   (clearly different)
+    General principle: for vector/geometric data, re-rasterise at the
+    model's input size, don't downscale a high-res raster. This applies
+    to any future sketch/diagram/map → CNN pipeline in this repo.
+
+  Verification (agent-browser, headless Chromium,
+  http://127.0.0.1:8767/AI-Car-Racer/index.html):
+    - UI click-path: _debugReset() → reload → click "Next" → "Next" (via
+      accessibility refs @e1, @e2) → phase=3, window.currentTrackVec is
+      Float32Array(512), head=[0.045, 0.184, 0.048, …].
+    - Three-track programmatic comparison (phase=0 → set points →
+      nextPhase ×3 → capture vec): sim_AAp=0.994, sim_AB=0.711,
+      sim_ApB=0.708.
+    - Integration with P4.C: archiveBrain(new NeuralNetwork([6,8,4]),
+      42, window.currentTrackVec, 0, []) → bridge.info() goes from
+      {brains:0, tracks:0} to {brains:1, tracks:1}.
+
+  Notes for P4.E:
+    - Hook into index.html's #rv-panel div (already present since P4.B).
+    - For the "this track resembles" badge, call bridge.recommendSeeds(
+      window.currentTrackVec, k) and render hits[0].trackSim as %.
+    - The badge should appear after phase=3 (when currentTrackVec is set)
+      — listen on the same hook in buttonResponse.js case 3, or poll
+      window.currentTrackVec from a main-loop tick. Either works.
+    - Archive will be empty on first run: recommendSeeds returns []. Hide
+      the badge in that case rather than showing "0% match".
 ```
