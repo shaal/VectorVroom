@@ -1,0 +1,97 @@
+body {
+    display: flex;
+}
+.sliderDiv{
+    width: 100%;
+    display: flex;
+    flex-direction: column; 
+    justify-content: center;
+    align-items: stretch;
+}
+output{
+    color: black;
+    float: left;
+    font-weight: bold;
+    transform: translate(5%,-2em);
+    pointer-events: none;
+    text-shadow: rgb(139, 139, 139) 1px 0 10px;
+}
+.unselectable {
+    user-select: none;
+        -moz-user-select: none;
+        -khtml-user-select: none;
+        -webkit-user-select: none;
+        -o-user-select: none;
+}
+
+input[type="range"] { 
+    -webkit-appearance: none;
+    overflow: hidden;
+    height: 40px;
+    cursor: pointer;
+    border-radius: 100px; /* iOS */
+}
+
+::-webkit-slider-runnable-track {
+    background: #d5d5d5;
+}
+
+/*
+ * 1. Set to 0 width and remove border for a slider without a thumb
+ * 2. Shadow is negative the full width of the input and has a spread 
+ *    of the width of the input.
+ */
+::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 2px; /* 1 */
+    height: 40px;
+    background: #fff;
+    box-shadow: -200px 0 0 200px rgb(227, 138, 15); /* 2 */
+    border: 2px solid rgb(109, 58, 0); /* 1 */
+}
+
+::-moz-range-track {
+    height: 40px;
+    background: #ddd;
+}
+
+::-moz-range-thumb {
+    background: #fff;
+    height: 40px;
+    width: 20px;
+    border: 3px solid #999;
+    border-radius: 0 !important;
+    box-shadow: -200px 0 0 200px dodgerblue;
+    box-sizing: border-box;
+}
+
+::-ms-fill-lower { 
+    background: dodgerblue;
+}
+
+::-ms-thumb { 
+    background: #fff;
+    border: 2px solid #999;
+    height: 40px;
+    width: 20px;
+    box-sizing: border-box;
+}
+
+::-ms-ticks-after { 
+    display: none; 
+}
+
+::-ms-ticks-before { 
+    display: none; 
+}
+
+::-ms-track { 
+    background: #ddd;
+    color: transparent;
+    height: 40px;
+    border: none;
+}
+
+::-ms-tooltip { 
+    display: none;
+}

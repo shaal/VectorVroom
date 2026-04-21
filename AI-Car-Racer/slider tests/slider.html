@@ -1,0 +1,9 @@
+<html>
+<link type="text/css" href="slider.css" rel="stylesheet">
+<body>
+    <div class="sliderDiv">
+        <input min="0" max="1" value=".5" step=".01" id='tractionSlider' type="range" oninput="document.getElementById('tractionOutput').value = 'Traction: ' + this.value" >
+        <output for='tractionSlider' id="tractionOutput">Traction: .5</output>
+    </div>
+</body>
+</html>
