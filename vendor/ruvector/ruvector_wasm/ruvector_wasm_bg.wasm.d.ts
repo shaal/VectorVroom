@@ -1,0 +1,36 @@
+/* tslint:disable */
+/* eslint-disable */
+export const memory: WebAssembly.Memory;
+export const __wbg_jssearchresult_free: (a: number, b: number) => void;
+export const __wbg_jsvectorentry_free: (a: number, b: number) => void;
+export const __wbg_vectordb_free: (a: number, b: number) => void;
+export const arrayToFloat32Array: (a: number, b: number) => number;
+export const benchmark: (a: number, b: number, c: number, d: number, e: number) => void;
+export const detectSIMD: () => number;
+export const jssearchresult_id: (a: number, b: number) => void;
+export const jssearchresult_metadata: (a: number) => number;
+export const jssearchresult_score: (a: number) => number;
+export const jssearchresult_vector: (a: number) => number;
+export const jsvectorentry_id: (a: number, b: number) => void;
+export const jsvectorentry_metadata: (a: number) => number;
+export const jsvectorentry_new: (a: number, b: number, c: number, d: number, e: number) => void;
+export const jsvectorentry_vector: (a: number) => number;
+export const vectordb_delete: (a: number, b: number, c: number, d: number) => void;
+export const vectordb_dimensions: (a: number) => number;
+export const vectordb_get: (a: number, b: number, c: number, d: number) => void;
+export const vectordb_insert: (a: number, b: number, c: number, d: number, e: number, f: number) => void;
+export const vectordb_insertBatch: (a: number, b: number, c: number) => void;
+export const vectordb_isEmpty: (a: number, b: number) => void;
+export const vectordb_len: (a: number, b: number) => void;
+export const vectordb_loadFromIndexedDB: (a: number, b: number, c: number) => void;
+export const vectordb_new: (a: number, b: number, c: number, d: number, e: number) => void;
+export const vectordb_saveToIndexedDB: (a: number, b: number) => void;
+export const vectordb_search: (a: number, b: number, c: number, d: number, e: number) => void;
+export const version: (a: number) => void;
+export const init: () => void;
+export const __wbindgen_export: (a: number, b: number) => number;
+export const __wbindgen_export2: (a: number, b: number, c: number, d: number) => number;
+export const __wbindgen_export3: (a: number) => void;
+export const __wbindgen_export4: (a: number, b: number, c: number) => void;
+export const __wbindgen_add_to_stack_pointer: (a: number) => number;
+export const __wbindgen_start: () => void;

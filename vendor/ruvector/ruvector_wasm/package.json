@@ -1,0 +1,24 @@
+{
+  "name": "ruvector-wasm",
+  "type": "module",
+  "collaborators": [
+    "Ruvector Team"
+  ],
+  "description": "WASM bindings for Ruvector including kernel pack system (ADR-005)",
+  "version": "2.2.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ruvnet/ruvector"
+  },
+  "files": [
+    "ruvector_wasm_bg.wasm",
+    "ruvector_wasm.js",
+    "ruvector_wasm.d.ts"
+  ],
+  "main": "ruvector_wasm.js",
+  "types": "ruvector_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
