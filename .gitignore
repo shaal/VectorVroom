@@ -1,0 +1,10 @@
+# Local dev symlink to the upstream ruvector source tree. Only the
+# pre-built WASM artifacts under vendor/ruvector/ are needed at runtime.
+/ruvector
+
+# Debug/validation screenshots from agent-browser runs
+docs/validation/screenshots/debug-*.png
+
+# OS noise
+.DS_Store
+Thumbs.db
