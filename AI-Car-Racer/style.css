@@ -1050,7 +1050,7 @@ label {
     gap: 0.3em;
 }
 .rv-empty {
-    color: var(--ink-400);
+    color: var(--ink-700); /* AAA: ink-400 hit only 2.8:1 */
     font-style: italic;
     padding: 0.4em 0.3em;
     background: var(--surface-2);
@@ -1473,7 +1473,7 @@ label {
 .eli15-popover-title {
     font-family: var(--font-display);
     font-weight: 600;
-    color: var(--info-600);
+    color: var(--ink-blue); /* AAA: info-600 → 6.15 on white */
     font-size: 0.98rem;
     margin: 0 1.8em 0.3em 0;  /* leave room for the close × */
     line-height: 1.25;
@@ -1488,7 +1488,8 @@ label {
     gap: var(--sp-2);
 }
 .eli15-popover-more {
-    background: var(--info-600);
+    /* AAA: white on info-600 = 6.15; ink-blue reaches ~9.9. */
+    background: var(--ink-blue);
     color: #fff;
     border: 0;
     padding: 0.4em 0.9em;
@@ -1498,7 +1499,7 @@ label {
     cursor: pointer;
     transition: background 120ms var(--ease-out);
 }
-.eli15-popover-more:hover { background: var(--info-700, #234b8f); }
+.eli15-popover-more:hover { background: #14304f; }
 .eli15-popover-close {
     position: absolute;
     top: 6px;
@@ -1507,7 +1508,7 @@ label {
     border: 0;
     font-size: 1.2rem;
     line-height: 1;
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA: was ink-500 */
     cursor: pointer;
     padding: 2px 6px;
     border-radius: var(--r-sm);
@@ -1531,13 +1532,14 @@ label {
 .eli15-tour-title {
     font-family: var(--font-display);
     font-weight: 600;
-    color: var(--info-600);
+    /* AAA: info-600 hits 6.15:1; ink-blue reaches ~9.9:1 on white. */
+    color: var(--ink-blue);
     font-size: 1.02rem;
     margin: 0 0 0.25em 0;
     letter-spacing: -0.005em;
 }
 .eli15-tour-step {
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA */
     font-size: 0.68rem;
     margin-bottom: 0.4em;
     text-transform: uppercase;
@@ -1557,7 +1559,8 @@ label {
     gap: var(--sp-2);
 }
 .eli15-tour-btn {
-    background: var(--info-600);
+    /* AAA: white on info-600 = 6.15; ink-blue bg hits ~9.9. */
+    background: var(--ink-blue);
     color: #fff;
     border: none;
     border-radius: var(--r-sm);
@@ -1568,20 +1571,21 @@ label {
     font-size: 0.82rem;
     transition: background-color var(--dur-fast) var(--ease-out);
 }
-.eli15-tour-btn:hover    { background: #1c3f70; }
+.eli15-tour-btn:hover    { background: #14304f; }
 .eli15-tour-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(47, 95, 180, 0.45); }
 .eli15-tour-btn-ghost {
     background: transparent;
-    color: var(--info-600);
-    border: 1px solid var(--info-600);
+    /* AAA: info-600 ghost text was 6.15 on white. */
+    color: var(--ink-blue);
+    border: 1px solid var(--ink-blue);
 }
 .eli15-tour-btn-ghost:hover {
     background: var(--info-100);
-    color: #1c3f70;
+    color: #14304f;
 }
 .eli15-tour-close {
     background: transparent;
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA: was ink-500 (4.94 on white) */
     border: none;
     font-size: 1.3rem;
     cursor: pointer;
@@ -1655,6 +1659,19 @@ label {
        because main.js sets child inline styles too. */
     #perf-hud,
     #perf-hud *         { color: #f8f2e4 !important; }
+
+    /* Tour card + popover: the light-mode ink-blue text reads ~10:1 on
+       white but inverts to ~1.6:1 on dark surface-1. Flip to the
+       light-tier info tone (#9ab8ff) for parity with the .blue badge
+       and the tour ring itself. */
+    .eli15-tour-title,
+    .eli15-tour-btn-ghost,
+    .eli15-popover-title { color: #9ab8ff; }
+    .eli15-tour-btn-ghost { border-color: #9ab8ff; }
+    .eli15-tour-btn-ghost:hover { background: rgba(154, 184, 255, 0.12); color: #cfd9f7; }
+    /* Filled buttons stay readable against the light-tier info bg. */
+    .eli15-tour-btn,
+    .eli15-popover-more { background: #1c3f70; }
 }
 
 /* Broad reduced-motion guard */
