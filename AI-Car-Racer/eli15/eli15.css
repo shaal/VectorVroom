@@ -25,7 +25,11 @@
     height: auto;
     padding: 0.5em 0.9em 0.5em 0.7em;
     border-radius: 999px;
-    border: 1.5px solid #d38b4b;
+    /* WCAG 1.4.11: #d38b4b (amber-500) was 2.78:1 on the white pill bg and
+       2.66:1 on the paper-0 viewport — below the 3:1 threshold for essential
+       control boundaries. #a45a13 (amber-600) clears 5:1 while keeping the
+       warm amber identity; style.css uses the same bump on .controlButton. */
+    border: 1.5px solid #a45a13;
     background: #fff;
     color: #824006;
     font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
@@ -46,7 +50,9 @@
     box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
 }
 .eli15-fab:focus-visible {
-    outline: 3px solid #d38b4b;
+    /* 1.4.11: focus ring must hit 3:1 against whatever surface it lands on.
+       #a45a13 clears 5:1 on paper and 4:1 on surface-2 in dark mode. */
+    outline: 3px solid #a45a13;
     outline-offset: 2px;
 }
 /* Dark-mode tweak — the legacy colors read poorly on dark paper. */
@@ -54,7 +60,9 @@
     .eli15-fab {
         background: #1d1a23;
         color: #f4c691;
-        border-color: rgba(211, 139, 75, 0.65);
+        /* 1.4.11: 0.65 alpha was ~3.1:1 on surface-1 — borderline. 0.85
+           hits ~4.5:1 with the same warm amber temperature. */
+        border-color: rgba(211, 139, 75, 0.85);
     }
     .eli15-fab:hover { background: rgba(211, 139, 75, 0.16); }
 }
@@ -87,7 +95,11 @@
     border-radius: 999px;
     background: #fff4e2;
     color: #824006;
-    border: 1px solid #d38b4b;
+    /* 1.4.11: #d38b4b was 2.55:1 against the amber-50 fill and 2.78:1 on
+       white surfaces — under 3:1. The amber-50 fill alone (#fff4e2 vs white
+       = 1.09:1) can't identify the pill as a control; the rim is the load-
+       bearing boundary. #a45a13 (amber-600) clears 4.9:1 on amber-50. */
+    border: 1px solid #a45a13;
     font-size: 0.7rem;
     font-weight: bold;
     line-height: 1;
@@ -100,7 +112,8 @@
 [data-eli15]:empty::before { content: '?'; }
 [data-eli15]:hover { background: #ffe1b8; }
 [data-eli15]:focus-visible {
-    outline: 2px solid #d38b4b;
+    /* 1.4.11: see .eli15-fab:focus-visible. */
+    outline: 2px solid #a45a13;
     outline-offset: 1px;
 }
 
@@ -204,7 +217,8 @@
 }
 .eli15-close:hover { background: rgba(131, 64, 6, 0.08); }
 .eli15-close:focus-visible {
-    outline: 2px solid #d38b4b;
+    /* 1.4.11: see .eli15-fab:focus-visible. */
+    outline: 2px solid #a45a13;
     outline-offset: 1px;
 }
 

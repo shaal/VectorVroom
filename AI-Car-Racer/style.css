@@ -70,6 +70,13 @@
     --line:        #ece2ca;
     --line-strong: #d7c9a9;
     --line-soft:   rgba(94, 75, 39, 0.08);
+    /* --line-control: WCAG 1.4.11 (3:1) — essential borders that carry the
+       component boundary of form controls (button / select / toggle chips).
+       --line / --line-strong sit at ~1.3 / 1.6 on the paper-0 surface which
+       is fine for decorative rules but fails for interactive affordances.
+       #786f62 is the existing --ink-500; it clears 3:1 on every surface-* tier
+       (4.94 on white, 4.08 on paper-2). Alias so the intent reads at sites. */
+    --line-control: #786f62;
 
     /* Radii */
     --r-xs: 4px;
@@ -132,6 +139,10 @@
         --line:        rgba(255, 241, 216, 0.08);
         --line-strong: rgba(255, 241, 216, 0.18);
         --line-soft:   rgba(255, 241, 216, 0.05);
+        /* --line-control: 3:1 against every dark surface tier (see light
+           definition for rationale). 0.45 alpha composites to a mid-grey
+           that clears ~4:1 on surface-1/2 and ~3.8 on surface-3/paper-3. */
+        --line-control: rgba(255, 241, 216, 0.45);
 
         --amber-100: rgba(211, 139, 75, 0.14);
         --amber-50:  rgba(211, 139, 75, 0.08);
@@ -320,7 +331,11 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     line-height: 1.2;
     color: var(--amber-700);
     background: var(--surface-1);
-    border: 1px solid var(--amber-500);
+    /* WCAG 1.4.11: amber-500 border was 2.78:1 on white — below the 3:1
+       threshold for essential control boundaries. amber-600 (#a45a13) clears
+       5:1 on every paper tier. Hover shifts back to the same tone; no visible
+       change on that state because hover is already carried by the bg tint. */
+    border: 1px solid var(--amber-600);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-xs);
     cursor: pointer;
@@ -367,7 +382,10 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     .controlButton {
         color: var(--amber-300);
         background: var(--surface-2);
-        border-color: rgba(211, 139, 75, 0.55);
+        /* 1.4.11: 0.55 alpha was ~2.9:1 on surface-2 — below the 3:1
+           threshold. 0.85 composites to ~4.5:1 and still feels amber-tinted
+           rather than pure white. */
+        border-color: rgba(211, 139, 75, 0.85);
     }
     .controlButton:hover {
         background: rgba(211, 139, 75, 0.14);
@@ -436,7 +454,9 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
 .backNext[aria-disabled="true"] {
     background: var(--surface-2);
     color: var(--ink-400);
-    border-color: var(--line-strong);
+    /* 1.4.11: disabled *text* is exempt, but the border that conveys
+       "this is a button" still needs 3:1. --line-control clears that. */
+    border-color: var(--line-control);
     box-shadow: none;
     cursor: not-allowed;
     transform: none;
@@ -446,7 +466,9 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
 .backNext[aria-disabled="true"]:hover {
     background: var(--surface-2);
     color: var(--ink-400);
-    border-color: var(--line-strong);
+    /* 1.4.11: disabled *text* is exempt, but the border that conveys
+       "this is a button" still needs 3:1. --line-control clears that. */
+    border-color: var(--line-control);
     transform: none;
     box-shadow: none;
 }
@@ -462,7 +484,8 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
 .back {
     background: var(--surface-1);
     color: var(--amber-700);
-    border-color: var(--amber-500);
+    /* 1.4.11: amber-500 was 2.78:1 on white; amber-600 clears 5:1. */
+    border-color: var(--amber-600);
 }
 .back:hover {
     background: var(--amber-50);
@@ -478,7 +501,8 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     .back {
         background: var(--surface-2);
         color: var(--amber-300);
-        border-color: rgba(211, 139, 75, 0.55);
+        /* 1.4.11: see .controlButton dark rule — 0.85 alpha clears 3:1. */
+        border-color: rgba(211, 139, 75, 0.85);
     }
     .back:hover {
         background: rgba(211, 139, 75, 0.14);
@@ -523,7 +547,9 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
 .controlButton.secondary {
     background: var(--surface-2);
     color: var(--ink-700);
-    border-color: var(--line-strong);
+    /* 1.4.11: --line-strong is 1.64:1 on paper — below 3:1. --line-control
+       (ink-500) clears 4:1 on every surface tier. */
+    border-color: var(--line-control);
 }
 .controlButton.secondary:hover {
     background: var(--surface-3);
@@ -777,7 +803,9 @@ label {
     padding: 0.3em 0.4em;
     background: var(--surface-1);
     color: var(--ink-900);
-    border: 1px solid var(--line-strong);
+    /* 1.4.11: native select boundary needs 3:1 so sighted users can find
+       the edge of the control. --line-control clears 4:1 across surfaces. */
+    border: 1px solid var(--line-control);
     border-radius: var(--r-sm);
     font-family: var(--font-body);
     font-size: 0.9em;
@@ -818,7 +846,8 @@ label {
 #track-preset-select {
     background: var(--surface-2) !important;
     color: var(--ink-900) !important;
-    border: 1px solid var(--line-strong) !important;
+    /* 1.4.11: see #simSpeedLabel select. */
+    border: 1px solid var(--line-control) !important;
     border-radius: var(--r-sm) !important;
     padding: 0.3em 0.5em !important;
     font: inherit;
@@ -833,7 +862,11 @@ label {
     /* AAA-compliant fill (see .backNext). */
     background: var(--amber-700) !important;
     color: #fff !important;
-    border: none !important;
+    /* 1.4.11: the filled amber-700 body is 4.57:1 on paper-0 in light mode
+       (passes), but drops to 2.19:1 on dark surface-1, so the button has no
+       visible edge in dark mode. amber-800 trim keeps the light-mode feel
+       identical; the dark-mode override below lifts it to amber-400. */
+    border: 1px solid var(--amber-800) !important;
     border-radius: var(--r-sm) !important;
     padding: 0.35em 0.9em !important;
     font: inherit;
@@ -1205,7 +1238,10 @@ label {
 .rv-lineage-toggle {
     background: var(--ml-100);
     color: var(--ml-700);
-    border: 1px solid var(--ml-200);
+    /* 1.4.11: ml-200 was 1.36:1 on ml-50 — the purple rim barely read. ml-500
+       (#7a65cc) hits 4.14:1 on ml-50 and 3.73 on ml-100 (its own fill) while
+       keeping the amethyst identity. */
+    border: 1px solid var(--ml-500);
     border-radius: var(--r-sm);
     padding: 0.2em 0.7em;
     font: inherit;
@@ -1306,7 +1342,10 @@ label {
     background: var(--surface-1);
     padding: 2px;
     border-radius: var(--r-sm);
-    border: 1px solid var(--line);
+    /* 1.4.11: the segmented-control wrapper boundary distinguishes the
+       cluster of buttons from the surrounding amber-tinted strip; --line was
+       1.29:1. --line-control clears 3:1 on every surface tier. */
+    border: 1px solid var(--line-control);
     flex-wrap: wrap;
 }
 .rv-abbtn {
@@ -1649,7 +1688,28 @@ label {
     .rv-sim              { color: #77d29a; }
     .rv-lap              { color: #9ab8ff; }
     .rv-abstrip-title    { color: #f4c691; }
-    .rv-lineage-toggle   { color: #c5b8ff; background: rgba(122, 101, 204, 0.18); border-color: rgba(122, 101, 204, 0.35); }
+
+    /* 1.4.11: filled amber-700 CTAs (.backNext, .start-cta, #track-preset-load,
+       .rv-abbtn-active) read 4.57:1 on paper in light mode but drop to
+       2.19:1 on dark surface-1 — the button edge disappears against the page.
+       Lift the trim to amber-400 (8.3:1 vs dark surface, 3.8:1 vs the fill)
+       so the boundary stays visible in both themes. */
+    .backNext,
+    .backNext:hover,
+    .controlButton.start-cta,
+    .controlButton.start-cta:hover,
+    .rv-abbtn-active,
+    .rv-abbtn-active:hover {
+        border-color: var(--amber-400);
+    }
+    #track-preset-load,
+    #track-preset-load:hover {
+        border-color: var(--amber-400) !important;
+    }
+    /* 1.4.11: 0.35 alpha purple was 1.52:1 on surface-1 — well below 3:1.
+       The light-tier amethyst (#c5b8ff) hits ~9.5:1 on surface-1 and ~7.8
+       on the composited tinted fill, matching the .rv-title accent. */
+    .rv-lineage-toggle   { color: #c5b8ff; background: rgba(122, 101, 204, 0.18); border-color: #c5b8ff; }
     .rv-lineage-toggle:hover { background: rgba(122, 101, 204, 0.28); }
     .rv-reranker-mode-gnn  { background: rgba(47, 131, 85, 0.22);  color: #9ce5b8; }
     .rv-reranker-mode-ema  { background: rgba(211, 139, 75, 0.18); color: #f4c691; }
@@ -1743,7 +1803,10 @@ label {
     justify-content: center;
     background: var(--surface-1);
     color: var(--ink-700); /* AAA: was ink-600 (6.69:1 on white) */
-    border: 1px solid var(--line);
+    /* 1.4.11: --line was 1.29:1 against the paper-0 viewport bg — this tab
+       is the only boundary between the pill and the page, so it must clear
+       3:1. --line-control (ink-500) hits 4.9:1 on both paper and white. */
+    border: 1px solid var(--line-control);
     border-right: none;
     border-radius: var(--r-md) 0 0 var(--r-md);
     box-shadow: var(--shadow-sm);
@@ -1796,7 +1859,8 @@ label {
         width: 44px;
         height: 28px;
         border-radius: var(--r-full);
-        border-right: 1px solid var(--line);
+        /* 1.4.11: match the outer border-color set above. */
+        border-right: 1px solid var(--line-control);
     }
     #panelToggle > span { transform: rotate(-90deg); }
     #panelToggle[aria-expanded="false"] > span { transform: rotate(90deg); }
