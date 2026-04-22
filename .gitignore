@@ -5,6 +5,9 @@
 # Debug/validation screenshots from agent-browser runs
 docs/validation/screenshots/debug-*.png
 
+# Node (Playwright + a11y tooling)
+node_modules/
+
 # OS noise
 .DS_Store
 Thumbs.db

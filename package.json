@@ -1,0 +1,13 @@
+{
+  "name": "vectorvroom-a11y",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Dev tooling (a11y contrast audit) for the VectorVroom browser app. Runtime is pure static HTML/JS; this package.json only exists so Playwright can be installed for CI accessibility checks.",
+  "scripts": {
+    "a11y": "node scripts/a11y-contrast.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.59.1"
+  }
+}

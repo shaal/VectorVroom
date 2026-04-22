@@ -1,0 +1,37 @@
+name: Accessibility (contrast)
+
+# Runs the Playwright-driven WCAG 2.1 contrast audit across light/dark
+# themes and the key UI states (default, panel-collapsed, drawer, tour,
+# phase-1 edit). Fails the build when any text drops below AAA ratios,
+# so regressions in style.css or eli15.css get caught before merge.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  contrast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run contrast audit
+        run: scripts/a11y-contrast.sh
