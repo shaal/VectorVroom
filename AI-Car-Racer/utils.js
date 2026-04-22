@@ -113,6 +113,15 @@ function phaseToLayout(phase){
             <button class='controlButton' onclick='save(); restartBatch();'>Save Best and Restart</button>
             <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
 
+            <div id="brainShare" style="display:flex; gap:.35em; margin:.35em 0; flex-wrap:wrap;">
+                <button class='controlButton' style='flex:1;min-width:0;' onclick='exportBrainJson()' title='Download current best brain as a ~1 KB JSON file'>⬇️ Export Brain</button>
+                <button class='controlButton' style='flex:1;min-width:0;' onclick='importBrainJson()' title='Load a brain JSON file and use it as the seed'>⬆️ Import Brain</button>
+                ${window.__rvfEnabled ? `
+                <button class='controlButton' style='flex:1;min-width:0;' onclick='exportBrainPackRvf()' title='Export full brain pack as .rvf (experimental)'>⬇️ .rvf</button>
+                <button class='controlButton' style='flex:1;min-width:0;' onclick='importBrainPackRvf()' title='Import a .rvf brain pack (experimental)'>⬆️ .rvf</button>
+                ` : ''}
+            </div>
+
             <div id="trainingPresets" style="display:flex; gap:.35em; margin:.35em 0; flex-wrap:wrap;">
                 <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('fresh')" title="Random brains: N=500, 2×, 10s, variance 0.30">🌱 Fresh</button>
                 <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('grind')" title="Elite drives laps: N=500, 20×, 15s, variance 0.20">🏎️ Grind</button>
