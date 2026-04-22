@@ -117,7 +117,12 @@ class roadEditor{
         this.ctx.stroke();
         this.ctx.globalAlpha = 1;
 
-        this.ctx.strokeStyle = "green";
+        // Checkpoints: named-"green" (#008000) reads only 3.2:1 on the
+        // near-black scene (#15161a) and collapses toward muddy olive under
+        // deuteranopia. #58E05D lime jumps to ~7:1, stays clearly green to
+        // trichromats, and stays distinct from the yellow sensor rays by
+        // luminance even under red-green CVD.
+        this.ctx.strokeStyle = "#58E05D";
         this.ctx.lineWidth = checkW;
         this.checkPointListEditor.forEach((p)=>{
             this.ctx.beginPath();
@@ -164,15 +169,21 @@ class roadEditor{
 
     drawCircles() {
         if(!this.checkPointMode){
-            this.ctx.strokeStyle = "red";
+            // Inner-wall handles: crimson reads clearer than #FF0000 against
+            // the scene bg and is CVD-separable from the amber AI cars once
+            // edit mode drops back into training.
+            this.ctx.strokeStyle = "#E6194B";
             this.ctx.lineWidth = 3;
             this.points.forEach((p) => {
                 this.ctx.beginPath();
                 this.ctx.arc(p.x, p.y, this.pointSize, 0, Math.PI * 2, true);
                 this.ctx.stroke();
             })
-    
-            this.ctx.strokeStyle = "blue";
+
+            // Outer-wall handles: CSS-named "blue" (#0000FF) is only 2.5:1
+            // against #15161a — a classic WCAG trap. Sky blue jumps to ~7:1
+            // and is still clearly "blue" to trichromats.
+            this.ctx.strokeStyle = "#4FC3F7";
             this.ctx.lineWidth = 4;
             this.points2.forEach((p) => {
                 this.ctx.beginPath();
@@ -180,10 +191,10 @@ class roadEditor{
                 this.ctx.stroke();
             })
         }
- 
+
 
         if(this.checkPointMode){
-            this.ctx.strokeStyle = "green";
+            this.ctx.strokeStyle = "#58E05D";
             this.ctx.lineWidth = 3;
             this.checkPointListEditor.forEach((p) => {
                 this.ctx.beginPath();

@@ -649,9 +649,15 @@ function animate(){
 
     if(phase==3){
         playerCar.update(road.borders, road.checkPointList);
-        playerCar.draw(ctx,"red",true);
+        // Player car 1: crimson instead of pure "red" so (a) it is not the
+        // same pigment as the start-flag triangle and (b) it separates from
+        // the amber AI cars under deuteranopia/protanopia. Contrast ~5.6:1.
+        playerCar.draw(ctx,"#E6194B",true);
         playerCar2.update(road.borders, road.checkPointList);
-        playerCar2.draw(ctx,"blue",true);
+        // Player car 2: sky blue instead of CSS-named "blue" (#0000FF is
+        // 2.5:1 — unreadable). #4FC3F7 sits around 7:1 and is CVD-safe
+        // against the amber AI population.
+        playerCar2.draw(ctx,"#4FC3F7",true);
     }
     if(phase==4){
         const timer = document.getElementById("timer");
@@ -688,8 +694,8 @@ function animate(){
                 inputVisual(bestCar.controls);
                 drawBestCar(bestCar);
             }
-            playerCar.draw(ctx,"red",true);
-            playerCar2.draw(ctx,"blue",true);
+            playerCar.draw(ctx,"#E6194B",true);
+            playerCar2.draw(ctx,"#4FC3F7",true);
             if (perfEnabled) _perfDraw += performance.now() - _perfDrawT0;
         }
         ctx.restore();
