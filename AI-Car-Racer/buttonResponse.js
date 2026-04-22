@@ -1,12 +1,38 @@
 function pauseGame(){
     pause=!pause;
-    document.getElementById("pause").textContent = pause?"Play":"Pause";
+    const btn = document.getElementById("pause");
+    if (btn){
+        btn.textContent = pause?"Play":"Pause";
+        // First-press of the Start CTA graduates the button to the normal
+        // Pause/Play cycle.
+        btn.classList.remove('start-cta');
+    }
+    window.__firstStart = false;
     // Halt / resume the worker's AI step loop too. Without this, sim-worker
     // would keep burning CPU while the user has paused — and on resume the
     // accumulator would stampede a huge backlog of physics steps at once.
     if (typeof simWorker !== 'undefined' && simWorker){
         simWorker.postMessage({ type: 'setPause', pause });
     }
+}
+
+// Route a phase-4 user back into the track editor. Mirrors backPhase()'s
+// cleanup (pause the worker, close any SONA trajectory) but sets phase=0
+// so the next nextPhase() call lands on phase 1 — i.e. the classic
+// "draw your own track" entry point. Triggered by the ✏️ Customize Track
+// button added to the training panel.
+function customizeTrack(){
+    if (typeof simWorker !== 'undefined' && simWorker){
+        try { simWorker.postMessage({ type: 'setPause', pause: true }); } catch(_){}
+    }
+    try {
+        if (phase === 4 && !window.rvDisabled && window.__rvBridge){
+            var fit = Number(window.__rvSessionBestFitness) || 0;
+            window.__rvBridge.endPhase4Trajectory(fit);
+        }
+    } catch (e) { console.warn('[sona] customize exit failed', e); }
+    phase = 0;
+    nextPhase();
 }
 function save(){
     const progressVal = bestCar.checkPointsCount+bestCar.laps*road.checkPointList.length/seconds;

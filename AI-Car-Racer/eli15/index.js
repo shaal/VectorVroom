@@ -129,6 +129,18 @@
   let backdropEl = null;
   let fabEl = null;
 
+  // ─── popover DOM (anchored to badges) ───────────────────────────────────
+  // Single-badge clicks show this lightweight card next to the anchor so the
+  // element the user clicked stays visible. The heavier drawer is reserved
+  // for the "Read full chapter" escalation.
+  let popoverEl = null;
+  let popoverTitleEl = null;
+  let popoverOneLinerEl = null;
+  let popoverMoreBtn = null;
+  let popoverRingEl = null;
+  let popoverActiveId = null;
+  let popoverActiveAnchor = null;
+
   function ensureDrawer() {
     if (drawerEl) return;
 
@@ -205,6 +217,110 @@
     } else {
       openChapter(lastChapterId || 'what-is-this-project');
     }
+  }
+
+  // ─── anchored popover ──────────────────────────────────────────────────
+  function ensurePopover() {
+    if (popoverEl) return;
+    popoverEl = document.createElement('div');
+    popoverEl.className = 'eli15-popover';
+    popoverEl.hidden = true;
+    popoverEl.setAttribute('role', 'dialog');
+    popoverEl.innerHTML = [
+      '<button type="button" class="eli15-popover-close" aria-label="Close">×</button>',
+      '<h3 class="eli15-popover-title"></h3>',
+      '<p class="eli15-popover-oneliner"></p>',
+      '<div class="eli15-popover-actions">',
+      '  <button type="button" class="eli15-popover-more">Read full chapter →</button>',
+      '</div>',
+    ].join('');
+    popoverTitleEl = popoverEl.querySelector('.eli15-popover-title');
+    popoverOneLinerEl = popoverEl.querySelector('.eli15-popover-oneliner');
+    popoverMoreBtn = popoverEl.querySelector('.eli15-popover-more');
+    popoverEl.querySelector('.eli15-popover-close').addEventListener('click', hidePopover);
+    popoverMoreBtn.addEventListener('click', function () {
+      const id = popoverActiveId;
+      hidePopover();
+      if (id) openChapter(id);
+    });
+
+    // Reuse the tour-ring visual styling to highlight the anchor.
+    popoverRingEl = document.createElement('div');
+    popoverRingEl.className = 'eli15-tour-ring';
+    popoverRingEl.hidden = true;
+
+    document.body.appendChild(popoverRingEl);
+    document.body.appendChild(popoverEl);
+  }
+
+  function positionPopover(anchor) {
+    const ar = anchor.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const pad = 10;
+
+    // Ring: snap to the anchor with a small inflate so the highlight reads
+    // as a glow around the badge rather than a tight border.
+    const ringPad = 4;
+    popoverRingEl.hidden = false;
+    popoverRingEl.style.left   = (ar.left - ringPad) + 'px';
+    popoverRingEl.style.top    = (ar.top - ringPad) + 'px';
+    popoverRingEl.style.width  = (ar.width + ringPad * 2) + 'px';
+    popoverRingEl.style.height = (ar.height + ringPad * 2) + 'px';
+
+    // Popover: measure, then prefer to the LEFT of the anchor when the anchor
+    // sits in the right half of the viewport (e.g. inside #rightPanel); else
+    // go below. Clamp to viewport.
+    popoverEl.hidden = false;
+    popoverEl.style.visibility = 'hidden';  // measure without flicker
+    popoverEl.style.left = '0px';
+    popoverEl.style.top = '0px';
+    const pr = popoverEl.getBoundingClientRect();
+    const pw = pr.width;
+    const ph = pr.height;
+
+    let x, y;
+    const anchorInRightHalf = (ar.left + ar.width / 2) > vw / 2;
+    if (anchorInRightHalf && ar.left - pw - pad > pad) {
+      x = ar.left - pw - pad;
+      y = ar.top + ar.height / 2 - ph / 2;
+    } else if (!anchorInRightHalf && ar.right + pw + pad < vw - pad) {
+      x = ar.right + pad;
+      y = ar.top + ar.height / 2 - ph / 2;
+    } else if (ar.bottom + ph + pad < vh - pad) {
+      x = ar.left + ar.width / 2 - pw / 2;
+      y = ar.bottom + pad;
+    } else {
+      x = ar.left + ar.width / 2 - pw / 2;
+      y = ar.top - ph - pad;
+    }
+    x = Math.max(pad, Math.min(x, vw - pw - pad));
+    y = Math.max(pad, Math.min(y, vh - ph - pad));
+
+    popoverEl.style.left = x + 'px';
+    popoverEl.style.top = y + 'px';
+    popoverEl.style.visibility = 'visible';
+  }
+
+  function showPopover(id, anchor) {
+    ensurePopover();
+    const entry = REGISTRY[id];
+    if (!entry) return;
+    popoverActiveId = id;
+    popoverActiveAnchor = anchor;
+    popoverTitleEl.textContent = entry.title;
+    popoverOneLinerEl.textContent = entry.oneLiner || '';
+    positionPopover(anchor);
+    // Move focus to the CTA so keyboard users can press Enter for full chapter.
+    try { popoverMoreBtn.focus({ preventScroll: true }); } catch (e) { /* Safari preventScroll */ }
+  }
+
+  function hidePopover() {
+    if (!popoverEl) return;
+    popoverEl.hidden = true;
+    if (popoverRingEl) popoverRingEl.hidden = true;
+    popoverActiveId = null;
+    popoverActiveAnchor = null;
   }
 
   // ─── chapter load + render ─────────────────────────────────────────────
@@ -332,23 +448,61 @@
       toggleDrawer();
       return;
     }
-    if (ev.key === 'Escape' && drawerEl && drawerEl.classList.contains('eli15-drawer-open')) {
-      ev.preventDefault();
-      closeDrawer();
+    if (ev.key === 'Escape') {
+      // Dismiss popover first (it's the lighter layer), then drawer. Lets the
+      // user escape a quick glance without blowing away the full chapter if
+      // both happen to be stacked.
+      if (popoverEl && !popoverEl.hidden) {
+        ev.preventDefault();
+        hidePopover();
+        return;
+      }
+      if (drawerEl && drawerEl.classList.contains('eli15-drawer-open')) {
+        ev.preventDefault();
+        closeDrawer();
+      }
     }
   });
 
-  // Delegated click for badge pattern. Closest() means the badge can be a
-  // nested element (e.g. a span inside a styled link) and the click still
-  // routes correctly.
+  // Delegated click: badge clicks open the anchored popover (progressive
+  // disclosure — summary first, "Read full chapter" escalates to the drawer).
+  // A click anywhere else while the popover is open dismisses it, as long as
+  // the click wasn't inside the popover or on another badge.
   document.addEventListener('click', function (ev) {
-    const badge = ev.target && ev.target.closest && ev.target.closest('[data-eli15]');
-    if (!badge) return;
-    const id = badge.getAttribute('data-eli15');
-    if (!id) return;
-    ev.preventDefault();
-    openChapter(id);
+    const t = ev.target;
+    const badge = t && t.closest && t.closest('[data-eli15]');
+    if (badge) {
+      const id = badge.getAttribute('data-eli15');
+      if (!id) return;
+      ev.preventDefault();
+      // Click the same badge a second time → dismiss (toggle).
+      if (popoverActiveAnchor === badge && popoverEl && !popoverEl.hidden) {
+        hidePopover();
+      } else {
+        showPopover(id, badge);
+      }
+      return;
+    }
+    // Outside-click dismiss. Ignore clicks inside the popover itself so the
+    // "Read full chapter" button and the × button can do their thing.
+    if (popoverEl && !popoverEl.hidden && !(t && popoverEl.contains(t))) {
+      hidePopover();
+    }
   });
+
+  // Reposition on viewport changes so the popover stays anchored if the
+  // right panel or #liveData resizes (happens during phase transitions and
+  // when the user resizes the window).
+  window.addEventListener('resize', function () {
+    if (popoverActiveAnchor && popoverEl && !popoverEl.hidden) {
+      positionPopover(popoverActiveAnchor);
+    }
+  });
+  window.addEventListener('scroll', function () {
+    if (popoverActiveAnchor && popoverEl && !popoverEl.hidden) {
+      positionPopover(popoverActiveAnchor);
+    }
+  }, true /* capture — catch scrolls inside #rightPanel too */);
 
   // ─── public API ────────────────────────────────────────────────────────
 

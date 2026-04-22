@@ -41,7 +41,26 @@ var breakAccel = .05;
 let pause=true;
 var phase = 0; //0 welcome, 1 track, 2 checkpoints, 3 physics, 4 training
 var maxSpeed = 15;
-nextPhase();
+// Default entry flow: land straight on phase 4 (training) with a preloaded
+// rectangle track so visitors see cars racing immediately behind a prominent
+// Start button. The old draw-a-track-from-scratch flow is still one click
+// away via "Customize Track" (see customizeTrack() in buttonResponse.js) and
+// can also be forced with `?edit=1` on the URL for dev use.
+window.__firstStart = !localStorage.getItem('trainCount');
+if (new URLSearchParams(location.search).get('edit') === '1') {
+    nextPhase(); // → phase 1 (track draw)
+} else {
+    // Replicate the state transitions that phases 1-3 produce when the user
+    // walks through them: lock the editor, persist defaults, populate road
+    // borders + checkpoints from the editor points, embed the track vector.
+    road.roadEditor.checkPointModeChange(false);
+    road.roadEditor.editModeChange(false);
+    saveTrack();
+    submitTrack();
+    try { embedCurrentTrack(); } catch (_) {}
+    phase = 3;
+    nextPhase(); // → phase 4 (training)
+}
 if (localStorage.getItem("traction")){
     traction=JSON.parse(localStorage.getItem("traction"));
 }
@@ -113,6 +132,7 @@ function perfEnsureHud(){
         'background:rgba(12,14,18,.88);color:#a8e6a0;padding:8px 10px;' +
         'border-radius:4px;font:11px/1.35 ui-monospace,Menlo,monospace;' +
         'pointer-events:none;min-width:170px;';
+    perfHud.addEventListener('click', function(){ perfHud.classList.toggle('expanded'); });
     document.body.appendChild(perfHud);
     return perfHud;
 }
@@ -153,19 +173,27 @@ function perfRender(){
         if (fpsNum < 30) fpsColor = '#f07070';
         else if (fpsNum < 55) fpsColor = '#f0c060';
     }
+    // Hitches block is wrapped in .perf-hitches — collapsed by default via
+    // CSS, click anywhere on #perf-hud to toggle the .expanded class.
     var hitchHtml = '';
-    if (hitchEnabled && hitches.length){
+    if (hitchEnabled){
         var nowT = performance.now();
-        hitchHtml = '<div style="margin-top:6px;border-top:1px solid #334;padding-top:4px;color:#f0c060;font-size:.95em;">hitches</div>';
+        var hitchLines = '';
         for (var i = hitches.length - 1; i >= 0; i--){
             var h = hitches[i];
             var ago = ((nowT - h.t) / 1000).toFixed(1);
             var col = h.ms > 300 ? '#f07070' : '#f0c060';
-            hitchHtml += '<div style="color:' + col + ';opacity:.9;">' +
+            hitchLines += '<div style="color:' + col + ';opacity:.9;">' +
                 h.ms.toFixed(0) + 'ms ' + h.kind +
                 (h.extra ? ' <span style="opacity:.7;">' + h.extra + '</span>' : '') +
                 ' <span style="opacity:.55;">-' + ago + 's</span></div>';
         }
+        var count = hitches.length;
+        hitchHtml =
+            '<div class="perf-hitches-header" style="margin-top:6px;border-top:1px solid #334;padding-top:4px;color:#f0c060;font-size:.95em;">' +
+                'hitches (' + count + ') <span style="opacity:.6;font-size:.85em;">click to toggle</span>' +
+            '</div>' +
+            '<div class="perf-hitches">' + hitchLines + '</div>';
     }
     hud.innerHTML =
         '<div style="color:#fff;margin-bottom:3px;"><b>perf</b></div>' +
@@ -590,6 +618,13 @@ function performNextBatch(genData){
 }
 
 begin();
+// First-visit: keep the sim paused so the user clicks the "▶ Start Training"
+// CTA. begin() flips pause=false, so we re-pause here AFTER it runs. Phase-4
+// layout already relabels the pause button; this just makes sure the sim
+// doesn't start stepping before the user opts in.
+if (window.__firstStart){
+    pause = true;
+}
 animate();
 
 // -----------------------------------------------------------------------------

@@ -1,7 +1,16 @@
 function showGraphCanvas(){
-    document.getElementById("rightPanel").innerHTML += "<canvas id='graphCanvas'></canvas>";
-    graphCanvas.height=300;
-    graphCanvas.width=400;
+    // Prefer the #liveData region (phase-4 template pins it high in the
+    // panel so the fitness curve stays visible without scrolling). Fall
+    // back to appending onto #rightPanel directly.
+    const host = document.getElementById("liveData") || document.getElementById("rightPanel");
+    let gc = document.getElementById("graphCanvas");
+    if (!gc){
+        gc = document.createElement("canvas");
+        gc.id = "graphCanvas";
+        host.appendChild(gc);
+    }
+    gc.width = 400;
+    gc.height = 300;
 }
 function graphProgress(){
     const graphCanvas=document.getElementById("graphCanvas");

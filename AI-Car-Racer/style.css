@@ -232,9 +232,10 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: var(--sp-3);
+    gap: var(--sp-2);
     min-width: 0;
-    padding: var(--sp-5);
+    min-height: 0;
+    padding: var(--sp-4);
     background: var(--surface-1);
     border: 1px solid var(--line);
     border-radius: var(--r-lg);
@@ -442,6 +443,95 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     }
 }
 
+/* ---------- Start-training CTA ----------------------------------
+   On first visit the Pause button is repurposed as an explicit Start
+   Training call-to-action. Filled amber, larger type, centered icon. */
+.controlButton.start-cta {
+    color: #fff;
+    background: var(--amber-500);
+    border-color: var(--amber-600);
+    font-weight: 700;
+    font-size: 1.02rem;
+    letter-spacing: 0.04em;
+    padding: 0.85em 0.9em;
+    box-shadow: var(--shadow-md);
+    animation: start-cta-pulse 2200ms var(--ease-in-out) infinite;
+}
+.controlButton.start-cta:hover {
+    background: var(--amber-600);
+    border-color: var(--amber-700);
+    color: #fff;
+}
+.controlButton.start-cta:active {
+    background: var(--amber-700);
+    color: #fff;
+}
+@keyframes start-cta-pulse {
+    0%, 100% { box-shadow: var(--shadow-md), 0 0 0 0 rgba(211, 139, 75, 0.45); }
+    50%      { box-shadow: var(--shadow-md), 0 0 0 10px rgba(211, 139, 75, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .controlButton.start-cta { animation: none; }
+}
+
+/* Secondary control button tint — used for Customize Track so it reads as
+   subordinate to the Start CTA above it. */
+.controlButton.secondary {
+    background: var(--surface-2);
+    color: var(--ink-700);
+    border-color: var(--line-strong);
+}
+.controlButton.secondary:hover {
+    background: var(--surface-3);
+    color: var(--ink-800);
+    border-color: var(--ink-300);
+}
+
+/* ---------- More actions (collapsible secondary buttons) ------- */
+.more-actions {
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    overflow: hidden;
+}
+.more-actions > summary {
+    padding: 0.45em 0.75em;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--ink-600);
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    user-select: none;
+}
+.more-actions > summary::-webkit-details-marker { display: none; }
+.more-actions > summary::before {
+    content: "▸";
+    transition: transform var(--dur-fast) var(--ease-out);
+    font-size: 0.75em;
+    color: var(--ink-500);
+}
+.more-actions[open] > summary::before { transform: rotate(90deg); }
+.more-actions > summary:hover { background: var(--surface-3); color: var(--ink-800); }
+.more-actions-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
+}
+.more-actions-body .controlButton {
+    font-size: 0.82rem;
+    padding: 0.45em 0.55em;
+}
+.more-actions-body .brain-share {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--sp-2);
+}
+
 /* Training-preset cluster (the 🌱 / 🏎️ / ✨ row) — clamp inline-style
    overrides so each button is still a card in the shared language. */
 #trainingPresets {
@@ -512,17 +602,67 @@ h1 {
     .blue { color: #9ab8ff; background: rgba(120, 150, 255, 0.14); box-shadow: inset 0 0 0 1px rgba(120, 150, 255, 0.35); }
 }
 
-/* ---------- Neural-network input + timer preview card ---------------------------------- */
-#inputCanvas {
+/* ---------- Live-data region (phase 4) ----------------------------------
+   A compact vertical stack pinned high in #rightPanel so the training
+   signals (fitness curve + NN viz + timer) stay visible without scrolling
+   the panel. #liveData is the host for inputCanvas + graphCanvas that
+   showInputCanvas/showGraphCanvas append dynamically. */
+.live-data {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--sp-2);
+    margin: var(--sp-1) 0;
+}
+.live-data canvas {
+    width: 100% !important;
+    height: auto !important;
     display: block;
-    width: 100%;
-    min-height: 110px;
-    max-width: 100%;
-    background:
-        linear-gradient(180deg, #ffffff 0%, #f7efde 100%);
+    background: linear-gradient(180deg, #ffffff 0%, #f7efde 100%);
     border: 1px solid var(--line);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-xs);
+}
+.live-data #graphCanvas {
+    aspect-ratio: 4 / 2;
+    max-height: 140px;
+}
+.live-data #inputCanvas {
+    aspect-ratio: 2 / 1;
+    max-height: 90px;
+}
+@media (prefers-color-scheme: dark) {
+    .live-data canvas {
+        background: linear-gradient(180deg, #1c1924 0%, #24202c 100%);
+        border-color: var(--line-strong);
+    }
+}
+/* Legacy selectors (when phase-4 layout falls back to appending onto
+   #rightPanel directly rather than into #liveData). */
+#inputCanvas {
+    display: block;
+    width: 100%;
+    min-height: 84px;
+    max-height: 120px;
+    max-width: 100%;
+    background: linear-gradient(180deg, #ffffff 0%, #f7efde 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--r-md);
+    box-shadow: var(--shadow-xs);
+    object-fit: contain;
+}
+
+.timer-eli15 {
+    display: flex;
+    gap: 0.25em;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 0.2em;
+}
+@media (prefers-color-scheme: dark) {
+    #graphCanvas {
+        background: linear-gradient(180deg, #1c1924 0%, #24202c 100%);
+        border-color: var(--line-strong);
+    }
 }
 
 @media (prefers-color-scheme: dark) {
@@ -541,22 +681,26 @@ label {
 #inputsContainer {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-3);
-    padding: var(--sp-3) var(--sp-3) var(--sp-4);
+    gap: var(--sp-2);
+    padding: var(--sp-2) var(--sp-3) var(--sp-3);
     background: var(--surface-2);
     border: 1px solid var(--line);
     border-radius: var(--r-md);
+}
+#inputsContainer output {
+    font-size: 0.82em;
+    color: var(--ink-700);
 }
 
 #timer {
     text-align: center;
     font-family: var(--font-mono);
-    font-size: 0.9rem;
+    font-size: 0.82rem;
     font-variant-numeric: tabular-nums;
     color: var(--ink-700);
-    padding: var(--sp-2) 0;
+    padding: var(--sp-1) 0;
     border-top: 1px dashed var(--line-strong);
-    margin-top: var(--sp-2);
+    margin-top: var(--sp-1);
 }
 
 #timer-eli15 {
@@ -1192,6 +1336,76 @@ label {
 }
 .eli15-tour-card[hidden] { display: none; }
 
+/* ---------- ELI15 anchored popover (single-badge clicks) ---------------
+   Progressive-disclosure UI for `?` badges. The guided tour (.eli15-tour-*)
+   walks a fixed playlist with Back/Next; this card is the lighter "what is
+   this element?" glance — title, one-liner, and a Read-full-chapter button
+   that opens the heavier drawer for readers who want depth. Sits above the
+   ring (z-index 1150) and the perf HUD (z-index 50). */
+.eli15-popover {
+    position: fixed;
+    z-index: 1400;
+    max-width: 300px;
+    min-width: 220px;
+    background: var(--surface-1);
+    color: var(--ink-800);
+    border: 1px solid var(--info-100);
+    border-top: 4px solid var(--info-600);
+    border-radius: var(--r-md);
+    padding: var(--sp-3) var(--sp-4) var(--sp-3);
+    font: 0.86rem/1.45 var(--font-body);
+    box-shadow: var(--shadow-lg);
+    animation: eli15-popover-in 140ms var(--ease-out);
+}
+.eli15-popover[hidden] { display: none; }
+@keyframes eli15-popover-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.eli15-popover-title {
+    font-family: var(--font-display);
+    font-weight: 600;
+    color: var(--info-600);
+    font-size: 0.98rem;
+    margin: 0 1.8em 0.3em 0;  /* leave room for the close × */
+    line-height: 1.25;
+}
+.eli15-popover-oneliner {
+    margin: 0 0 var(--sp-3) 0;
+    color: var(--ink-700);
+}
+.eli15-popover-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--sp-2);
+}
+.eli15-popover-more {
+    background: var(--info-600);
+    color: #fff;
+    border: 0;
+    padding: 0.4em 0.9em;
+    border-radius: var(--r-sm);
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 120ms var(--ease-out);
+}
+.eli15-popover-more:hover { background: var(--info-700, #234b8f); }
+.eli15-popover-close {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: transparent;
+    border: 0;
+    font-size: 1.2rem;
+    line-height: 1;
+    color: var(--ink-500);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: var(--r-sm);
+}
+.eli15-popover-close:hover { background: var(--ink-100); color: var(--ink-800); }
+
 .eli15-tour-progress {
     display: flex;
     gap: 3px;
@@ -1334,6 +1548,10 @@ label {
    bottom-text banner in the middle) and re-theme it to match the ink/paper
    palette. Inline cssText loses to !important. */
 #perf-hud {
+    /* Sit below the ELI15 tour card (z-index 1400) and the rv-panel modal
+       (z-index 1100) so the hitches log never occludes learning UI. Inline
+       cssText from main.js sets 99998 — override with !important. */
+    z-index: 50 !important;
     top: auto !important;
     right: auto !important;
     bottom: var(--sp-4) !important;
@@ -1350,10 +1568,13 @@ label {
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     opacity: 0.82;
-    pointer-events: none;
+    pointer-events: auto !important; /* re-enable so the collapse toggle works */
     letter-spacing: 0.01em;
+    cursor: pointer;
 }
 #perf-hud:hover { opacity: 1; }
+#perf-hud .perf-hitches { display: none; }
+#perf-hud.expanded .perf-hitches { display: block; }
 @media (max-width: 900px) {
     #perf-hud { display: none !important; }
 }

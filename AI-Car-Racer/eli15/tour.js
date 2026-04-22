@@ -266,13 +266,24 @@
     cardEl.hidden = false;
     positionCard();
 
-    // Ring placement. We deliberately do NOT call scrollIntoView: body is
-    // `overflow: hidden` in this app, so programmatic scroll works one-way
-    // (scrolls down, no user scrollbar to scroll back). If the target is
-    // clipped off-screen at the current window size, the step stays readable
-    // via the card — we just suppress the ring rather than trap the viewport.
+    // Ring placement. We deliberately do NOT call scrollIntoView on the page
+    // (body is `overflow: hidden` in this app, so programmatic scroll works
+    // one-way — no user scrollbar to scroll back), but we DO scroll anchor-
+    // owning containers that have their own internal scroll (#rv-panel and
+    // #rightPanel). Those scrolls are reversible and often the only reason
+    // the ring would otherwise be clipped out of view.
     const target = hasAnchor ? document.querySelector(step.anchor) : null;
     if (target) {
+      const scrollHost = target.closest('#rv-panel, #rightPanel');
+      if (scrollHost) {
+        const hostRect = scrollHost.getBoundingClientRect();
+        const tRect = target.getBoundingClientRect();
+        if (tRect.top < hostRect.top + 12) {
+          scrollHost.scrollTop += (tRect.top - hostRect.top) - 12;
+        } else if (tRect.bottom > hostRect.bottom - 12) {
+          scrollHost.scrollTop += (tRect.bottom - hostRect.bottom) + 12;
+        }
+      }
       const rect = target.getBoundingClientRect();
       const inViewport =
         rect.bottom > 0 && rect.top < window.innerHeight &&

@@ -166,7 +166,19 @@ export function hydrateFromMirror(mirror) {
     _childToParents.set(idx, []);
   }
 
-  // Pass 2: connect edges.
+  // Pass 2: connect edges. Deliberately skip the WASM _dag.add_edge() path
+  // here — it runs DFS-based cycle detection per insert, which is O(V+E)
+  // worst-case and grew to ~56s on a 2392-brain archive (all cost, no
+  // benefit: the WASM DAG is write-only — nothing ever queries it; all
+  // query paths read the JS shadow _childToParents with a seen-set for
+  // cycle safety).
+  //
+  // JS-side cycle rejection uses a generation-monotonicity check: a parent
+  // strictly older than its child can never close a cycle in a DAG where
+  // generation is the partial order. Ties and backwards edges (same or
+  // newer parent) are rejected, matching the intent of the original WASM
+  // guard while running in O(1) per edge.
+  const dropsBefore = _droppedEdges;
   for (const [id] of mirror) {
     const idx = _idToIdx.get(id);
     if (idx === undefined) continue;
@@ -176,15 +188,19 @@ export function hydrateFromMirror(mirror) {
     for (const pid of meta.parentIds) {
       const pidx = _idToIdx.get(pid);
       if (pidx === undefined) continue;
-      const ok = _dag.add_edge(pidx, idx);
-      if (ok) {
+      const pmeta = _nodeMeta[pidx];
+      if (!pmeta) { _droppedEdges += 1; continue; }
+      if (pmeta.generation < meta.generation) {
         myParents.push(pidx);
       } else {
         _droppedEdges += 1;
-        console.warn('[lineage-dag] hydrate dropped cycle edge', pid, '→', id);
       }
     }
     _childToParents.set(idx, myParents);
+  }
+  const dropped = _droppedEdges - dropsBefore;
+  if (dropped > 0) {
+    console.debug('[lineage-dag] hydrate dropped', dropped, 'cycle edge(s)');
   }
 }
 

@@ -104,22 +104,19 @@ function phaseToLayout(phase){
             //   - inputCanvas (NN out)  → neural-network (see uiPanels/indexed
             //                             via the inputCanvas badge wrapper below)
             rightPanel.innerHTML = `
-            <button class='backNext back' onclick='backPhase()'>Prev</button>
-            <button class='backNext next' disabled aria-disabled='true' title='Training is the final step'>Next</button>
             <button class='controlButton' id='pause' onclick='pauseGame()'>Pause</button>
-            <button class='controlButton' onclick='destroyBrain(); nextBatch();'>Reset Brain</button>
-            <button class='controlButton' onclick='resetFastLap();'>Reset Fast Lap</button>
-            <button class='controlButton' onclick='restartBatch();'>Restart Batch</button>
-            <button class='controlButton' onclick='save(); restartBatch();'>Save Best and Restart</button>
-            <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
+            <button class='controlButton secondary' id='customizeTrackBtn' onclick='customizeTrack()' title='Draw your own track shape, reset checkpoints, retune physics'>✏️ Customize Track</button>
 
-            <div id="brainShare" style="display:flex; gap:.35em; margin:.35em 0; flex-wrap:wrap;">
-                <button class='controlButton' style='flex:1;min-width:0;' onclick='exportBrainJson()' title='Download current best brain as a ~1 KB JSON file'>⬇️ Export Brain</button>
-                <button class='controlButton' style='flex:1;min-width:0;' onclick='importBrainJson()' title='Load a brain JSON file and use it as the seed'>⬆️ Import Brain</button>
-                ${window.__rvfEnabled ? `
-                <button class='controlButton' style='flex:1;min-width:0;' onclick='exportBrainPackRvf()' title='Export full brain pack as .rvf (experimental)'>⬇️ .rvf</button>
-                <button class='controlButton' style='flex:1;min-width:0;' onclick='importBrainPackRvf()' title='Import a .rvf brain pack (experimental)'>⬆️ .rvf</button>
-                ` : ''}
+            <!-- Live-data region: inputCanvas + graphCanvas get appended here by
+                 showInputCanvas/showGraphCanvas so they stay at the top of the
+                 panel (visible without scrolling) while the secondary sliders
+                 sit below. -->
+            <div id="liveData" class="live-data"></div>
+            <div id="timer"></div>
+            <div id="timer-eli15" class="timer-eli15">
+                <span data-eli15="fitness-function" role="button" tabindex="0" aria-label="Learn: fitness function"></span>
+                <span data-eli15="sensors" role="button" tabindex="0" aria-label="Learn: ray-cast sensors"></span>
+                <span data-eli15="neural-network" role="button" tabindex="0" aria-label="Learn: neural network"></span>
             </div>
 
             <div id="trainingPresets" style="display:flex; gap:.35em; margin:.35em 0; flex-wrap:wrap;">
@@ -127,34 +124,47 @@ function phaseToLayout(phase){
                 <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('grind')" title="Elite drives laps: N=500, 20×, 15s, variance 0.20">🏎️ Grind</button>
                 <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('polish')" title="Refine competent brain: N=1000, 2×, 25s, variance 0.05">✨ Polish</button>
             </div>
-            <div id="inputsContainer">
-                <input min="0" max="2000" id="batchSizeInput" step="50" onkeydown="return false;" type="range" onchange='setN(this.value)' oninput="document.getElementById('batchSizeOutput').value = 'Batch Size: ' + this.value" >
-                <output  id="batchSizeOutput" name="Batch Size"></output>
-                <input min="5" max="100" id="secondsInput" step="5" onkeydown="return false;" type="range" onchange='setSeconds(this.value)' oninput="document.getElementById('secondsOutput').value = 'Round Length: ' + this.value" >
-                <output id="secondsOutput" name="Round Length"></output>
-                <input min=".001" max=".3" id="mutateValueInput" onkeydown="return false;" step=".001" type="range" onchange='setMutateValue(this.value)' oninput="document.getElementById('mutateValueOutput').value = 'Variance: ' + this.value" >
-                <output id="mutateValueOutput" name="Variance"></output>
-                <span data-eli15="genetic-algorithm" role="button" tabindex="0" aria-label="Learn: genetic algorithm + variance"></span>
-                <label id="simSpeedLabel" style="display:flex; align-items:center; gap:.4em; margin-top:.35em; font-size:.82em;">
-                    <span>Sim Speed:</span>
-                    <select id="simSpeedInput" onchange="setSimSpeed(this.value)" style="flex:1;">
-                        <option value="0.5">0.5&times; (slow)</option>
-                        <option value="1" selected>1&times; (real)</option>
-                        <option value="2">2&times;</option>
-                        <option value="5">5&times;</option>
-                        <option value="20">20&times;</option>
-                        <option value="100">100&times; (max)</option>
-                    </select>
-                </label>
-            </div>
-            <div id="timer"></div>
-            <div id="timer-eli15" style="margin-top:.25em;">
-                <!-- Fast Lap = fitness-function display; rays are drawn on the
-                     canvas when training, so the sensors badge lives here too. -->
-                <span data-eli15="fitness-function" role="button" tabindex="0" aria-label="Learn: fitness function"></span>
-                <span data-eli15="sensors" role="button" tabindex="0" aria-label="Learn: ray-cast sensors"></span>
-                <span data-eli15="neural-network" role="button" tabindex="0" aria-label="Learn: neural network"></span>
-            </div>
+            <details id="trainingTuning" class="more-actions">
+                <summary>Training tuning (sliders)</summary>
+                <div id="inputsContainer">
+                    <input min="0" max="2000" id="batchSizeInput" step="50" onkeydown="return false;" type="range" onchange='setN(this.value)' oninput="document.getElementById('batchSizeOutput').value = 'Batch Size: ' + this.value" >
+                    <output  id="batchSizeOutput" name="Batch Size"></output>
+                    <input min="5" max="100" id="secondsInput" step="5" onkeydown="return false;" type="range" onchange='setSeconds(this.value)' oninput="document.getElementById('secondsOutput').value = 'Round Length: ' + this.value" >
+                    <output id="secondsOutput" name="Round Length"></output>
+                    <input min=".001" max=".3" id="mutateValueInput" onkeydown="return false;" step=".001" type="range" onchange='setMutateValue(this.value)' oninput="document.getElementById('mutateValueOutput').value = 'Variance: ' + this.value" >
+                    <output id="mutateValueOutput" name="Variance"></output>
+                    <span data-eli15="genetic-algorithm" role="button" tabindex="0" aria-label="Learn: genetic algorithm + variance"></span>
+                    <label id="simSpeedLabel" style="display:flex; align-items:center; gap:.4em; margin-top:.35em; font-size:.82em;">
+                        <span>Sim Speed:</span>
+                        <select id="simSpeedInput" onchange="setSimSpeed(this.value)" style="flex:1;">
+                            <option value="0.5">0.5&times; (slow)</option>
+                            <option value="1" selected>1&times; (real)</option>
+                            <option value="2">2&times;</option>
+                            <option value="5">5&times;</option>
+                            <option value="20">20&times;</option>
+                            <option value="100">100&times; (max)</option>
+                        </select>
+                    </label>
+                </div>
+            </details>
+            <details id='moreActions' class='more-actions'>
+                <summary>More actions</summary>
+                <div class='more-actions-body'>
+                    <button class='controlButton' onclick='destroyBrain(); nextBatch();'>Reset Brain</button>
+                    <button class='controlButton' onclick='resetFastLap();'>Reset Fast Lap</button>
+                    <button class='controlButton' onclick='restartBatch();'>Restart Batch</button>
+                    <button class='controlButton' onclick='save(); restartBatch();'>Save Best + Restart</button>
+                    <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
+                    <div id="brainShare" class='brain-share'>
+                        <button class='controlButton' onclick='exportBrainJson()' title='Download current best brain as a ~1 KB JSON file'>⬇️ Export Brain</button>
+                        <button class='controlButton' onclick='importBrainJson()' title='Load a brain JSON file and use it as the seed'>⬆️ Import Brain</button>
+                        ${window.__rvfEnabled ? `
+                        <button class='controlButton' onclick='exportBrainPackRvf()' title='Export full brain pack as .rvf (experimental)'>⬇️ .rvf</button>
+                        <button class='controlButton' onclick='importBrainPackRvf()' title='Import a .rvf brain pack (experimental)'>⬆️ .rvf</button>
+                        ` : ''}
+                    </div>
+                </div>
+            </details>
             `;
             bottomText.innerHTML = `
                 <h1>Train your model!</h1>
@@ -168,14 +178,25 @@ function phaseToLayout(phase){
             showInputCanvas();
             showGraphCanvas();
             graphProgress();
-            // <label>Batch Size</label>
-            // <input type='range' min="0" max="1000" step="100" value=100 onchange='setN(this.value)'>Batch Size</input>
-            // <label>Round Length</label>
-            // <input type='range' min="0" max="100" step="5" value=10 onchange='setSeconds(this.value)'></input>
-            // <label>Mutation</label>
-            // <input type='range' min="0" max="1" step=".05" value=.3 onchange='setMutateValue(this.value)'></input>
-            // savePhysics();
             begin();
+            // First-visit UX: begin() sets pause=false, but on a brand-new
+            // visitor we keep the sim paused so the user presses an explicit
+            // "▶ Start Training" CTA. After the first click, the button
+            // reverts to the normal Pause/Play cycle.
+            if (window.__firstStart){
+                pause = true;
+                // Worker setPause deferred to pauseGame() / workerReady — at
+                // phase-4 first entry from main.js init the `const simWorker`
+                // binding is still in TDZ (declared later in main.js), so
+                // `typeof simWorker` would throw. Just flip the UI; begin()
+                // posts pause state with its own message when it actually
+                // engages the worker.
+                const pb = document.getElementById('pause');
+                if (pb){
+                    pb.textContent = '▶ Start Training';
+                    pb.classList.add('start-cta');
+                }
+            }
             break;
 
     }

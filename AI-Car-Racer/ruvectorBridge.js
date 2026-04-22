@@ -205,9 +205,24 @@ let _persistInFlight = null;
 
 // ─── init ────────────────────────────────────────────────────────────────────
 
+// ─── boot profiling (temporary) ────────────────────────────────────────
+// Records per-phase durations of ready() so heavy archives have a visible
+// trace of where the 30s startup time goes. Exposed as window.__bootTimings
+// for quick copy/paste diagnosis. Safe to leave in place — each call is one
+// performance.now() and a Map.set(), ~microseconds total.
+const _bootTimings = {};
+function _tStart() { return performance.now(); }
+function _tEnd(label, start) {
+  const ms = performance.now() - start;
+  _bootTimings[label] = Math.round(ms * 10) / 10;
+  return ms;
+}
+if (typeof window !== 'undefined') { window.__bootTimings = _bootTimings; }
+
 export function ready() {
   if (_ready) return _ready;
   _ready = (async () => {
+    const _t0 = _tStart();
     // P3.A — boot hyperbolic wasm in parallel with the Euclidean / CNN
     // inits. We always load it so the A/B toggle can flip to hyperbolic
     // without a cold-start stall, even when the URL flag isn't set.
@@ -221,8 +236,12 @@ export function ready() {
         wantHyperbolic = usp.get('hhnsw') === '1';
       }
     } catch (_) { /* ignore — fall back to euclidean */ }
+    const _tWasmInit = _tStart();
     await Promise.all([initVec(), initCnn()]);
+    _tEnd('1_initVec+initCnn', _tWasmInit);
+    const _tHyper = _tStart();
     try { await hyperbolicPromise; } catch (_) { /* already logged */ }
+    _tEnd('2_loadHyperbolic', _tHyper);
     _indexKind = (wantHyperbolic && isHyperbolicReady()) ? 'hyperbolic' : 'euclidean';
     const IndexClass = pickIndexClass(_indexKind);
     _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
@@ -243,13 +262,20 @@ export function ready() {
     // agent in parallel. Either side can fail independently without taking
     // the other down; we log+fall through in both cases.
     const sonaPromise = loadSonaEngine();
+    const _tHydrate = _tStart();
     await hydrate();
+    _tEnd('3_hydrate_total', _tHydrate);
+    const _tGnn = _tStart();
     try { await gnnPromise; } catch (_) { /* already logged inside loadGnn */ }
+    _tEnd('4_loadGnn', _tGnn);
+    const _tDag = _tStart();
     try { await dagPromise; } catch (_) { /* already logged inside loadDag */ }
-    // Once the mirror + DAG are both live, one-shot-populate the DAG from
-    // whatever hydrate() just loaded. Skipped when the wasm didn't load.
+    _tEnd('5_loadDag', _tDag);
+    const _tDagHydrate = _tStart();
     try { if (dagIsReady()) dagHydrateFromMirror(_brainMirror); }
     catch (e) { console.warn('[lineage-dag] hydrate failed', e); }
+    _tEnd('6_dagHydrateFromMirror', _tDagHydrate);
+    const _tSona = _tStart();
     try {
       await sonaPromise;
       // Hydrate adapter B-matrices after the wasm engines are live. Done
@@ -261,10 +287,21 @@ export function ready() {
       // driven by *this session's* training.
       await hydrateLoraSnapshot();
     } catch (_) { /* already logged inside loadSonaEngine */ }
+    _tEnd('7_sona+loraSnapshot', _tSona);
     if (typeof window !== 'undefined') {
       window.addEventListener('beforeunload', () => { try { flushPersist(); } catch (_) {} });
     }
+    _tEnd('0_total_ready', _t0);
+    _bootTimings._archiveSize = {
+      brains: _brainMirror.size,
+      tracks: _trackMirror.size,
+      obs: _observations.size,
+      dynamics: _dynamicsMirror.size,
+    };
     console.log(`[ruvector] ready — brains=${_brainMirror.size} tracks=${_trackMirror.size} obs=${_observations.size}`);
+    // One compact line so the full breakdown survives console truncation and
+    // can be copy-pasted back for diagnosis.
+    console.log('[boot-timings] ' + JSON.stringify(_bootTimings));
   })();
   return _ready;
 }
@@ -718,39 +755,55 @@ export async function hydrate() {
     // readAll is safe. Still, wrap in try/catch to be defensive against
     // partial upgrades from a crashed earlier session.
     let dynamicsRows = [];
+    const _tIdb = _tStart();
     try { dynamicsRows = await readAll(db, DYNAMICS_STORE); } catch (_) { dynamicsRows = []; }
     const [brainRows, trackRows, obsRows] = await Promise.all([
       readAll(db, BRAINS_STORE),
       readAll(db, TRACKS_STORE),
       readAll(db, OBS_STORE),
     ]);
+    _tEnd('3a_idb_readAll', _tIdb);
+    _bootTimings._rowCounts = {
+      brains: brainRows.length,
+      tracks: trackRows.length,
+      obs: obsRows.length,
+      dynamics: dynamicsRows.length,
+    };
     // Tracks first, so upsertTrack-dedup can reference them (not strictly needed
     // since we load by id, but keeps mirror/DB consistent).
+    const _tTracks = _tStart();
     for (const row of trackRows) {
       const vec = toFloat32(row.vec);
       if (vec.length !== TRACK_DIM) continue;
       _trackDB.insert(vec, row.id, row.meta || {});
       _trackMirror.set(row.id, { vector: vec, meta: row.meta || {} });
     }
+    _tEnd('3b_insert_tracks', _tTracks);
     // Dynamics second — brain meta references dynamicsId, so the mirror
     // being populated when brains hydrate means recommendSeeds can find the
     // match immediately. (Brain rows from pre-P1.C archives simply won't
     // have meta.dynamicsId set; that's the backwards-compat path.)
+    const _tDyn = _tStart();
     for (const row of dynamicsRows) {
       const vec = toFloat32(row.vec);
       if (vec.length !== DYNAMICS_DIM) continue;
       _dynamicsDB.insert(vec, row.id, row.meta || {});
       _dynamicsMirror.set(row.id, { vector: vec, meta: row.meta || {} });
     }
+    _tEnd('3c_insert_dynamics', _tDyn);
+    const _tBrains = _tStart();
     for (const row of brainRows) {
       const vec = toFloat32(row.vec);
       if (vec.length !== FLAT_LENGTH) continue;
       _brainDB.insert(vec, row.id, row.meta || {});
       _brainMirror.set(row.id, { vector: vec, meta: row.meta || {} });
     }
+    _tEnd('3d_insert_brains', _tBrains);
+    const _tObs = _tStart();
     for (const row of obsRows) {
       _observations.set(row.id, { weight: row.weight || 0, count: row.count | 0 });
     }
+    _tEnd('3e_insert_obs', _tObs);
   } finally {
     db.close();
   }

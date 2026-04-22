@@ -21,7 +21,19 @@ function boxColor(coordinate, on, rectWidth, rectHeight, inputCtx){
     inputCtx.stroke();
 }
 function showInputCanvas(){
-    document.getElementById("rightPanel").innerHTML += "<canvas id='inputCanvas'></canvas>"
+    // Prefer the #liveData region (phase-4 template pins it high in the
+    // panel so the NN viz stays visible without scrolling). index.html
+    // ships an inert <canvas id="inputCanvas"> inside #rightPanel that
+    // we relocate on phase-4 entry; if neither exists, create one fresh.
+    const host = document.getElementById("liveData") || document.getElementById("rightPanel");
+    let c = document.getElementById("inputCanvas");
+    if (!c){
+        c = document.createElement("canvas");
+        c.id = "inputCanvas";
+    }
+    if (c.parentElement !== host){
+        host.appendChild(c);
+    }
 }
 function deleteInputCanvas(){
     const toDel = document.getElementById("inputCanvas");

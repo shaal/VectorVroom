@@ -8,14 +8,21 @@ class roadEditor{
             this.points2=JSON.parse(localStorage.getItem("trackOuter"));
         }
         else{
-            this.points = [{x:startInfo.x-4*startInfo.startWidth,y:startInfo.y+4*startInfo.startWidth},{x:startInfo.x-3*startInfo.startWidth,y:startInfo.y-3*startInfo.startWidth}];
-            this.points2 = [{x:startInfo.x+4*startInfo.startWidth,y:startInfo.y+4*startInfo.startWidth},{x:startInfo.x+3*startInfo.startWidth,y:startInfo.y-3*startInfo.startWidth}];
+            // Rectangle preset (mirrors trackPresets.js entry "Rectangle") — a
+            // fresh visitor lands with a usable corridor so main.js can boot
+            // straight into phase-4 training and show cars racing immediately.
+            this.points  = [{x:650,y:700},{x:2450,y:700},{x:2450,y:1100},{x:650,y:1100}];
+            this.points2 = [{x:250,y:300},{x:3100,y:300},{x:3100,y:1500},{x:250,y:1500}];
         }
         if(localStorage.getItem("checkPointList")){
             this.checkPointListEditor=JSON.parse(localStorage.getItem("checkPointList"));
         }
         else{
-            this.checkPointListEditor = [[{x:startInfo.x-5*startInfo.startWidth,y:startInfo.y-startInfo.startWidth},{x:startInfo.x+5*startInfo.startWidth,y:startInfo.y-startInfo.startWidth}]];
+            this.checkPointListEditor = [
+                [{x:1600,y:300},{x:1600,y:700}],
+                [{x:250,y:900},{x:650,y:900}],
+                [{x:1600,y:1500},{x:1600,y:1100}]
+            ];
         }
         this.drag_point = -1;
         this.pointSize = startInfo.startWidth/1.5;
