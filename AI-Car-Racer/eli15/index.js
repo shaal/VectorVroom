@@ -187,7 +187,10 @@
     fabEl.className = 'eli15-fab';
     fabEl.setAttribute('aria-label', 'Open ELI15 teaching drawer (shortcut: ?)');
     fabEl.title = 'ELI15 — explain like I\'m 15  (?)';
-    fabEl.textContent = '🎓';
+    // Pill with an emoji icon + text label on desktop; mobile CSS shrinks
+    // this back to an emoji-only circle via .eli15-fab-label { display:none }.
+    fabEl.innerHTML = '<span class="eli15-fab-icon" aria-hidden="true">🎓</span>'
+                    + '<span class="eli15-fab-label">Explain anything</span>';
     fabEl.addEventListener('click', toggleDrawer);
 
     document.body.appendChild(backdropEl);

@@ -147,7 +147,11 @@
     fabEl.className = 'eli15-tour-fab';
     fabEl.setAttribute('aria-label', 'Start guided tour of every AI layer');
     fabEl.title = 'Guided tour of every AI layer';
-    fabEl.textContent = '🚗';
+    // Visible label pairs with the emoji so sighted users don't have to
+    // hover the tooltip to know what this does. Mobile CSS hides the
+    // label and shrinks back to a circular FAB (screen real estate).
+    fabEl.innerHTML = '<span class="eli15-tour-fab-icon" aria-hidden="true">🚗</span>'
+                    + '<span class="eli15-tour-fab-label">Guided tour</span>';
     fabEl.addEventListener('click', function () {
       if (_running) stop(); else start();
     });

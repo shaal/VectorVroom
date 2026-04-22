@@ -19,17 +19,26 @@
     <div id="fullDisplay">
         <div id="canvasDiv">
             <canvas id="myCanvas"></canvas>
-        </div>
-        <div id="bottomText">
-            <h1>Train Your Model</h1>
+            <!-- Banner is overlaid on the canvas (pointer-events: none) so the
+                 track claims the full grid area instead of surrendering a row. -->
+            <div id="bottomText">
+                <h1>Train Your Model</h1>
+            </div>
         </div>
         <div id="rightPanel">
             <div id="verticalButtons"></div>
             <canvas id="inputCanvas"></canvas>
             <!-- <canvas id="graphCanvas"></canvas> -->
+            <!-- #rv-panel is now nested so the right column is a single
+                 scrollable card. Legacy getElementById('rv-panel') still works. -->
+            <div id="rv-panel"></div>
         </div>
-        <div id="rv-panel"></div>
     </div>
+    <!-- Edge toggle: collapses the right panel so the track can use the
+         whole viewport width. State persisted in localStorage (main.js). -->
+    <button id="panelToggle" type="button" aria-label="Collapse control panel" aria-expanded="true" title="Collapse panel (press P)">
+        <span aria-hidden="true">›</span>
+    </button>
 
     <div id="track-preset-picker" style="position:fixed; top:8px; left:8px; z-index:1000; background:rgba(28,32,40,0.92); color:#eee; padding:8px 10px; border-radius:6px; font:12px/1.4 system-ui,-apple-system,sans-serif; display:none; box-shadow:0 2px 8px rgba(0,0,0,0.35);">
         <label for="track-preset-select" style="display:block; margin-bottom:4px; opacity:0.85;">Load preset track:
@@ -109,6 +118,43 @@
         }
       })();
     </script>
+    <script>
+      // Right-panel collapse toggle. Mirrors aria-expanded ↔ a class on
+      // #fullDisplay (CSS reads the class; screen readers read the attr)
+      // and persists the preference. Restored on load so collapse survives
+      // page refresh. The `P` key toggles it too as long as focus isn't in
+      // a text input or contenteditable — quick keyboard access for power
+      // users without stealing keystrokes from the track-name field etc.
+      (() => {
+        const KEY = 'vv.panelCollapsed';
+        const display = document.getElementById('fullDisplay');
+        const toggle = document.getElementById('panelToggle');
+        if (!display || !toggle) return;
+        const apply = (collapsed) => {
+          display.classList.toggle('panel-collapsed', collapsed);
+          toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+          toggle.setAttribute('aria-label', collapsed ? 'Expand control panel' : 'Collapse control panel');
+        };
+        // Restore — default to expanded. localStorage read is wrapped because
+        // Safari private mode throws synchronously on access.
+        let saved = false;
+        try { saved = localStorage.getItem(KEY) === '1'; } catch (_) {}
+        apply(saved);
+        toggle.addEventListener('click', () => {
+          const nowCollapsed = !display.classList.contains('panel-collapsed');
+          apply(nowCollapsed);
+          try { localStorage.setItem(KEY, nowCollapsed ? '1' : '0'); } catch (_) {}
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key !== 'p' && e.key !== 'P') return;
+          if (e.ctrlKey || e.metaKey || e.altKey) return;
+          const t = e.target;
+          if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+          toggle.click();
+        });
+      })();
+    </script>
+
     <script>
       // Preflight + sidecar loader for the ruvector bridge.
       //

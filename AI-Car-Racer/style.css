@@ -179,16 +179,32 @@ body {
    it locally. */
 p { line-height: 1.5; margin: 0 0 .6em 0; }
 
-/* ---------- Layout ---------------------------------- */
+/* ---------- Layout ----------------------------------
+   Single-row, 2-column grid. The track (left) takes all available vertical
+   space; the right column is a collapsible card that can drop to zero width
+   via the .panel-collapsed modifier so the canvas can claim the whole
+   viewport. The training-phase banner is absolutely positioned over the
+   canvas (see #bottomText below) so it no longer steals a grid row.
+
+   Outer padding + gap intentionally smaller than the rest of the card
+   system (sp-2 vs sp-4) — the grid gutter is aesthetic, not structural,
+   and every pixel given back to the canvas is pixels of track. */
 #fullDisplay {
     display: grid;
     grid-template-columns: minmax(0, 1fr) clamp(260px, 24vw, 340px);
-    grid-template-rows: minmax(0, 1fr) auto;
-    gap: var(--sp-4);
+    grid-template-rows: minmax(0, 1fr);
+    gap: var(--sp-2);
     width: 100vw;
     height: 100vh;
-    padding: var(--sp-4);
+    padding: var(--sp-2);
     box-sizing: border-box;
+    transition: grid-template-columns var(--dur-med) var(--ease-out);
+}
+
+/* Collapsed state: right column shrinks to 0. overflow: hidden on the panel
+   itself so the card contents don't spill out mid-transition. */
+#fullDisplay.panel-collapsed {
+    grid-template-columns: minmax(0, 1fr) 0;
 }
 
 #canvasDiv {
@@ -199,6 +215,8 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     justify-content: center;
     min-width: 0;
     min-height: 0;
+    /* position: relative so the absolutely-positioned #bottomText banner
+       anchors to this cell rather than the viewport. */
     position: relative;
 }
 
@@ -225,7 +243,9 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     box-shadow: var(--shadow-lg), 0 0 0 3px var(--amber-500);
 }
 
-/* ---------- Right panel (primary controls card) ---------------------------------- */
+/* ---------- Right panel (primary controls card) ----------------------------------
+   Single scroll surface for controls + vector-memory (#rv-panel is nested
+   inside this card now, so there's one scroll container instead of two). */
 #rightPanel {
     grid-column: 2 / span 1;
     grid-row: 1 / span 1;
@@ -244,6 +264,18 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: var(--ink-200) transparent;
+    transition: opacity var(--dur-med) var(--ease-out), padding var(--dur-med) var(--ease-out);
+}
+
+/* When #fullDisplay.panel-collapsed the column width already drops to 0
+   via grid-template-columns. Hide the card surface too so stale content
+   doesn't leak out during the transition, and stop it from intercepting
+   pointer events once it's off-screen. */
+#fullDisplay.panel-collapsed #rightPanel {
+    opacity: 0;
+    padding-inline: 0;
+    pointer-events: none;
+    overflow: hidden;
 }
 
 #rightPanel::-webkit-scrollbar { width: 8px; }
@@ -549,20 +581,35 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     padding: 0.55em 0.6em;
 }
 
-/* ---------- Titles & bottom banner ---------------------------------- */
+/* ---------- Titles & bottom banner ----------------------------------
+   Floats over the bottom-center of the canvas rather than occupying its
+   own grid row. pointer-events: none is load-bearing: without it the
+   banner would eat clicks in phase 1 (track draw) where every pixel of
+   the canvas needs to be interactive. Translucent + backdrop-blur so the
+   scene behind it stays legible. */
 #bottomText {
-    grid-column: 1 / span 1;
-    grid-row: 2 / span 1;
-    justify-self: center;
-    align-self: end;
-    padding: var(--sp-3) var(--sp-5);
-    background: var(--surface-1);
+    position: absolute;
+    left: 50%;
+    bottom: var(--sp-3);
+    transform: translateX(-50%);
+    padding: var(--sp-2) var(--sp-5);
+    background: rgba(255, 255, 255, 0.82);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    backdrop-filter: blur(8px) saturate(120%);
     border: 1px solid var(--line);
     border-radius: var(--r-full);
     box-shadow: var(--shadow-sm);
     color: var(--ink-900);
     text-align: center;
-    max-width: min(90vw, 680px);
+    max-width: min(80%, 620px);
+    pointer-events: none;
+    z-index: 5;
+}
+@media (prefers-color-scheme: dark) {
+    #bottomText {
+        background: rgba(29, 26, 22, 0.72);
+        border-color: var(--line-strong);
+    }
 }
 
 #bottomText h1,
@@ -731,7 +778,10 @@ label {
 
 /* ---------- Track preset picker (fixed top-left chip) ---------------------------------- */
 #track-preset-picker {
-    top: var(--sp-4) !important;
+    /* Sits beneath the two learning-tool pills at top-left (≈ drawer FAB
+       height + gap + tour FAB height + gap). Phase-1 only, so the stack
+       doesn't crowd during normal training. */
+    top: calc(var(--sp-4) + 90px) !important;
     left: var(--sp-4) !important;
     padding: var(--sp-3) var(--sp-4) !important;
     background: var(--surface-1) !important;
@@ -793,27 +843,25 @@ label {
    surface. The legacy CSS used dark-panel text tones (#bcd, #8aa)
    that were nearly invisible over #fafafa.
    ============================================================= */
+/* #rv-panel is now a *nested* section inside #rightPanel (not a standalone
+   grid cell), so it no longer needs its own scroll container or grid
+   placement — the parent card scrolls. We keep the violet rim + subtle
+   background so the vector-memory story still reads as a distinct section
+   separated from the controls above it. */
 #rv-panel {
-    grid-column: 2 / span 1;
-    grid-row: 2 / span 1;
-    align-self: start;
-    padding: var(--sp-4);
-    background: var(--surface-1);
+    margin-top: var(--sp-3);
+    padding: var(--sp-3);
+    background: var(--ml-50);
     border: 1px solid var(--line);
-    border-radius: var(--r-lg);
-    box-shadow: var(--shadow-sm);
+    border-radius: var(--r-md);
     font-family: var(--font-body);
     font-size: 0.82rem;
     color: var(--ink-800);
     min-width: 0;
-    max-height: 42vh;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: var(--ink-200) transparent;
 
-    /* a calm violet rim — this is where the ML/vector story lives */
+    /* Violet top-rim carried over from the standalone-card design. */
     background-image:
-        linear-gradient(180deg, var(--ml-50) 0%, var(--surface-1) 48px);
+        linear-gradient(180deg, var(--ml-50) 0%, var(--surface-1) 40px);
 }
 
 .rv-header {
@@ -1281,32 +1329,72 @@ label {
 /* =============================================================
    Guided-tour overlay (eli15)
    ============================================================= */
+/* Tour launcher — stacks directly below the #eli15-fab (drawer) pill at
+   top-left. Same pill shape; info-blue accent so it reads as a different
+   affordance from the amber drawer pill. On narrow viewports it drops back
+   to a 46px circle and stacks above the drawer FAB at bottom-right. */
 .eli15-tour-fab {
     position: fixed;
-    right: var(--sp-4);
-    bottom: calc(var(--sp-4) + 48px);
+    top: calc(var(--sp-4) + 40px + var(--sp-2)); /* below .eli15-fab */
+    left: var(--sp-4);
+    right: auto;
+    bottom: auto;
     z-index: 1200;
-    width: 46px;
-    height: 46px;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    width: auto;
+    height: auto;
+    padding: 0.5em 0.9em 0.5em 0.7em;
     border-radius: var(--r-full);
-    border: 2px solid var(--info-600);
+    border: 1.5px solid var(--info-600);
     background: var(--surface-1);
     color: var(--info-600);
-    font-size: 22px;
-    line-height: 40px;
-    text-align: center;
-    box-shadow: var(--shadow-md);
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: 0.01em;
+    text-align: left;
+    box-shadow: var(--shadow-sm);
     cursor: pointer;
-    padding: 0;
-    transition: transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+    transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
 }
+.eli15-tour-fab-icon  { font-size: 1.1em; line-height: 1; }
+.eli15-tour-fab-label { white-space: nowrap; }
 .eli15-tour-fab:hover {
+    background: var(--info-100);
     transform: translateY(-1px);
-    box-shadow: var(--shadow-lg);
+    box-shadow: var(--shadow-md);
 }
 .eli15-tour-fab:focus-visible {
     outline: none;
     box-shadow: var(--shadow-md), 0 0 0 3px rgba(47, 95, 180, 0.45);
+}
+@media (prefers-color-scheme: dark) {
+    .eli15-tour-fab {
+        background: var(--surface-2);
+        color: #9ab8ff;
+        border-color: rgba(154, 184, 255, 0.6);
+    }
+    .eli15-tour-fab:hover { background: rgba(154, 184, 255, 0.14); }
+}
+/* Mobile: revert to emoji-only circle at bottom-right, stacked above the
+   drawer FAB (which sits at bottom: var(--sp-4)). */
+@media (max-width: 720px) {
+    .eli15-tour-fab {
+        top: auto;
+        left: auto;
+        right: var(--sp-4);
+        bottom: calc(var(--sp-4) + 56px);
+        width: 46px;
+        height: 46px;
+        padding: 0;
+        border-radius: 50%;
+        justify-content: center;
+        font-size: 22px;
+    }
+    .eli15-tour-fab-label { display: none; }
 }
 
 .eli15-tour-ring {
@@ -1487,25 +1575,18 @@ label {
 /* =============================================================
    Responsive
    ============================================================= */
+/* Portrait / near-square viewports: the canvas + panel stack; the panel
+   becomes a shorter bottom strip so the track still dominates. */
 @media (max-aspect-ratio: 1/1) {
     #fullDisplay {
-        grid-template-columns: 1fr minmax(240px, 34vw);
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 1fr) minmax(200px, 38vh);
     }
-    #canvasDiv {
-        grid-column: 1 / span 2;
-    }
-    #rightPanel {
-        grid-column: 2 / span 1;
-        grid-row: 2 / span 1;
-    }
-    #rv-panel {
-        grid-column: 2 / span 1;
-        grid-row: 3 / span 1;
-    }
-    #bottomText {
-        grid-column: 1 / span 1;
-        grid-row: 3 / span 1;
+    #canvasDiv  { grid-column: 1; grid-row: 1; }
+    #rightPanel { grid-column: 1; grid-row: 2; }
+    #fullDisplay.panel-collapsed {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(0, 1fr) 0;
     }
 }
 
@@ -1517,16 +1598,15 @@ label {
 @media (max-width: 720px) {
     #fullDisplay {
         grid-template-columns: 1fr;
-        grid-template-rows: auto auto auto auto;
-        padding: var(--sp-3);
-        gap: var(--sp-3);
+        grid-template-rows: minmax(0, 1fr) minmax(220px, 50vh);
+        padding: var(--sp-2);
+        gap: var(--sp-2);
     }
-    #canvasDiv, #rightPanel, #rv-panel, #bottomText {
+    #canvasDiv, #rightPanel {
         grid-column: 1 / -1;
     }
-    #rightPanel { grid-row: auto; max-height: 60vh; }
-    #rv-panel   { grid-row: auto; max-height: 40vh; }
-    #bottomText { grid-row: auto; border-radius: var(--r-lg); }
+    #rightPanel { grid-row: 2; }
+    #bottomText { font-size: 0.9em; }
 }
 
 /* Broad reduced-motion guard */
@@ -1577,6 +1657,82 @@ label {
 #perf-hud.expanded .perf-hitches { display: block; }
 @media (max-width: 900px) {
     #perf-hud { display: none !important; }
+}
+
+/* ---------- Right-panel collapse toggle ----------------------------------
+   Fixed tab on the right edge of the viewport. Lives outside #fullDisplay
+   so its position is anchored to the viewport, not the grid — this means
+   it stays put whether the panel is open or collapsed, just changes its
+   chevron direction. Visual treatment is intentionally quiet so it doesn't
+   compete with the Start-training CTA or the track itself. */
+#panelToggle {
+    position: fixed;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
+    width: 22px;
+    height: 64px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface-1);
+    color: var(--ink-600);
+    border: 1px solid var(--line);
+    border-right: none;
+    border-radius: var(--r-md) 0 0 var(--r-md);
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    z-index: 1000;
+    font-family: var(--font-body);
+    font-size: 14px;
+    line-height: 1;
+    transition:
+        background-color var(--dur-fast) var(--ease-out),
+        color var(--dur-fast) var(--ease-out),
+        transform var(--dur-med) var(--ease-out);
+}
+#panelToggle > span {
+    display: inline-block;
+    transition: transform var(--dur-med) var(--ease-out);
+}
+/* aria-expanded is the source of truth — drives the chevron direction so
+   collapsed state reads as "open the panel again" (points left = ‹). */
+#panelToggle[aria-expanded="false"] > span { transform: rotate(180deg); }
+#panelToggle:hover {
+    background: var(--surface-2);
+    color: var(--ink-900);
+}
+#panelToggle:focus-visible {
+    outline: none;
+    box-shadow: var(--ring);
+}
+@media (prefers-color-scheme: dark) {
+    #panelToggle {
+        background: var(--surface-2);
+        color: var(--ink-600);
+    }
+    #panelToggle:hover {
+        background: var(--surface-3);
+        color: var(--ink-800);
+    }
+}
+/* On portrait/mobile the panel lives below the canvas rather than beside
+   it, so the edge-tab doesn't make spatial sense — rotate it into a pill
+   pinned to the bottom-right corner. */
+@media (max-aspect-ratio: 1/1), (max-width: 720px) {
+    #panelToggle {
+        top: auto;
+        right: var(--sp-2);
+        bottom: var(--sp-2);
+        transform: none;
+        width: 44px;
+        height: 28px;
+        border-radius: var(--r-full);
+        border-right: 1px solid var(--line);
+    }
+    #panelToggle > span { transform: rotate(-90deg); }
+    #panelToggle[aria-expanded="false"] > span { transform: rotate(90deg); }
 }
 
 /* Accessible "visually-hidden" utility for screen-reader-only labels */

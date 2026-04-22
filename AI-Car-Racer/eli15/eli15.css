@@ -5,33 +5,74 @@
  * cover the driving canvas; on narrow screens it becomes full-width.
  */
 
-/* ─── floating action button ───────────────────────────────────────────── */
+/* ─── floating action button ─────────────────────────────────────────────
+   Desktop: pill with an emoji icon + a visible "Explain anything" label,
+   pinned top-left as the first of two learning-tools (the guided-tour FAB
+   stacks directly below). Mobile (≤720px): shrinks back to a 44px emoji
+   circle pinned bottom-right so it doesn't eat screen width.
+ */
 .eli15-fab {
     position: fixed;
-    right: 1em;
-    bottom: 1em;
+    top: 16px;            /* ≈ var(--sp-4) — eli15.css doesn't import tokens */
+    left: 16px;
+    right: auto;
+    bottom: auto;
     z-index: 1200;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    border: 2px solid #d38b4b;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    width: auto;
+    height: auto;
+    padding: 0.5em 0.9em 0.5em 0.7em;
+    border-radius: 999px;
+    border: 1.5px solid #d38b4b;
     background: #fff;
     color: #824006;
-    font-size: 22px;
-    line-height: 40px;
-    text-align: center;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.15;
+    letter-spacing: 0.01em;
+    text-align: left;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
     cursor: pointer;
-    padding: 0;
-    transition: transform 120ms ease-out, background-color 120ms ease-out;
+    transition: transform 120ms ease-out, background-color 120ms ease-out, box-shadow 120ms ease-out;
 }
+.eli15-fab-icon  { font-size: 1.1em; line-height: 1; }
+.eli15-fab-label { white-space: nowrap; }
 .eli15-fab:hover {
     background: #fff4e2;
     transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.16);
 }
 .eli15-fab:focus-visible {
     outline: 3px solid #d38b4b;
     outline-offset: 2px;
+}
+/* Dark-mode tweak — the legacy colors read poorly on dark paper. */
+@media (prefers-color-scheme: dark) {
+    .eli15-fab {
+        background: #1d1a23;
+        color: #f4c691;
+        border-color: rgba(211, 139, 75, 0.65);
+    }
+    .eli15-fab:hover { background: rgba(211, 139, 75, 0.16); }
+}
+/* Mobile: revert to emoji-only circle at bottom-right. */
+@media (max-width: 720px) {
+    .eli15-fab {
+        top: auto;
+        left: auto;
+        right: 12px;
+        bottom: 12px;
+        width: 44px;
+        height: 44px;
+        padding: 0;
+        border-radius: 50%;
+        justify-content: center;
+        font-size: 22px;
+    }
+    .eli15-fab-label { display: none; }
 }
 
 /* ─── badges (anywhere [data-eli15] appears) ───────────────────────────── */
