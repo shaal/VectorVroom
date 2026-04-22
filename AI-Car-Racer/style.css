@@ -31,9 +31,10 @@
     --ink-100: #ece6d8;
 
     /* Accent scales */
+    --amber-800: #6a3405;   /* hover for filled CTAs (see --brand-solid) */
     --amber-700: #824006;
     --amber-600: #a45a13;
-    --amber-500: #d38b4b;   /* legacy brand */
+    --amber-500: #d38b4b;   /* legacy brand — tint / border use */
     --amber-400: #e7a86c;
     --amber-300: #f4c691;
     --amber-200: #fde2bd;
@@ -50,6 +51,8 @@
     --ml-100: #ebe4fb;
     --ml-50:  #f5f1fd;
 
+    --success-900: #083820;   /* AAA text on --success-100 chip tint */
+    --success-800: #0d5435;   /* AAA-compliant text on paper surfaces */
     --success-700: #1f6e47;
     --success-500: #2f8355;
     --success-100: #d6ecdf;
@@ -391,8 +394,12 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: #ffffff;
-    background: var(--amber-500);
-    border: 1px solid var(--amber-600);
+    /* Filled primary actions target WCAG AAA (7:1). White text only passes
+       against amber-700 or darker; amber-500 (the brand chip color) tops
+       out at ~2.8:1 and can't be rescued without the whole button fill
+       moving down the ladder. */
+    background: var(--amber-700);
+    border: 1px solid var(--amber-800);
     border-radius: var(--r-md);
     box-shadow: var(--shadow-sm);
     cursor: pointer;
@@ -406,21 +413,25 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
 }
 
 .backNext:hover {
-    background: var(--amber-600);
-    border-color: var(--amber-700);
+    background: var(--amber-800);
+    border-color: var(--amber-800);
     color: #fff;
     transform: translateY(-1px);
     box-shadow: var(--shadow-md);
 }
 .backNext:active {
     transform: translateY(0);
-    background: var(--amber-700);
+    background: var(--amber-800);
     box-shadow: var(--shadow-xs);
 }
 .backNext:focus-visible {
     outline: none;
     box-shadow: var(--ring), var(--shadow-sm);
 }
+/* WCAG 2.1 SC 1.4.3 note: inactive UI components are explicitly exempt
+   from contrast requirements, so the muted ink-400 here is deliberate —
+   the "not available right now" affordance carries meaning that AAA
+   text contrast would actively fight. */
 .backNext:disabled,
 .backNext[aria-disabled="true"] {
     background: var(--surface-2);
@@ -480,8 +491,9 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
    Training call-to-action. Filled amber, larger type, centered icon. */
 .controlButton.start-cta {
     color: #fff;
-    background: var(--amber-500);
-    border-color: var(--amber-600);
+    /* AAA: white needs amber-700+ (see .backNext for rationale). */
+    background: var(--amber-700);
+    border-color: var(--amber-800);
     font-weight: 700;
     font-size: 1.02rem;
     letter-spacing: 0.04em;
@@ -490,12 +502,12 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     animation: start-cta-pulse 2200ms var(--ease-in-out) infinite;
 }
 .controlButton.start-cta:hover {
-    background: var(--amber-600);
-    border-color: var(--amber-700);
+    background: var(--amber-800);
+    border-color: var(--amber-800);
     color: #fff;
 }
 .controlButton.start-cta:active {
-    background: var(--amber-700);
+    background: var(--amber-800);
     color: #fff;
 }
 @keyframes start-cta-pulse {
@@ -530,7 +542,7 @@ p { line-height: 1.5; margin: 0 0 .6em 0; }
     padding: 0.45em 0.75em;
     font-size: 0.82rem;
     font-weight: 600;
-    color: var(--ink-600);
+    color: var(--ink-700); /* AAA: ink-600 tops out at 6.69 on paper-2 */
     cursor: pointer;
     list-style: none;
     display: flex;
@@ -818,7 +830,8 @@ label {
 }
 
 #track-preset-load {
-    background: var(--amber-500) !important;
+    /* AAA-compliant fill (see .backNext). */
+    background: var(--amber-700) !important;
     color: #fff !important;
     border: none !important;
     border-radius: var(--r-sm) !important;
@@ -829,7 +842,7 @@ label {
     transition: background-color var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
 }
 #track-preset-load:hover {
-    background: var(--amber-600) !important;
+    background: var(--amber-800) !important;
     transform: translateY(-1px);
 }
 #track-preset-load:focus-visible {
@@ -885,11 +898,11 @@ label {
 
 .rv-info {
     font-size: 0.75rem;
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA */
     font-family: var(--font-mono);
     font-variant-numeric: tabular-nums;
 }
-.rv-info-muted { color: var(--ink-400); font-style: italic; }
+.rv-info-muted { color: var(--ink-700); font-style: italic; }
 
 /* Master toggle — custom switch */
 .rv-master-toggle {
@@ -945,7 +958,7 @@ label {
     font-size: 0.68rem;
     letter-spacing: 0.04em;
     min-width: 1.5em;
-    color: var(--ink-600);
+    color: var(--ink-700); /* AAA */
     text-transform: uppercase;
 }
 
@@ -956,10 +969,10 @@ label {
     gap: 0.4em;
     margin: 0 0 0.4em 0;
     font-size: 0.75rem;
-    color: var(--ink-600);
+    color: var(--ink-700); /* AAA */
 }
 .rv-reranker-mode[hidden] { display: none; }
-.rv-reranker-mode-label { color: var(--ink-500); letter-spacing: 0.02em; }
+.rv-reranker-mode-label { color: var(--ink-700); letter-spacing: 0.02em; }
 .rv-reranker-mode-value {
     font-family: var(--font-mono);
     font-weight: 600;
@@ -969,20 +982,20 @@ label {
     color: var(--amber-700);
     font-size: 0.75rem;
 }
-.rv-reranker-mode-gnn  { background: var(--success-100); color: var(--success-700); }
+.rv-reranker-mode-gnn  { background: var(--success-100); color: var(--success-900); /* AAA: success-700 hit only 5.0 on the chip tint */ }
 .rv-reranker-mode-ema  { background: var(--amber-100);   color: var(--amber-700); }
-.rv-reranker-mode-none { background: var(--ink-100);     color: var(--ink-600); }
+.rv-reranker-mode-none { background: var(--ink-100);     color: var(--ink-700); /* AAA */ }
 
 .rv-reranker {
     font-size: 0.75rem;
-    color: var(--ink-600);
+    color: var(--ink-700); /* AAA: was ink-600 (6.72:1 on ml-50) */
     margin: 0 0 0.5em 0;
     padding: 0 0 0.4em 0;
     border-bottom: 1px dashed var(--line);
     letter-spacing: 0.01em;
 }
 .rv-reranker[hidden] { display: none; }
-.rv-reranker-muted { color: var(--ink-400); font-style: italic; }
+.rv-reranker-muted { color: var(--ink-700); font-style: italic; }
 
 .rv-badge-row {
     display: flex;
@@ -1026,7 +1039,7 @@ label {
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA */
     font-weight: 600;
     margin: 0.6em 0 0.3em 0;
 }
@@ -1074,13 +1087,17 @@ label {
     padding-left: 0.1em;
 }
 
+/* AAA contrast: on #rv-panel surfaces (paper-1 / ml-50) ink-400/500/600
+   top out below 7:1. Everything below reads metadata labels — hierarchy
+   comes from font-weight, mono-styling, and column placement, not
+   contrast reduction, so ink-700 is fine. */
 .rv-rank    { color: var(--amber-700); font-weight: 700; font-family: var(--font-mono); font-size: 0.72rem; }
-.rv-id      { color: var(--ink-500); font-family: var(--font-mono); font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.rv-sim     { color: var(--success-700); font-weight: 700; font-family: var(--font-mono); font-size: 0.72rem; }
+.rv-id      { color: var(--ink-700); font-family: var(--font-mono); font-size: 0.72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.rv-sim     { color: var(--success-800); font-weight: 700; font-family: var(--font-mono); font-size: 0.72rem; }
 .rv-fit     { color: var(--ink-800); font-size: 0.72rem; font-family: var(--font-mono); }
-.rv-lap     { color: var(--info-600); font-size: 0.72rem; font-family: var(--font-mono); }
-.rv-gen     { color: var(--ink-600); font-size: 0.72rem; font-family: var(--font-mono); }
-.rv-parents { color: var(--ink-400); font-size: 0.72rem; font-family: var(--font-mono); }
+.rv-lap     { color: var(--ink-blue); font-size: 0.72rem; font-family: var(--font-mono); }
+.rv-gen     { color: var(--ink-700); font-size: 0.72rem; font-family: var(--font-mono); }
+.rv-parents { color: var(--ink-700); font-size: 0.72rem; font-family: var(--font-mono); }
 
 .rv-spark {
     display: inline-flex;
@@ -1089,12 +1106,12 @@ label {
     height: 12px;
 }
 .rv-spark-svg { width: 42px; height: 12px; display: block; }
-.rv-spark-empty { color: var(--ink-300); font-size: 0.7rem; line-height: 12px; }
+.rv-spark-empty { color: var(--ink-700); font-size: 0.7rem; line-height: 12px; }
 .rv-spark-label {
     font-size: 0.62rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: var(--ink-400);
+    color: var(--ink-700);
 }
 
 .rv-lora,
@@ -1106,7 +1123,7 @@ label {
     flex-wrap: wrap;
     margin: 0.3em 0 0.15em 0;
     font-size: 0.72rem;
-    color: var(--ink-600);
+    color: var(--ink-700); /* AAA */
 }
 .rv-dynamics[hidden],
 .rv-sona[hidden] { display: none; }
@@ -1114,7 +1131,7 @@ label {
 .rv-lora-label,
 .rv-sona-label,
 .rv-dynamics-label {
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA */
     text-transform: uppercase;
     font-size: 0.62rem;
     letter-spacing: 0.08em;
@@ -1180,7 +1197,7 @@ label {
     align-items: center;
     gap: 0.45em;
     font-size: 0.72rem;
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA */
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.06em;
@@ -1203,7 +1220,7 @@ label {
 .rv-lineage-toggle:disabled { cursor: default; opacity: 0.5; }
 .rv-lineage-toggle:focus-visible { outline: none; box-shadow: var(--ring); }
 .rv-lineage-status {
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA */
     font-family: var(--font-mono);
     font-size: 0.68rem;
     letter-spacing: 0;
@@ -1262,7 +1279,7 @@ label {
 .rv-abstrip-hint {
     display: inline;
     margin-left: 0.45em;
-    color: var(--ink-500);
+    color: var(--ink-700); /* AAA */
     font-weight: 400;
     text-transform: none;
     letter-spacing: 0;
@@ -1309,13 +1326,14 @@ label {
     color: var(--amber-700);
 }
 .rv-abbtn-active {
-    background: var(--amber-500);
+    /* AAA: white on amber-500 = 2.78, needs amber-700. */
+    background: var(--amber-700);
     color: #fff;
     font-weight: 700;
-    border-color: var(--amber-600);
+    border-color: var(--amber-800);
 }
 .rv-abbtn-active:hover {
-    background: var(--amber-600);
+    background: var(--amber-800);
     color: #fff;
 }
 .rv-abbtn-unavailable { opacity: 0.5; cursor: help; }
@@ -1347,9 +1365,11 @@ label {
     height: auto;
     padding: 0.5em 0.9em 0.5em 0.7em;
     border-radius: var(--r-full);
-    border: 1.5px solid var(--info-600);
+    border: 1.5px solid var(--ink-blue);
     background: var(--surface-1);
-    color: var(--info-600);
+    /* AAA: info-600 (#2f5fb4) on white is 6.15:1. ink-blue (#1c3f70) hits
+       ~9.9:1 so the label and icon both pass at AAA. */
+    color: var(--ink-blue);
     font-family: var(--font-body);
     font-size: 0.82rem;
     font-weight: 600;
@@ -1609,6 +1629,34 @@ label {
     #bottomText { font-size: 0.9em; }
 }
 
+/* ---------- Dark-mode AAA contrast overrides ----------------------------------
+   The light-mode tokens for accent text (amber-700, ml-700, success-800,
+   info-600, ink-blue) all encode a dark color that reads well on paper
+   surfaces but inverts to 1.5–2.2 :1 against the dark-paper backdrop. The
+   flips below target ≥7:1 on dark surfaces by swapping in the light-tier
+   of each accent ladder. #panelToggle and #perf-hud keep hardcoded
+   visible tones because their backgrounds are fixed (the HUD's bg is a
+   semi-opaque dark in both themes; light-mode paper-1 text would vanish
+   there in dark mode since paper-1 itself flips to dark).
+   ========================================================================== */
+@media (prefers-color-scheme: dark) {
+    .rv-title            { color: #c5b8ff; }
+    .rv-rank             { color: #f4c691; }
+    .rv-sim              { color: #77d29a; }
+    .rv-lap              { color: #9ab8ff; }
+    .rv-abstrip-title    { color: #f4c691; }
+    .rv-lineage-toggle   { color: #c5b8ff; background: rgba(122, 101, 204, 0.18); border-color: rgba(122, 101, 204, 0.35); }
+    .rv-lineage-toggle:hover { background: rgba(122, 101, 204, 0.28); }
+    .rv-reranker-mode-gnn  { background: rgba(47, 131, 85, 0.22);  color: #9ce5b8; }
+    .rv-reranker-mode-ema  { background: rgba(211, 139, 75, 0.18); color: #f4c691; }
+    /* Perf HUD: keep a fixed light text tone regardless of theme because
+       the HUD's dark-on-dark background is intentional. All descendants
+       inherit unless a child rule overrides — span-level !important needed
+       because main.js sets child inline styles too. */
+    #perf-hud,
+    #perf-hud *         { color: #f8f2e4 !important; }
+}
+
 /* Broad reduced-motion guard */
 @media (prefers-reduced-motion: reduce) {
     *,
@@ -1677,7 +1725,7 @@ label {
     align-items: center;
     justify-content: center;
     background: var(--surface-1);
-    color: var(--ink-600);
+    color: var(--ink-700); /* AAA: was ink-600 (6.69:1 on white) */
     border: 1px solid var(--line);
     border-right: none;
     border-radius: var(--r-md) 0 0 var(--r-md);
@@ -1710,11 +1758,13 @@ label {
 @media (prefers-color-scheme: dark) {
     #panelToggle {
         background: var(--surface-2);
-        color: var(--ink-600);
+        /* AAA: ink-600 in dark mode = #a89f8f, ratio ~6.1 on surface-2.
+           ink-800 = #e8e1d2 hits ~11:1 and reads cleanly. */
+        color: var(--ink-800);
     }
     #panelToggle:hover {
         background: var(--surface-3);
-        color: var(--ink-800);
+        color: var(--ink-900);
     }
 }
 /* On portrait/mobile the panel lives below the canvas rather than beside

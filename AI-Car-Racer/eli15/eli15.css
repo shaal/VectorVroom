@@ -174,7 +174,8 @@
     font-size: 0.7rem;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: #a07e5a;
+    /* AAA: the prior #a07e5a against the amber kicker tint was 3.43:1. */
+    color: #824006;
     margin-bottom: 0.2em;
 }
 .eli15-title {
@@ -186,7 +187,8 @@
 .eli15-oneliner {
     font-size: 0.82rem;
     margin: 0;
-    color: #555;
+    /* AAA: #555 on the kicker tint was 6.85:1. */
+    color: #403a33;
     font-style: italic;
 }
 .eli15-close {
@@ -230,7 +232,7 @@
 }
 .eli15-body strong { color: #222; }
 
-.eli15-loading { color: #888; font-style: italic; }
+.eli15-loading { color: #403a33; font-style: italic; } /* AAA: was #888 (3.54:1) */
 .eli15-error { color: #933; }
 .eli15-error-detail {
     background: #fff0f0;
@@ -266,7 +268,8 @@
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    color: #888;
+    /* AAA: #888 on white was 3.54:1. */
+    color: #403a33;
     margin-bottom: 0.3em;
 }
 .eli15-related-list {
