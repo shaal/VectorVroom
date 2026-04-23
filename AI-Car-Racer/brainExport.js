@@ -98,15 +98,16 @@ function _applyImportedBrainText(text){
                  : null;
     if (!brain) throw new Error('File is not a recognised brain JSON.');
 
-    // Topology sanity: the app's NN is [6,8,4]. Revive tolerates the legacy
-    // nested shape, but an imported brain with a different sensor count would
-    // silently mismatch runtime inputs — reject loudly instead.
+    // Topology sanity: the app's NN is [8,8,4] as of Phase A1'. Revive
+    // tolerates the legacy nested shape, but an imported brain with a
+    // different input width would silently mismatch runtime inputs — reject
+    // loudly instead.
     const topo = brain.levels.map(L => L.inputCount).concat(
         [brain.levels[brain.levels.length - 1].outputCount]
     );
-    const expected = [6, 8, 4];
+    const expected = [8, 8, 4];
     if (topo.length !== expected.length || topo.some((n, i) => n !== expected[i])){
-        throw new Error('Topology mismatch. Expected [6,8,4], got [' + topo.join(',') + '].');
+        throw new Error('Topology mismatch. Expected [8,8,4], got [' + topo.join(',') + '].');
     }
 
     // Stash the old best so "Restore Old Brain" can roll back, then install.

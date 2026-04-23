@@ -75,7 +75,7 @@ var playerCar2;
 // worker's real bestCar (position, angle, sensor state, controls, lap data)
 // for rendering, perf HUD, and the save()/archive paths in buttonResponse.js.
 var bestCar = null;
-var bestBrainFlat = null;          // Float32Array(92) — updated on genEnd
+var bestBrainFlat = null;          // Float32Array(FLAT_LENGTH) — updated on genEnd
 var _cachedBestBrainObj = null;    // inflated lazily via __rvUnflatten
 var _cachedBestBrainSeq = 0;       // bumped whenever bestBrainFlat replaced
 var latestSnapshot = null;
@@ -570,16 +570,16 @@ function handleGenEnd(m){
 }
 
 // -----------------------------------------------------------------------------
-// Brain buffer builder — produces the N×92 Float32Array shipped to the worker.
+// Brain buffer builder — produces the N×FLAT_LENGTH Float32Array shipped to the worker.
 // Applies ruvector seeding / localStorage fallback + mutation directly on flat
 // weights (no intermediate NeuralNetwork objects for the bulk of the population).
 // -----------------------------------------------------------------------------
-const FLAT_LENGTH = 92;
+const FLAT_LENGTH = 108;
 // Mirror of brainCodec.BRAIN_SCHEMA_VERSION — duplicated because main.js is a
 // classic script and can't import ES modules. Keep in sync with brainCodec.js.
 // Used to gate the localStorage.bestBrain seeding path below; ruvector owns the
 // actual schema migration (see migrateBrainSchemaIfNeeded in ruvectorBridge.js).
-const BRAIN_SCHEMA_VERSION = 2;
+const BRAIN_SCHEMA_VERSION = 4;
 
 function flattenBrainInline(brain){
     const out = new Float32Array(FLAT_LENGTH);
@@ -597,7 +597,7 @@ function inflateBrainInline(flat){
     if (!flat) return null;
     const NN = globalThis.NeuralNetwork;
     if (!NN) return null;
-    const net = new NN([6, 8, 4]);
+    const net = new NN([8, 8, 4]);
     let k = 0;
     for (let L = 0; L < net.levels.length; L++){
         const level = net.levels[L];

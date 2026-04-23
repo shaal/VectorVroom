@@ -1,11 +1,18 @@
-export const TOPOLOGY = [6, 8, 4];
-export const FLAT_LENGTH = 92;
+// Phase A1' — input width bumped 6→8 to carry the two track-orientation
+// features (car-local direction to next checkpoint, scaled by canvas
+// diagonal). Flat layout: 8*8+8 (hidden) + 8*4+4 (output) = 72 + 36.
+export const TOPOLOGY = [8, 8, 4];
+export const FLAT_LENGTH = 108;
 // Bump whenever the network's *inference semantics* or wire shape change in a
 // way that makes stored brains behave differently at runtime. Inference-only
 // changes (A0: hidden-layer tanh swap) count — the weights load fine but
 // produce different outputs for the same inputs, so old archive hits would
-// mislead rather than seed. Bumped to 2 at Phase A0.
-export const BRAIN_SCHEMA_VERSION = 2;
+// mislead rather than seed. Versions:
+//   2 — A0 tanh on hidden
+//   3 — A1 unit-vector direction (reverted; see arch-a1/PROOF.md)
+//   4 — A1' scaled-distance direction (current)
+// v3 is skipped so any testers whose localStorage holds '3' from A1 get wiped.
+export const BRAIN_SCHEMA_VERSION = 4;
 
 function flatLengthFor(topology) {
   let n = 0;
@@ -64,7 +71,7 @@ export function unflatten(float32, topology = TOPOLOGY) {
   const vec = flatten(b);
   if (vec.length !== FLAT_LENGTH) throw new Error(`brainCodec: expected ${FLAT_LENGTH} dims, got ${vec.length}`);
   const b2 = unflatten(vec);
-  const testInput = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6];
+  const testInput = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
   const o1 = globalThis.NeuralNetwork.feedForward(testInput, b);
   const o2 = globalThis.NeuralNetwork.feedForward(testInput.slice(), b2);
   const eq = o1.length === o2.length && o1.every((v, i) => v === o2[i]);
@@ -72,5 +79,5 @@ export function unflatten(float32, topology = TOPOLOGY) {
     console.error('[brainCodec] round-trip mismatch', { o1, o2 });
     throw new Error('brainCodec: round-trip produced different feedForward outputs');
   }
-  console.log('[brainCodec] self-check passed — 92-dim round-trip ok');
+  console.log(`[brainCodec] self-check passed — ${FLAT_LENGTH}-dim round-trip ok`);
 })();

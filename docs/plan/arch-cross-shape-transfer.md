@@ -1,6 +1,6 @@
 # Architecture changes to enable cross-shape transfer
 
-**Status:** A0 shipped (2026-04-22). A1 attempted + reverted 2026-04-23 — unit-vector direction-to-next-checkpoint regresses Triangle cold (−0.138) and worsens cross-track transfer (−0.221 vs cold-tri baseline). See `docs/plan/ruvector-proof/arch-a1/PROOF.md`. A2/A3 blocked on a successful A1' retry (suggested variants in the retrospective).
+**Status:** A0 shipped 2026-04-22. A1 attempted + reverted 2026-04-23 (`arch-a1/PROOF.md`). **A1' (scaled-distance variant) shipped 2026-04-23 — cross-track Δ flipped positive (+0.013 vs Phase 2 cold-tri baseline 0.714); see `arch-a1-prime/PROOF.md`.** A2/A3 are now unblocked.
 **Origin:** Phase 3.5 experiments (`docs/plan/ruvector-proof/phase3.5/PROOF.md` + `phase3.5-samesame/PROOF-SAME-TRACK.md`) showed ruvector's archive currently *hurts* cross-track generalization because the 6→8→4 network overfits to track-specific sensor sequences. This plan proposes the architecture changes that should flip that result.
 **How to use:** each phase is scoped for an independent `/ship-task` invocation. Run them in order (A0 → A1 → A2 → A3). Acceptance criteria at the end of each phase are the ship-task confidence-gate targets.
 
@@ -68,7 +68,18 @@ Schema migrator fired cleanly on the cold-boot test (`[ruvector] brain schema v1
 
 ## Phase A1 — Track-orientation sensor features (~1–2 sittings)
 
-**Attempted 2026-04-23, reverted. See `docs/plan/ruvector-proof/arch-a1/PROOF.md` for measurement + retrospective.** The unit-vector `(local_forward, local_right)` parameterisation below regressed Triangle cold by −0.138 and made cross-track transfer worse (−0.221 vs cold-tri baseline, vs Phase 3.5's −0.056). Failure mode matched the "risks" section of this same phase: Triangle's tight apexes punish a "drive toward next CP" shortcut. Retry variants in the retrospective — scaled-distance encoding, next-wall-gap direction, or running with A2 layer-norm layered in. The section below is the original spec, preserved for reference.
+**Attempted 2026-04-23, reverted. See `docs/plan/ruvector-proof/arch-a1/PROOF.md` for measurement + retrospective.** The unit-vector `(local_forward, local_right)` parameterisation below regressed Triangle cold by −0.138 and made cross-track transfer worse (−0.221 vs cold-tri baseline, vs Phase 3.5's −0.056). Failure mode matched the "risks" section of this same phase: Triangle's tight apexes punish a "drive toward next CP" shortcut.
+
+**A1' (scaled-distance variant) shipped 2026-04-23 — `docs/plan/ruvector-proof/arch-a1-prime/PROOF.md`.** Same feature vector, but instead of `(lf, lr) / ‖(lf, lr)‖` (unit vector), use `(lf, lr) / D` where `D` is the canvas diagonal (~3671 px). Magnitude of the feature now encodes "how close to the next checkpoint" — the NN can learn to distrust the direction shortcut when the target is near (i.e., near a wall). Acceptance results:
+
+| Metric | Target | Measured |
+|---|---|---|
+| Cross-track Δ vs Phase 2 cold-tri baseline | ≥ +0.00 | **+0.013** (0.727 vs 0.714) |
+| Rectangle cold Δ | within ±0.05 | −0.034 |
+| Triangle cold Δ (n=6) | within ±0.05 | −0.007 |
+| Same-track warm Δ | ~+0.001 ± 0.011 | +0.002 |
+
+The section below is the original spec, preserved for reference.
 
 **Goal:** add 2 inputs that give the network a frame-invariant view of "where's the corridor going."
 

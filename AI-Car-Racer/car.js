@@ -34,8 +34,12 @@ class Car{
 
         if(controlType!="DUMMY"){
             this.sensor=new Sensor(this);
+            // Phase A1': +2 inputs for car-local direction to the next
+            // checkpoint, scaled by the canvas diagonal so magnitude encodes
+            // "fraction of the longest possible straight line." Preserves the
+            // distance signal that A1's unit-vector variant erased.
             this.brain=new NeuralNetwork(
-                [this.sensor.rayCount+1,8,4]
+                [this.sensor.rayCount+3,8,4]
             );
         }
         this.controls=new Controls(controlType);
@@ -111,6 +115,44 @@ class Car{
                     s=>s==null?0:1-s.offset
                 );
                 offsets.push(this.speed/this.maxSpeed);
+                // Phase A1' — track-orientation features with MAGNITUDE preserved.
+                // Project world-frame offset (car→next-cp-midpoint) into the
+                // car's local (forward, right) basis, then divide by the canvas
+                // diagonal. The NN sees BOTH direction AND proximity: near an
+                // apex the magnitude shrinks, so the "drive toward the CP"
+                // shortcut is self-damping precisely when the straight line
+                // would crash a wall. The A1 unit-vector variant erased that
+                // distance cue; see docs/plan/ruvector-proof/arch-a1/PROOF.md.
+                const cpList = checkPointList;
+                let lf = 0, lr = 0;
+                if (cpList && cpList.length){
+                    const passed = this.checkPointsPassed;
+                    const nextIdx = passed.length === 0
+                        ? 0
+                        : (passed[passed.length - 1] + 1) % cpList.length;
+                    const cp = cpList[nextIdx];
+                    if (cp && cp.length >= 2){
+                        const mx = (cp[0].x + cp[1].x) * 0.5;
+                        const my = (cp[0].y + cp[1].y) * 0.5;
+                        const dx = mx - this.x;
+                        const dy = my - this.y;
+                        const s = Math.sin(this.angle), c = Math.cos(this.angle);
+                        const lfRaw = dx * s + dy * c;
+                        const lrRaw = dx * c - dy * s;
+                        // Canvas diagonal as track-invariant scale. `road` is a
+                        // global populated by main.js (or handleInit in the
+                        // worker); both paths set `right` and `bottom` = canvas
+                        // dims. Fallback constant guards the very-early frame
+                        // before handleInit lands.
+                        const W = (typeof road !== 'undefined' && road && road.right) ? (road.right - road.left) : 3200;
+                        const H = (typeof road !== 'undefined' && road && road.bottom) ? (road.bottom - road.top) : 1800;
+                        const D = Math.hypot(W, H);
+                        lf = lfRaw / D;
+                        lr = lrRaw / D;
+                    }
+                }
+                offsets.push(lf);
+                offsets.push(lr);
                 const outputs=NeuralNetwork.feedForward(offsets,this.brain);
                 if(this.useBrain){
                     this.controls.forward=outputs[0];
