@@ -28,8 +28,17 @@
   <meta name="twitter:description" content="Browser-native genetic algorithm that teaches neural nets to drive, with a vector-memory bridge for cross-track transfer learning.">
   <meta name="twitter:image" content="https://vectorvroom.shaal.dev/og-image.jpg">
 
-  <meta http-equiv="refresh" content="0; url=./AI-Car-Racer/">
-  <link rel="canonical" href="./AI-Car-Racer/">
+  <!-- Canonical URL is the bare domain itself — this is the URL people
+       paste into Slack/Twitter, so the social card should belong to it.
+       Pointing canonical at /AI-Car-Racer/ caused some crawlers to dedupe
+       the bare domain and never generate a card for it. -->
+  <link rel="canonical" href="https://vectorvroom.shaal.dev/">
+
+  <!-- Redirect real visitors into the game. The JS redirect fires for
+       browsers; the meta-refresh with a 1s delay is the JS-disabled
+       fallback (short but non-zero so crawlers that auto-follow refresh=0
+       still have time to parse the head first). -->
+  <meta http-equiv="refresh" content="1; url=./AI-Car-Racer/">
   <script>window.location.replace('./AI-Car-Racer/');</script>
 </head>
 <body>
