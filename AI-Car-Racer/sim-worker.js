@@ -285,9 +285,17 @@ function stepOnce() {
         }
         self.frameCount++;
         for (let i = 0; i < cars.length; i++) {
-            const prevDamaged = cars[i].damaged;
-            cars[i].update(self.road.borders, self.road.checkPointList);
-            if (!prevDamaged && cars[i].damaged) cars[i].deathFrame = self.frameCount;
+            const cc = cars[i];
+            const prevDamaged = cc.damaged;
+            // Snapshot prior-frame slide flag so endGen can classify slide-out
+            // deaths separately from head-on / side-scrape. Capturing before
+            // update() is cheap and avoids allocating a parallel buffer.
+            const prevSlide = !!cc.slide;
+            cc.update(self.road.borders, self.road.checkPointList);
+            if (!prevDamaged && cc.damaged) {
+                cc.deathFrame = self.frameCount;
+                cc.slideAtDeath = prevSlide;
+            }
         }
         // O(N) bestCar scan — mirror of main.js's pre-worker logic.
         let bestFit = -Infinity, bestC = null;
@@ -437,6 +445,10 @@ function endGen() {
     const N = cars.length;
     const popCheckpoints = new Int16Array(N);
     const popDeathFrames = new Int32Array(N);   // -1 sentinel = survived to timeout
+    // popDeathCauses encodes per-car terminal state: 0=head-on, 1=side-scrape,
+    // 2=slide-out, 3=stalled, 4=alive. Mutually exclusive — sum across buckets
+    // equals N. Classification is O(N) at endGen (no per-frame cost).
+    const popDeathCauses = new Int8Array(N);
     let wallBumps = 0, stillAlive = 0;
     for (let i = 0; i < N; i++) {
         const c = cars[i];
@@ -444,9 +456,25 @@ function endGen() {
         if (c.damaged) {
             wallBumps++;
             popDeathFrames[i] = (c.deathFrame != null ? c.deathFrame : self.frameCount) | 0;
+            // Forward speed magnitude — `c.speed` is scalar along the car's
+            // heading axis; |speed|/maxSpeed > 0.7 means the car was driving
+            // hard into the wall rather than scraping it laterally.
+            const maxSpd = c.maxSpeed || 1;
+            const fwdMag = Math.abs(c.speed || 0);
+            // Priority: slide-out > head-on > side-scrape. Slide-out is a
+            // distinctive traction-loss failure even at high forward speed,
+            // so we tag it first when c.slideAtDeath was latched at impact.
+            if (c.slideAtDeath) {
+                popDeathCauses[i] = 2; // slide-out
+            } else if (fwdMag > 0.7 * maxSpd) {
+                popDeathCauses[i] = 0; // head-on
+            } else {
+                popDeathCauses[i] = 1; // side-scrape (low forward vel, lateral impact)
+            }
         } else {
             stillAlive++;
             popDeathFrames[i] = -1;
+            popDeathCauses[i] = (c.checkPointsCount | 0) >= 1 ? 4 : 3;
         }
     }
 
@@ -460,7 +488,7 @@ function endGen() {
         if (lev0 && lev0.outputs) bestHiddenActivations = new Float32Array(lev0.outputs);
     } catch (_) {}
 
-    const transfer = [flat.buffer, popCheckpoints.buffer, popDeathFrames.buffer];
+    const transfer = [flat.buffer, popCheckpoints.buffer, popDeathFrames.buffer, popDeathCauses.buffer];
     if (bestHiddenActivations) transfer.push(bestHiddenActivations.buffer);
 
     self.postMessage({
@@ -474,7 +502,7 @@ function endGen() {
         popN: N,
         popWallBumps: wallBumps,
         popStillAlive: stillAlive,
-        popCheckpoints, popDeathFrames,
+        popCheckpoints, popDeathFrames, popDeathCauses,
         bestHiddenActivations,
         genSeconds: seconds
     }, transfer);

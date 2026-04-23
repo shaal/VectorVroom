@@ -72,6 +72,12 @@ var batchSize = 10;
 var nextSeconds = 15;
 var seconds;
 var mutateValue = .3;
+// P2.C Conservative Init: biases gen-0 random brains toward
+// "reverse when a ray reads short" (close wall). 0 = pure random (no-op,
+// bit-identical to pre-P2.C baseline). 1 = maximum bias. Persisted to
+// localStorage via setConservativeInit(). Only applied on cold-random-init
+// paths (fillRandom callers); ruvector-seeded brains are left untouched.
+var conservativeInit = 0;
 var playerCar;
 var playerCar2;
 // AI population lives entirely inside sim-worker.js. bestCar on main is a
@@ -141,6 +147,10 @@ if (localStorage.getItem("maxSpeed")){
 }
 if (localStorage.getItem("fastLap")){
     fastLap = JSON.parse(localStorage.getItem("fastLap"));
+}
+if (localStorage.getItem("conservativeInit")){
+    const v = parseFloat(localStorage.getItem("conservativeInit"));
+    if (Number.isFinite(v)) conservativeInit = Math.max(0, Math.min(1, v));
 }
 // Vector-memory integration (P4.C). `?rv=0` disables the bridge entirely;
 // `currentSeedIds` carries the retrieval set across begin()→nextBatch() so
@@ -328,6 +338,21 @@ function metricsComputeRow(m){
         for (let i = 0; i < N; i++){ if (df[i] === -1 || df[i] > frameBudget) alive++; }
         return alive / N;
     };
+    // Death-cause breakdown (0=head-on, 1=side-scrape, 2=slide-out, 3=stalled,
+    // 4=alive). Buckets are mutually exclusive; sum must equal N. Fallback to
+    // zeros if an older worker build didn't send popDeathCauses.
+    let dcHead = 0, dcSide = 0, dcSlide = 0, dcStalled = 0, dcAlive = 0;
+    const dc = m.popDeathCauses;
+    if (dc){
+        for (let i = 0; i < N; i++){
+            const b = dc[i] | 0;
+            if (b === 0) dcHead++;
+            else if (b === 1) dcSide++;
+            else if (b === 2) dcSlide++;
+            else if (b === 3) dcStalled++;
+            else dcAlive++;
+        }
+    }
     return {
         gen: generation,
         popN: N,
@@ -336,6 +361,11 @@ function metricsComputeRow(m){
         maxCheckpoints: cpSorted[N - 1],
         wallBumps: m.popWallBumps | 0,
         stillAlive: m.popStillAlive | 0,
+        dcHeadOn: dcHead,
+        dcSide: dcSide,
+        dcSlide: dcSlide,
+        dcStalled: dcStalled,
+        dcAlive: dcAlive,
         survival5s:  +survivedAt(5  * FPS).toFixed(4),
         survival10s: +survivedAt(10 * FPS).toFixed(4),
         survivalEnd: +(m.popStillAlive / N).toFixed(4),
@@ -357,7 +387,9 @@ function metricsRender(){
     if (last){
         body += '<div style="margin-top:4px;opacity:.75;font-size:.9em;">gen ' + last.gen + ' · N=' + last.popN + '</div>';
         body += '<div>med cp  <b>' + last.medCheckpoints + '</b> · p90 <b>' + last.p90Checkpoints + '</b> · max <b>' + last.maxCheckpoints + '</b></div>';
-        body += '<div>wall-bumps <b>' + last.wallBumps + '</b></div>';
+        body += '<div>head-on <b>' + last.dcHeadOn + '</b> · side <b>' + last.dcSide +
+                '</b> · slide <b>' + last.dcSlide + '</b> · stalled <b>' + last.dcStalled +
+                '</b> · alive <b>' + last.dcAlive + '</b></div>';
         body += '<div>surv 5s <b>' + pct(last.survival5s) + '</b> · 10s <b>' + pct(last.survival10s) + '</b> · end <b>' + pct(last.survivalEnd) + '</b></div>';
     } else {
         body += '<div style="opacity:.6;">(awaiting first genEnd)</div>';
