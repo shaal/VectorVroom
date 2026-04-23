@@ -38,6 +38,11 @@
       oneLiner: 'Six sensor inputs → eight hidden neurons → four pedal/steer outputs.',
       loader: function () { return import('./chapters/neural-network.js'); },
     },
+    'why-cars-crash': {
+      title: 'Why your car keeps driving into walls',
+      oneLiner: 'Four reasons: frozen reflexes, random gen-0, elite lock-in, and physics.',
+      loader: function () { return import('./chapters/why-cars-crash.js'); },
+    },
     'genetic-algorithm': {
       title: 'Breeding brains instead of training them',
       oneLiner: 'Copy the winners, nudge their weights, discard the losers. Repeat.',
