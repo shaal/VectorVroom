@@ -29,9 +29,19 @@ function computeStartInfoInPlace(cpList){
         hy =  (g0[1].x - g0[0].x);
     }
     // Car uses sin=dx, cos=dy convention (car.js:177-178), so heading = atan2(dx, dy).
-    startInfo.x = mx;
-    startInfo.y = my;
-    startInfo.heading = Math.atan2(hx, hy);
+    const heading = Math.atan2(hx, hy);
+    // Offset the spawn forward along the heading by a safe distance. The first
+    // checkpoint gate often runs wall-to-wall (e.g. the Triangle preset's left
+    // apex), so sitting exactly on the gate leaves no lateral margin for a
+    // 30×50 car body under heading jitter. One car-length of forward offset
+    // puts the spawn deeper into the corridor while preserving "starts at the
+    // first checkpoint" semantics (the car still has to pass cp0 on its way
+    // back around on lap 2+).
+    const len = Math.sqrt(hx*hx + hy*hy);
+    const offset = Math.min(80, len * 0.15);   // ≤15% toward cp1, capped at 80px
+    startInfo.x = mx + (len > 0 ? hx / len * offset : 0);
+    startInfo.y = my + (len > 0 ? hy / len * offset : 0);
+    startInfo.heading = heading;
     return startInfo;
 }
 
@@ -45,6 +55,15 @@ function currentCheckpointList(){
 }
 
 computeStartInfoInPlace(currentCheckpointList());
+
+// Pose jitter config — OFF by default. Empirically, uniform-disk jitter
+// around the canonical spawn regresses narrow-apex tracks (Triangle loses
+// ~40% survival at radius=40) while helping wider corridors. The code path
+// stays in place as an opt-in for users whose tracks have room for it:
+//   window.__poseJitter = { radiusPx: 40, angleDeg: 15, maxAttempts: 8 }
+// Applied to AI cars only (not elite at i=0, not player cars).
+window.__poseJitter = window.__poseJitter || { radiusPx: 0, angleDeg: 0, maxAttempts: 8 };
+
 var batchSize = 10;
 var nextSeconds = 15;
 var seconds;
@@ -678,6 +697,7 @@ function performBegin(N){
         type: 'begin',
         N, seconds, maxSpeed, traction,
         startInfo: { x: startInfo.x, y: startInfo.y, heading: startInfo.heading || 0 },
+        poseJitter: Object.assign({ radiusPx: 0, angleDeg: 0, maxAttempts: 8 }, window.__poseJitter || {}),
         brains
     }, [brains.buffer]);
 }

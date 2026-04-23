@@ -97,6 +97,38 @@ function handleInit(m) {
     }
 }
 
+// Build a car polygon at an arbitrary pose without allocating a Car (avoids
+// instantiating Sensor + NeuralNetwork just to validate a spawn). Matches
+// car.js #createPolygon exactly — keep the two in sync.
+function makeCarPolygon(x, y, angle, width, height){
+    const halfLen = height / 2, halfWid = width / 2;
+    const fx = Math.sin(angle), fy = Math.cos(angle);
+    const rx = Math.cos(angle), ry = -Math.sin(angle);
+    return [
+        { x: x + fx * halfLen,              y: y + fy * halfLen              },
+        { x: x - fx * halfLen + rx * halfWid, y: y - fy * halfLen + ry * halfWid },
+        { x: x - fx * halfLen - rx * halfWid, y: y - fy * halfLen - ry * halfWid },
+    ];
+}
+function poseInCorridor(x, y, angle, width, height){
+    const poly = makeCarPolygon(x, y, angle, width, height);
+    const borders = self.road && self.road.borders;
+    if (!borders) return true;
+    const grid = self.road.borderGrid;
+    if (grid){
+        const ids = grid.queryPolygon(poly);
+        for (let k = 0; k < ids.length; k++){
+            const b = borders[ids[k]];
+            if (b && polysIntersect(poly, b)) return false;
+        }
+        return true;
+    }
+    for (let i = 0; i < borders.length; i++){
+        if (polysIntersect(poly, borders[i])) return false;
+    }
+    return true;
+}
+
 function handleBegin(m) {
     const _t0 = performance.now();
     self.frameCount = 0;
@@ -107,13 +139,45 @@ function handleBegin(m) {
     self.traction = m.traction;
     startInfo = m.startInfo;
 
+    // Pose jitter: uniform disk around the canonical spawn (already offset
+    // forward from cp0 gate-mid by computeStartInfoInPlace in main.js, which
+    // gives each sample room to breathe even on apex-tight corridors like the
+    // Triangle preset). Rejection-sample against road.borders; fall back to
+    // canonical on persistent misses. Elite at i=0 keeps canonical pose so
+    // fitness comparisons across generations stay anchored.
+    const jit = m.poseJitter || {};
+    const jitterR   = Math.max(0, +jit.radiusPx || 0);
+    const jitterA   = (+jit.angleDeg || 0) * Math.PI / 180;
+    const jitterMax = Math.max(1, +jit.maxAttempts || 8);
+    const canonicalAngle = startInfo.heading || 0;
+    let jitterRejected = 0, jitterFallback = 0;
+
     const N = m.N;
     const flat = m.brains;
     cars = new Array(N);
     for (let i = 0; i < N; i++) {
-        const c = new Car(startInfo.x, startInfo.y, 30, 50, 'AI', m.maxSpeed, startInfo.heading || 0);
+        let x = startInfo.x, y = startInfo.y, angle = canonicalAngle;
+        if (i >= 1 && jitterR > 0){
+            let accepted = false;
+            for (let att = 0; att < jitterMax; att++){
+                const r = Math.sqrt(Math.random()) * jitterR;    // uniform-in-disk
+                const phi = Math.random() * 2 * Math.PI;
+                const jx = startInfo.x + r * Math.cos(phi);
+                const jy = startInfo.y + r * Math.sin(phi);
+                const ja = canonicalAngle + (Math.random() * 2 - 1) * jitterA;
+                if (poseInCorridor(jx, jy, ja, 30, 50)){
+                    x = jx; y = jy; angle = ja; accepted = true; break;
+                }
+                jitterRejected++;
+            }
+            if (!accepted) jitterFallback++;
+        }
+        const c = new Car(x, y, 30, 50, 'AI', m.maxSpeed, angle);
         assignBrainFromFlat(c.brain, flat, i * FLAT_LENGTH);
         cars[i] = c;
+    }
+    if (jitterR > 0){
+        self.postMessage({ type: 'debug', event: 'poseJitter', rejected: jitterRejected, fallback: jitterFallback, jittered: N - 1 });
     }
     self.bestCar = cars.length ? cars[0] : null;
     if (self.bestCar) bestEpoch = 1;

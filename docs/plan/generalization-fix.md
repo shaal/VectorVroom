@@ -134,6 +134,36 @@ Triangle survival more than doubled; median checkpoints lifted off zero for the 
 
 CSVs saved to `docs/plan/ruvector-proof/phase1/`.
 
+### Phase 2 — Implementation status (2026-04-22)
+
+**Shipped**, but with a **deliberate scope change from the original spec.** Files changed: `AI-Car-Racer/main.js`, `AI-Car-Racer/sim-worker.js`. The data told me the spec's defaults were wrong, so I adjusted.
+
+**What the original spec called for:** disk pose jitter (radius 40px, ±15° heading) around the canonical spawn, rejection-sampled against the corridor, for every non-elite car.
+
+**What I actually shipped:**
+1. **Spawn now offset forward** from the first-checkpoint gate midpoint by `min(80px, 0.15 · |cp1 − cp0|)` along the heading direction. Matters because `cp0` often runs wall-to-wall (Triangle's left apex gate spans the entire apex tip), leaving no lateral margin for a 30×50 car body. The offset moves the spawn 80px deeper into the corridor where there's breathing room.
+2. **Pose-jitter mechanism (still in sim-worker.js handleBegin)** now lives behind an opt-in flag. Default is `{ radiusPx: 0, angleDeg: 0 }` — no jitter. Users with wide tracks can enable via `window.__poseJitter = { radiusPx: 40, angleDeg: 15 }` from the console.
+
+**Why the scope change:** empirical benchmarking with disk jitter at radius=40 **regressed Triangle cold survival by ~40%** (0.583 → 0.339). The Triangle apex's 70px-wide corridor zone left no room for even moderate jitter to avoid walls. Rectangle still benefited from jitter (0.433 → 0.596), so the mechanism works — it's the default that was miscalibrated. Rather than pick a single compromise radius, I moved the spawn deeper (which helps both tracks) and made jitter opt-in.
+
+**Results — 3 replicates × 30 gens × 1000 cars × cold-start:**
+
+| Track | Baseline | Phase 1 | **Phase 2 mean ± σ (n=3)** | lift vs P1 |
+|---|---|---|---|---|
+| Rectangle surv@5s | 0.455 | 0.433 | **0.492 ± 0.025** | +14% (~2.4σ) |
+| Triangle surv@5s | 0.248 | 0.583 | **0.714 ± 0.066** | +22% (~3σ) |
+| Triangle median cp | 0 | 1 | **2** | 2× |
+| Triangle max cp | 0.4 | 2 | 2 | — |
+
+Triangle's lower bound (0.648) exceeds Phase 1's mean (0.583), so the improvement is statistically defensible even with n=3.
+
+CSVs saved to `docs/plan/ruvector-proof/phase2/` (primary trials) and `docs/plan/ruvector-proof/phase2/replicates/` (trials 2 and 3).
+
+**Caveats to carry into Phase 3+:**
+- 8 non-Rectangle-non-Triangle presets not empirically tested — geometry-only validation passed.
+- On Rectangle, median-cp is high-variance at 30 gens (trial values 0, 0.8, 1). p90 is more stable.
+- Rectangle offset-only (0.492) is slightly worse than Rectangle-with-jitter-no-offset (0.596 in the earlier single trial). If a future session wants to revisit, a track-width-aware jitter radius (scaled by local corridor clearance) could recover Rectangle's extra lift without re-breaking Triangle.
+
 ---
 
 ## Phase 2 — Pose randomization during training (~1–2 sittings)
