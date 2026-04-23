@@ -134,6 +134,8 @@ function phaseToLayout(phase){
                     <input min=".001" max=".3" id="mutateValueInput" onkeydown="return false;" step=".001" type="range" onchange='setMutateValue(this.value)' oninput="document.getElementById('mutateValueOutput').value = 'Variance: ' + this.value" >
                     <output id="mutateValueOutput" name="Variance"></output>
                     <span data-eli15="genetic-algorithm" role="button" tabindex="0" aria-label="Learn: genetic algorithm + variance"></span>
+                    <input min="0" max="1" id="conservativeInitInput" step=".05" onkeydown="return false;" type="range" onchange='setConservativeInit(this.value)' oninput="document.getElementById('conservativeInitOutput').value = 'Conservative Init: ' + this.value" >
+                    <output id="conservativeInitOutput" name="Conservative Init"></output>
                     <label id="simSpeedLabel" style="display:flex; align-items:center; gap:.4em; margin-top:.35em; font-size:.82em;">
                         <span>Sim Speed:</span>
                         <select id="simSpeedInput" onchange="setSimSpeed(this.value)" style="flex:1;">
@@ -174,7 +176,7 @@ function phaseToLayout(phase){
             bottomText.innerHTML = `
                 <h1>Train your model!</h1>
             `;
-            const idArray = ["batchSize", "seconds", "mutateValue"];
+            const idArray = ["batchSize", "seconds", "mutateValue", "conservativeInit"];
             for (let i = 0; i<idArray.length; i++){
                 document.getElementById(idArray[i]+"Input").value = window[idArray[i]];
                 document.getElementById(idArray[i]+"Output").value = document.getElementById(idArray[i]+"Output").name + ": " +  window[idArray[i]];

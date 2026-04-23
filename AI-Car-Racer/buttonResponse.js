@@ -210,6 +210,15 @@ function setSeconds(value){
 function setMutateValue(value){
     mutateValue=value;
 }
+// P2.C Conservative Init setter. Clamps to [0, 1] and persists to
+// localStorage so the bias survives reload. Only consumed inside
+// fillRandom() on cold-random init paths — the worker never reads this
+// directly; the bias is baked into the flat weights buffer before ship.
+function setConservativeInit(value){
+    const n = parseFloat(value);
+    conservativeInit = Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0;
+    try { localStorage.setItem("conservativeInit", String(conservativeInit)); } catch (_) {}
+}
 // Training-phase presets. Each entry sets the four knobs that dominate
 // training feel: N (population size), simSpeed (stride schedule kicks in
 // above 2×), seconds (per-generation evaluation window), mutateValue

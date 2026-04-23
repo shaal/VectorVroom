@@ -656,8 +656,63 @@ function fillMutated(dst, dstOff, src, amt){
         dst[dstOff + i] = lerp(src[i], Math.random() * 2 - 1, amt);
     }
 }
-function fillRandom(dst, dstOff){
+// fillRandom(dst, dstOff, applyConservativeBias?)
+//
+// `applyConservativeBias` is a cold-path opt-in. When truthy AND the global
+// `conservativeInit` > 0, the generated weights are post-processed to bias
+// gen-0 brains toward "reverse when any ray reads short (close wall)".
+// When the flag is omitted/false, or conservativeInit === 0, the function
+// produces bit-identical output to the pre-P2.C pure-random init — so the
+// default path is a no-op (see buildBrainsBuffer: ruvector-seeded novel
+// cars pass no flag, preserving pure-random semantics for the seeded mix).
+//
+// NN topology (car.js:42 → [10, 16, 4]) — flat layout (FLAT_LENGTH=244):
+//   [  0.. 15] L1 biases (16)
+//   [ 16..175] L1 weights, indexed weights[j*16 + i]
+//              j = input (0..9), i = hidden (0..15)
+//              j in [0..6] are the 7 rays (s.offset → 1-offset, so HIGH = close)
+//              j=7 speed/maxSpeed, j=8 lf, j=9 lr (checkpoint-dir in car frame)
+//   [176..179] L2 biases (4)
+//   [180..243] L2 weights, indexed weights[j*4 + i]
+//              j = hidden (0..15), i = output (0..3)
+//              i=0 forward, i=1 left, i=2 right, i=3 reverse (car.js:158-161)
+//
+// Bias strategy: build a coherent input→hidden→output chain so "high ray"
+// → "hidden activates" → "forward OFF, reverse ON":
+//   L1 ray→hidden: w += +0.5 * c  (amplify close-wall signal into hidden)
+//   L2 hidden→forward (i=0): w += -0.5 * c
+//   L2 hidden→reverse (i=3): w += +0.5 * c
+// All post-bias weights are clamped to [-1, 1] (network's init range).
+function fillRandom(dst, dstOff, applyConservativeBias){
     for (let i = 0; i < FLAT_LENGTH; i++) dst[dstOff + i] = Math.random() * 2 - 1;
+    // Fast path: omitted flag OR slider at 0 → no-op, bit-identical to
+    // pre-P2.C. Must stay ordered BEFORE any bias math runs.
+    if (!applyConservativeBias) return;
+    const c = conservativeInit;
+    if (!(c > 0)) return;
+    const push = 0.5 * c;
+    // L1 ray→hidden weights: input indices 0..6 (rays), hidden 0..15.
+    // Slot in flat buffer: 16 (L1 biases) + j*16 + i.
+    for (let j = 0; j < 7; j++){
+        for (let i = 0; i < 16; i++){
+            const k = dstOff + 16 + j * 16 + i;
+            let v = dst[k] + push;
+            if (v > 1) v = 1; else if (v < -1) v = -1;
+            dst[k] = v;
+        }
+    }
+    // L2 hidden→output weights: hidden j=0..15, output i=0 (forward) and i=3 (reverse).
+    // Slot: 176 (through L1) + 4 (L2 biases) + j*4 + i = 180 + j*4 + i.
+    for (let j = 0; j < 16; j++){
+        const kF = dstOff + 180 + j * 4 + 0;
+        let vF = dst[kF] - push;
+        if (vF > 1) vF = 1; else if (vF < -1) vF = -1;
+        dst[kF] = vF;
+        const kR = dstOff + 180 + j * 4 + 3;
+        let vR = dst[kR] + push;
+        if (vR > 1) vR = 1; else if (vR < -1) vR = -1;
+        dst[kR] = vR;
+    }
 }
 
 function buildBrainsBuffer(N){
@@ -725,10 +780,15 @@ function buildBrainsBuffer(N){
                 else fillMutated(out, off, savedFlat, mutateValue);
             }
         } else {
-            fillRandom(out, 0);
+            // Cold-random init (no ruvector seed, no localStorage bestBrain).
+            // This is the ONLY place P2.C Conservative Init is applied — the
+            // third argument opts into the bias. Skipped inside the ruvector
+            // path (novel-car fillRandom calls above) and skipped when a
+            // saved bestBrain is seeding the population.
+            fillRandom(out, 0, true);
             for (let i = 1; i < N; i++){
                 const off = i * FLAT_LENGTH;
-                fillRandom(out, off);
+                fillRandom(out, off, true);
             }
         }
     }
