@@ -1470,6 +1470,74 @@ label {
     .eli15-tour-fab-label { display: none; }
 }
 
+/* =============================================================
+   GitHub link pill — third stack in the left column, below
+   Explain anything / Guided tour. Neutral ink color so it reads as
+   the "view source" affordance, distinct from the amber drawer pill
+   and the blue tour pill.
+   ============================================================= */
+.github-fab {
+    position: fixed;
+    /* Stacks below .eli15-tour-fab: sp-4 + 2×(40px + sp-2). */
+    top: calc(var(--sp-4) + 2 * (40px + var(--sp-2)));
+    left: var(--sp-4);
+    right: auto;
+    bottom: auto;
+    z-index: 1200;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    padding: 0.5em 0.9em 0.5em 0.7em;
+    border-radius: var(--r-full);
+    border: 1.5px solid var(--ink-600, #2a2e35);
+    background: var(--surface-1);
+    color: var(--ink-900, #1a1c22);
+    font-family: var(--font-body);
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.15;
+    text-decoration: none;
+    box-shadow: var(--shadow-sm);
+    cursor: pointer;
+    transition: transform var(--dur-fast) var(--ease-out), background-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+.github-fab-icon  { display: inline-flex; line-height: 1; }
+.github-fab-label { white-space: nowrap; }
+.github-fab:hover {
+    background: var(--surface-2);
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+}
+.github-fab:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-md), 0 0 0 3px rgba(42, 46, 53, 0.45);
+}
+@media (prefers-color-scheme: dark) {
+    .github-fab {
+        background: var(--surface-2);
+        color: #d8dce4;
+        border-color: rgba(216, 220, 228, 0.5);
+    }
+    .github-fab:hover { background: rgba(216, 220, 228, 0.12); }
+}
+/* Mobile: same collapse pattern as the other fabs — circle at
+   bottom-right, stacked above the tour pill. */
+@media (max-width: 720px) {
+    .github-fab {
+        top: auto;
+        left: auto;
+        right: var(--sp-4);
+        bottom: calc(var(--sp-4) + 112px);
+        width: 46px;
+        height: 46px;
+        padding: 0;
+        border-radius: 50%;
+        justify-content: center;
+    }
+    .github-fab-label { display: none; }
+    .github-fab-icon  { font-size: 22px; }
+}
+
 .eli15-tour-ring {
     position: fixed;
     pointer-events: none;
