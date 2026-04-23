@@ -164,6 +164,35 @@ CSVs saved to `docs/plan/ruvector-proof/phase2/` (primary trials) and `docs/plan
 - On Rectangle, median-cp is high-variance at 30 gens (trial values 0, 0.8, 1). p90 is more stable.
 - Rectangle offset-only (0.492) is slightly worse than Rectangle-with-jitter-no-offset (0.596 in the earlier single trial). If a future session wants to revisit, a track-width-aware jitter radius (scaled by local corridor clearance) could recover Rectangle's extra lift without re-breaking Triangle.
 
+### Phase 3 — Implementation status (2026-04-22)
+
+**Shipped**, as infrastructure-not-as-benchmark-win. Files changed: `AI-Car-Racer/main.js`, `AI-Car-Racer/sim-worker.js`.
+
+- `sim-worker.js` endGen: copies the elite's last-tick hidden-layer outputs (`bc.brain.levels[0].outputs`, Float32Array(8)) into `bestHiddenActivations` and transfers it with the `genEnd` postMessage.
+- `main.js` handleGenEnd: lazy-opens the SONA trajectory (handles the bridge-async-load race — `currentTrackVec` retries via `embedCurrentTrack()` before opening), then calls `window.__rvBridge.addPhase4Step(activations, null, fitness)` once per generation. Auto-boot also tries to begin the trajectory eagerly, with the lazy path as the safety net.
+
+**Live verification — 5-gen Rectangle smoke test:**
+- `sona.trajectoryOpen`: `false` → **`true`**
+- `sona.trajectorySteps`: 0 → **46** (pre-existing gens + 5 new; counter ticks up every genEnd)
+- `lora.drift`: 0 → **6.5e-8** (non-zero; LoRA weights adapting)
+- `lora.rewardCount`: 0 → **22** (track adapter receiving reward signals)
+- `currentTrackVec`: `null` → **present** (lazy embedding worked)
+
+**Benchmark impact — Triangle cold, n=3 replicates:**
+
+| Run | surv@5s | med cp |
+|---|---|---|
+| Phase 2 Triangle | 0.714 ± 0.066 | 2 |
+| Phase 3 Triangle | **0.689 ± 0.113** | 2 |
+
+Statistically indistinguishable. Slightly higher variance (tri3 was an outlier low at 0.531). **This is the expected outcome** — SONA pattern extraction fires on `endTrajectory`, not per-step, and within-session trajectories stay open. The value of Phase 3 is *enabling* Phase 3.5's cross-session measurements, not producing within-session lift.
+
+**What's still off pending Phase 3.5:**
+- `sona.trajectories` and `sona.patterns` stay at 0 because no code closes the trajectory during benchmark runs. A hook that calls `endPhase4Trajectory` at end of each benchmark (or every N gens) would crystallize patterns. Left for Phase 3.5.
+- Track-adapter drift climbs but slowly. Archive-size-curve experiments (clear archive, train, archive, clear fitness, retrain) will tell us whether SONA's patterns meaningfully seed faster learning on the same track.
+
+CSVs: `docs/plan/ruvector-proof/phase3/`.
+
 ---
 
 ## Phase 2 — Pose randomization during training (~1–2 sittings)

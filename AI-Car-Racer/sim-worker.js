@@ -448,6 +448,19 @@ function endGen() {
         }
     }
 
+    // Elite's last-tick hidden-layer activations for SONA trajectory
+    // recording. Network topology is [6, 8, 4]; level 0's outputs is the
+    // most informative internal state. Copied (not transferred in-place)
+    // because the worker continues to own the underlying brain object.
+    let bestHiddenActivations = null;
+    try {
+        const lev0 = bc.brain && bc.brain.levels && bc.brain.levels[0];
+        if (lev0 && lev0.outputs) bestHiddenActivations = new Float32Array(lev0.outputs);
+    } catch (_) {}
+
+    const transfer = [flat.buffer, popCheckpoints.buffer, popDeathFrames.buffer];
+    if (bestHiddenActivations) transfer.push(bestHiddenActivations.buffer);
+
     self.postMessage({
         type: 'genEnd',
         bestBrain: flat,
@@ -460,8 +473,9 @@ function endGen() {
         popWallBumps: wallBumps,
         popStillAlive: stillAlive,
         popCheckpoints, popDeathFrames,
+        bestHiddenActivations,
         genSeconds: seconds
-    }, [flat.buffer, popCheckpoints.buffer, popDeathFrames.buffer]);
+    }, transfer);
     // Wait for main's next `begin` — stepping is paused until then.
     pause = true;
 }

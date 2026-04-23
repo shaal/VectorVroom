@@ -117,6 +117,15 @@ if (new URLSearchParams(location.search).get('edit') === '1') {
     saveTrack();
     submitTrack();
     try { embedCurrentTrack(); } catch (_) {}
+    // Open the SONA trajectory for the auto-boot path too — mirrors the
+    // explicit-start path in buttonResponse.js:176. Without this, addPhase4Step
+    // no-ops because sona/engine.js gates on `_traj` being set, and trajectory
+    // recording never happens for visitors who land directly in phase 4.
+    try {
+        if (!window.rvDisabled && window.__rvBridge && window.__rvBridge.beginPhase4Trajectory){
+            window.__rvBridge.beginPhase4Trajectory(window.currentTrackVec || null);
+        }
+    } catch (e) { console.warn('[sona] beginTrajectory on auto-boot failed', e); }
     phase = 3;
     nextPhase(); // → phase 4 (training)
 }
@@ -515,6 +524,29 @@ function handleGenEnd(m){
         bestCar.lapTimes = m.lapTimes && m.lapTimes.length ? m.lapTimes : '--';
         bestCar.checkPointsCount = m.checkPointsCount;
     }
+    // Feed one SONA trajectory step per generation — elite's last-tick hidden
+    // activations as the embedding, generation fitness as the reward scalar.
+    // Lazy-open the trajectory on the first genEnd after SONA becomes ready,
+    // because the bridge loads async and the auto-boot call in the phase init
+    // block above sometimes fires before sonaReady() returns true.
+    try {
+        const b = window.__rvBridge;
+        if (!window.rvDisabled && b && b.info){
+            const i = b.info();
+            if (i.sona && i.sona.ready && !i.sona.trajectoryOpen && b.beginPhase4Trajectory){
+                // Lazy-embed: currentTrackVec may be null if the module-load
+                // call to embedCurrentTrack ran before the bridge's async init
+                // finished. Retry here; beginTrajectory refuses null vecs.
+                if (!window.currentTrackVec && typeof embedCurrentTrack === 'function'){
+                    try { embedCurrentTrack(); } catch (_) {}
+                }
+                b.beginPhase4Trajectory(window.currentTrackVec || null);
+            }
+            if (b.addPhase4Step && m.bestHiddenActivations){
+                b.addPhase4Step(m.bestHiddenActivations, null, m.fitness || 0);
+            }
+        }
+    } catch (e) { console.warn('[sona] genEnd hook failed', e); }
     try {
         const row = metricsComputeRow(m);
         if (row){
