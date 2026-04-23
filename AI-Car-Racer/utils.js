@@ -147,14 +147,9 @@ function phaseToLayout(phase){
                     </label>
                 </div>
             </details>
-            <details id='moreActions' class='more-actions' open>
-                <summary>More actions</summary>
+            <details id='brainShareSection' class='more-actions' open>
+                <summary>Import / Export Brain</summary>
                 <div class='more-actions-body'>
-                    <button class='controlButton' onclick='destroyBrain(); nextBatch();'>Reset Brain</button>
-                    <button class='controlButton' onclick='resetFastLap();'>Reset Fast Lap</button>
-                    <button class='controlButton' onclick='restartBatch();'>Restart Batch</button>
-                    <button class='controlButton' onclick='save(); restartBatch();'>Save Best + Restart</button>
-                    <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
                     <div id="brainShare" class='brain-share'>
                         <button class='controlButton' onclick='exportBrainJson()' title='Download current best brain as a ~1 KB JSON file'>⬇️ Export Brain</button>
                         <button class='controlButton' onclick='importBrainJson()' title='Load a brain JSON file and use it as the seed'>⬆️ Import Brain</button>
@@ -163,6 +158,16 @@ function phaseToLayout(phase){
                         <button class='controlButton' onclick='importBrainPackRvf()' title='Import a .rvf brain pack (experimental)'>⬆️ .rvf</button>
                         ` : ''}
                     </div>
+                </div>
+            </details>
+            <details id='moreActions' class='more-actions' open>
+                <summary>More actions</summary>
+                <div class='more-actions-body'>
+                    <button class='controlButton' onclick='destroyBrain(); nextBatch();'>Reset Brain</button>
+                    <button class='controlButton' onclick='resetFastLap();'>Reset Fast Lap</button>
+                    <button class='controlButton' onclick='restartBatch();'>Restart Batch</button>
+                    <button class='controlButton' onclick='save(); restartBatch();'>Save Best + Restart</button>
+                    <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
                 </div>
             </details>
             `;
@@ -175,15 +180,18 @@ function phaseToLayout(phase){
                 document.getElementById(idArray[i]+"Output").value = document.getElementById(idArray[i]+"Output").name + ": " +  window[idArray[i]];
                 document.getElementById(idArray[i]+"Input").setAttribute("value", window[idArray[i]]);
             }
-            // Move "More actions" panel to sit below #rv-panel (Vector Memory)
-            // so it lives at the bottom of the right column instead of above
-            // it. The details element was rendered inside #verticalButtons by
-            // the innerHTML above; we relocate it after the DOM is committed.
+            // Move "Import / Export Brain" and "More actions" panels to sit
+            // below #rv-panel (Vector Memory) so they live at the bottom of
+            // the right column instead of above it. Order placed:
+            //   rv-panel → brainShareSection → moreActions
             try {
+                const brainShareEl = document.getElementById('brainShareSection');
                 const moreActionsEl = document.getElementById('moreActions');
                 const rvPanelEl = document.getElementById('rv-panel');
-                if (moreActionsEl && rvPanelEl && rvPanelEl.parentNode) {
-                    rvPanelEl.parentNode.insertBefore(moreActionsEl, rvPanelEl.nextSibling);
+                if (rvPanelEl && rvPanelEl.parentNode) {
+                    if (brainShareEl) rvPanelEl.parentNode.insertBefore(brainShareEl, rvPanelEl.nextSibling);
+                    if (moreActionsEl && brainShareEl) brainShareEl.parentNode.insertBefore(moreActionsEl, brainShareEl.nextSibling);
+                    else if (moreActionsEl) rvPanelEl.parentNode.insertBefore(moreActionsEl, rvPanelEl.nextSibling);
                 }
             } catch (_) {}
             showInputCanvas();
