@@ -1,16 +1,23 @@
 // Ten pre-authored tracks that can be loaded instead of drawn by hand.
 // Five geometric primitives + five famous-circuit stylisations.
-// Canvas is 3200x1800 (main.js:5-6). Start position is (2880, 900) (main.js:10).
-// Each preset's corridor (area between inner wall `points` and outer wall
-// `points2`) must contain the start point, otherwise the car spawns outside
-// the track and the sim is broken.
+// Canvas is 3200x1800 (main.js:5-6).
+//
+// Spawn: the car's initial position is the midpoint of checkpoint[0], with
+// heading pointing toward the midpoint of checkpoint[1] (main.js:16-46).
+// For every preset, cp[0] is placed where the car has room to drive forward.
+//
+// Checkpoint count: each preset uses 4 ordered gates — top, left, bottom,
+// right-mid — giving a denser fitness gradient than the previous 3 (a 4th
+// reward along each lap helps partial survivors get ranked during early
+// generations, before any car can complete a full lap). See
+// sim-worker.js:295 for the fitness formula consuming checkPointsCount.
 //
 // Data format matches roadEditor.js:
 //   points:               inner wall, array of {x, y} — saved under `trackInner`
 //   points2:              outer wall, array of {x, y} — saved under `trackOuter`
 //   checkPointListEditor: array of [{x,y}, {x,y}] line segments — one per
 //                         checkpoint; the two points define a gate the car must
-//                         cross. Saved under `checkPointList`.
+//                         cross in order. Saved under `checkPointList`.
 //
 // To load a preset: click the floating "Load preset track" dropdown (visible
 // during phase 1), or call `loadTrackPreset(idx)` / `loadTrackPreset(name)`
@@ -35,9 +42,10 @@ window.TRACK_PRESETS = [
       { x: 250,  y: 1500 }
     ],
     checkPointListEditor: [
-      [{ x: 1600, y: 300  }, { x: 1600, y: 700  }],
-      [{ x: 250,  y: 900  }, { x: 650,  y: 900  }],
-      [{ x: 1600, y: 1500 }, { x: 1600, y: 1100 }]
+      [{ x: 1600, y: 300  }, { x: 1600, y: 700  }],  // 1: top-mid (spawn)
+      [{ x: 250,  y: 900  }, { x: 650,  y: 900  }],  // 2: left-mid
+      [{ x: 1600, y: 1500 }, { x: 1600, y: 1100 }],  // 3: bottom-mid
+      [{ x: 3100, y: 900  }, { x: 2450, y: 900  }]   // 4: right-mid
     ]
   },
   {
@@ -75,30 +83,34 @@ window.TRACK_PRESETS = [
       { x: 2899, y: 600  }
     ],
     checkPointListEditor: [
-      [{ x: 1600, y: 300  }, { x: 1600, y: 600  }],
-      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }],
-      [{ x: 1600, y: 1500 }, { x: 1600, y: 1200 }]
+      [{ x: 1600, y: 300  }, { x: 1600, y: 600  }],  // 1: top (spawn)
+      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }],  // 2: left
+      [{ x: 1600, y: 1500 }, { x: 1600, y: 1200 }],  // 3: bottom
+      [{ x: 3100, y: 900  }, { x: 2550, y: 900  }]   // 4: right
     ]
   },
   {
     name: 'Triangle',
-    description: 'Apex points left; spacious "nose" on the right contains start.',
-    // Apex-left so the start (2880, 900) sits comfortably in the wide right lobe.
+    description: 'Apex points left; spawn sits in the spacious right lobe.',
+    // Apex-left so the spawn (cp[0] on the right edge) sits comfortably in
+    // the wide right lobe. The previous cp-order put cp[0] at the left apex,
+    // pinning the spawn into the narrow corner — this rotation matches the
+    // original design intent.
     points: [
       { x: 500,  y: 900  }, // left apex (inner)
       { x: 2400, y: 500  }, // top-right
       { x: 2400, y: 1300 }  // bottom-right
     ],
-    // Outer right pushed from x=2950 to x=3100 for consistent start buffer.
     points2: [
       { x: 150,  y: 900  }, // left apex (outer)
       { x: 3100, y: 250  }, // top-right
       { x: 3100, y: 1550 }  // bottom-right
     ],
     checkPointListEditor: [
-      [{ x: 150,  y: 900  }, { x: 500,  y: 900  }], // left apex
-      [{ x: 1500, y: 550  }, { x: 1500, y: 720  }], // top edge
-      [{ x: 1500, y: 1250 }, { x: 1500, y: 1080 }]  // bottom edge
+      [{ x: 3100, y: 900  }, { x: 2400, y: 900  }], // 1: right-mid (spawn)
+      [{ x: 1500, y: 550  }, { x: 1500, y: 720  }], // 2: top edge
+      [{ x: 150,  y: 900  }, { x: 500,  y: 900  }], // 3: left apex
+      [{ x: 1500, y: 1250 }, { x: 1500, y: 1080 }]  // 4: bottom edge
     ]
   },
   {
@@ -123,9 +135,10 @@ window.TRACK_PRESETS = [
       { x: 2350, y: 380  }
     ],
     checkPointListEditor: [
-      [{ x: 1600, y: 380  }, { x: 1600, y: 510  }], // top flat
-      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }], // left vertex
-      [{ x: 1600, y: 1420 }, { x: 1600, y: 1290 }]  // bottom flat
+      [{ x: 1600, y: 380  }, { x: 1600, y: 510  }], // 1: top flat (spawn)
+      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }], // 2: left vertex
+      [{ x: 1600, y: 1420 }, { x: 1600, y: 1290 }], // 3: bottom flat
+      [{ x: 3100, y: 900  }, { x: 2550, y: 900  }]  // 4: right vertex
     ]
   },
   {
@@ -150,9 +163,10 @@ window.TRACK_PRESETS = [
       { x: 2200, y: 1550 }
     ],
     checkPointListEditor: [
-      [{ x: 1500, y: 320  }, { x: 1500, y: 610  }], // top
-      [{ x: 300,  y: 900  }, { x: 700,  y: 900  }], // left
-      [{ x: 1500, y: 1510 }, { x: 1500, y: 1180 }]  // bottom
+      [{ x: 1500, y: 320  }, { x: 1500, y: 610  }], // 1: top (spawn)
+      [{ x: 300,  y: 900  }, { x: 700,  y: 900  }], // 2: left
+      [{ x: 1500, y: 1510 }, { x: 1500, y: 1180 }], // 3: bottom
+      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]  // 4: right apex
     ]
   },
 
@@ -214,9 +228,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // top after Roggia
-      [{ x: 200,  y: 900  }, { x: 500,  y: 900  }],  // left link
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }]   // bottom after Ascari
+      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // 1: top after Roggia (spawn)
+      [{ x: 200,  y: 900  }, { x: 500,  y: 900  }],  // 2: left link
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }],  // 3: bottom after Ascari
+      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
     ]
   },
 
@@ -269,9 +284,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // mid Becketts
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // Club hairpin apex
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }]   // bot after Stowe
+      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // 1: mid Becketts (spawn)
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: Club hairpin apex
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }],  // 3: bot after Stowe
+      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
     ]
   },
 
@@ -321,9 +337,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1100, y: 300  }, { x: 1100, y: 700  }],  // after Piscine
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // Grand Hotel
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1100 }]   // after Mirabeau
+      [{ x: 1100, y: 300  }, { x: 1100, y: 700  }],  // 1: after Piscine (spawn)
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: Grand Hotel
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1100 }],  // 3: after Mirabeau
+      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
     ]
   },
 
@@ -376,9 +393,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1200, y: 350  }, { x: 1200, y: 800  }],  // after Les Combes
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // La Source
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }]   // mid Pouhon
+      [{ x: 1200, y: 350  }, { x: 1200, y: 800  }],  // 1: after Les Combes (spawn)
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: La Source
+      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }],  // 3: mid Pouhon
+      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
     ]
   },
 
@@ -438,9 +456,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1450, y: 400  }, { x: 1450, y: 800  }],  // mid Esses
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // Hairpin
-      [{ x: 1500, y: 1600 }, { x: 1500, y: 1200 }]   // mid Spoon
+      [{ x: 1450, y: 400  }, { x: 1450, y: 800  }],  // 1: mid Esses (spawn)
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: Hairpin
+      [{ x: 1500, y: 1600 }, { x: 1500, y: 1200 }],  // 3: mid Spoon
+      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
     ]
   }
 ];
@@ -495,6 +514,14 @@ window.loadTrackPreset = function(nameOrIdx) {
     road.roadEditor.points               = copy.points;
     road.roadEditor.points2              = copy.points2;
     road.roadEditor.checkPointListEditor = copy.checkPointListEditor;
+    // Recompute the spawn arrow from the new cp[0] so edit mode shows where
+    // training will actually place the car — otherwise the START triangle
+    // lags behind the track geometry until the next phase-4 begin().
+    try {
+      if (typeof computeStartInfoInPlace === 'function') {
+        computeStartInfoInPlace(copy.checkPointListEditor);
+      }
+    } catch (_) {}
     try { road.roadEditor.redraw(); } catch (_) { /* redraw only works in phase 1/2 */ }
   }
 

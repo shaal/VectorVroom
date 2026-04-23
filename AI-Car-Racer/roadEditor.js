@@ -130,6 +130,36 @@ class roadEditor{
             this.ctx.lineTo(p[1].x,p[1].y);
             this.ctx.stroke();
         })
+
+        // 1-based index labels: the order (cp[0]→cp[1]→…) determines lap
+        // direction, spawn heading (main.js:16-46), and reward sequencing
+        // (car.js:130) — numbering makes that invisible ordering visible so
+        // authors can confirm the car's intended path through the gates.
+        // Labels are tangent-offset so they sit just off the gate line rather
+        // than clipping on top of it.
+        const labelPx = this.editMode ? 40 : 60;
+        this.ctx.font = `bold ${labelPx}px Tahoma, sans-serif`;
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.lineWidth = 4;
+        this.checkPointListEditor.forEach((p, i) => {
+            const mx = (p[0].x + p[1].x) / 2;
+            const my = (p[0].y + p[1].y) / 2;
+            const dx = p[1].x - p[0].x;
+            const dy = p[1].y - p[0].y;
+            const len = Math.sqrt(dx*dx + dy*dy) || 1;
+            // Perpendicular unit vector → push label off the gate centerline.
+            const nx = -dy / len;
+            const ny =  dx / len;
+            const off = labelPx * 0.9;
+            const lx = mx + nx * off;
+            const ly = my + ny * off;
+            const label = String(i + 1);
+            this.ctx.strokeStyle = "#15161a";  // dark outline matches scene bg
+            this.ctx.strokeText(label, lx, ly);
+            this.ctx.fillStyle = "#58E05D";
+            this.ctx.fillText(label, lx, ly);
+        });
     }
     deleteLast(){
         if(this.checkPointMode && typeof this.lastClicked[1] != 'undefined' && this.checkPointListEditor.length>1){
