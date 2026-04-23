@@ -211,6 +211,23 @@ Full numbers, per-replicate details, interpretation, and caveats in `docs/plan/r
 
 **What this reframes about the overall plan:** Phase 3.5 was originally scoped as "the proof run that makes ruvector's value visible." The data says ruvector's value lives in a different scenario than the one we tested. Updating the UI or docs to claim cross-track transfer would be incorrect. The untested positive scenario — same-track warm-restart with Phase 3's SONA wiring on — is the follow-up experiment worth running.
 
+### Phase 3.5 follow-up — Same-track warm-restart (2026-04-22)
+
+**Ran the "untested positive" experiment.** Same-track cold vs warm on Triangle, n=3. Details in `docs/plan/ruvector-proof/phase3.5-samesame/PROOF-SAME-TRACK.md`.
+
+Δ last-5 survival = **+0.001 ± 0.011** (null result, tight stddev).
+Δ gen-0 survival = +0.000 ± 0.165 (noisy; variance explained by cold-run basin luck — warm gen-0 faithfully tracks cold last-5).
+
+**Re-characterization:** ruvector's archive + SONA behave as **save-and-resume**, not learning-acceleration. They preserve whatever state the cold phase reached; they don't extract more signal from an additional 30 gens. The GA itself plateaus at ~30 generations × batch=1000 on the Triangle corridor. Neither cross-track nor same-track continuation adds measurable lift beyond that plateau.
+
+### UI overclaim retirement
+
+Two eli15 tour chapters previously contained direct empirical claims that the data contradicts:
+- `what-is-this-project.js` — "That's why the system gets faster at learning new tracks the more tracks you've played."
+- `track-similarity.js` — "Empirically this shaves tens of generations off new tracks once the archive has a few dozen entries in it."
+
+Both reframed to preserve the design-intent explanation while adding an honest caveat about the measured behavior. The educational scaffolding (CNN embedder, HNSW, GNN reranker, LoRA adapter, lineage DAG, SONA) remains the point of the project — but now the tour doesn't promise behavior the architecture doesn't currently deliver.
+
 ---
 
 ## Phase 2 — Pose randomization during training (~1–2 sittings)
