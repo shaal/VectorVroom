@@ -60,6 +60,11 @@ class Level{
         this.outputs = new Float32Array(outputCount);
         this.biases  = new Float32Array(outputCount);
         this.weights = new Float32Array(inputCount * outputCount);
+        // preThreshold stores the raw weighted sum (before the `> bias ? 1 : 0`
+        // gate at the output layer, and before tanh at hidden layers). Cheap —
+        // outC writes per forward. Read by sim-worker's snapshot (Task 2.D) to
+        // expose the bestCar's brain-decision vector to the main-thread viz.
+        this.preThreshold = new Float32Array(outputCount);
         Level.#randomize(this);
     }
 
@@ -73,6 +78,7 @@ class Level{
         const inC = level.inputCount, outC = level.outputCount;
         const inputs = level.inputs, outputs = level.outputs;
         const weights = level.weights, biases = level.biases;
+        const preThreshold = level.preThreshold;
         // Copy inputs into scratch (givenInputs may be a plain Array from the
         // sensor path — we want the contiguous Float32Array for the loop).
         for(let i=0;i<inC;i++) inputs[i] = givenInputs[i];
@@ -84,6 +90,11 @@ class Level{
                     sum += inputs[j] * weights[k];
                     k += outC;
                 }
+                // preThreshold = the decision margin sum - bias; sign matches
+                // the gate below (sum > bias ⇔ sum - bias > 0). Main-thread
+                // viz renders this as a signed bar so you can see how strongly
+                // each control "wants to fire".
+                preThreshold[i] = sum - biases[i];
                 outputs[i] = sum > biases[i] ? 1 : 0;
             }
         } else {
@@ -94,7 +105,9 @@ class Level{
                     sum += inputs[j] * weights[k];
                     k += outC;
                 }
-                outputs[i] = Math.tanh(sum - biases[i]);
+                const z = sum - biases[i];
+                preThreshold[i] = z;
+                outputs[i] = Math.tanh(z);
             }
         }
         return outputs;
@@ -158,7 +171,9 @@ function reviveBrain(obj){
             inputs:  new Float32Array(inputCount  || 0),
             outputs: new Float32Array(outputCount || 0),
             biases:  Float32Array.from(src.biases || []),
-            weights: weightsFlat
+            weights: weightsFlat,
+            // Mirror constructor — Level.feedForward writes here each call.
+            preThreshold: new Float32Array(outputCount || 0)
         });
     }
     return out;

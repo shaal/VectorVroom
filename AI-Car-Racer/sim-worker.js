@@ -378,6 +378,14 @@ function postSnapshot(simMs, steps) {
     let bestRays = null, bestReadings = null, bestControls = null;
     let bestSpeed = 0, bestMaxSpeed = self.maxSpeed, bestDamaged = 0;
     let bestCheckpoints = 0, bestLaps = 0, bestLapTimes = null;
+    // Task 2.D: brain-decision viz. bestInputs = the 10-float input vector fed
+    // into the NN on the best car's last forward pass this tick (7 rays + speed
+    // + lf + lr). bestOutputActivations = the 4 pre-threshold sums (sum-bias)
+    // for forward/left/right/reverse; thresholded(x>0) must match bestControls
+    // by construction since both come from the SAME forward pass the controls
+    // were derived from. The LOD gate in car.js guarantees bestCar always runs
+    // perception, so these are never stale placeholder values.
+    let bestInputs = null, bestOutputActivations = null;
     if (self.bestCar && self.bestCar.sensor && self.bestCar.sensor.rays.length) {
         const bc = self.bestCar;
         const rays = bc.sensor.rays;
@@ -415,11 +423,30 @@ function postSnapshot(simMs, steps) {
         bestCheckpoints = bc.checkPointsCount;
         bestLaps = bc.laps;
         bestLapTimes = Array.isArray(bc.lapTimes) ? bc.lapTimes.slice() : null;
+        // Capture input + output pre-threshold vectors from the best car's
+        // most recent forward pass. levels[0].inputs is the scratch buffer
+        // feedForward just wrote; levels[last].preThreshold is the sum-bias
+        // pre-gate vector populated by the modified Level.feedForward in
+        // network.js. Both are owned by the worker's brain object — copy
+        // into fresh Float32Arrays so we can postMessage-transfer them.
+        try {
+            const lvls = bc.brain && bc.brain.levels;
+            if (lvls && lvls.length) {
+                const inArr = lvls[0].inputs;
+                if (inArr && inArr.length) bestInputs = new Float32Array(inArr);
+                const outLvl = lvls[lvls.length - 1];
+                if (outLvl && outLvl.preThreshold && outLvl.preThreshold.length) {
+                    bestOutputActivations = new Float32Array(outLvl.preThreshold);
+                }
+            }
+        } catch (_) { /* bail quietly — viz is non-critical */ }
     }
 
     const transfer = [positions.buffer];
     if (bestRays)     transfer.push(bestRays.buffer);
     if (bestReadings) transfer.push(bestReadings.buffer);
+    if (bestInputs)              transfer.push(bestInputs.buffer);
+    if (bestOutputActivations)   transfer.push(bestOutputActivations.buffer);
 
     self.postMessage({
         type: 'snapshot',
@@ -429,6 +456,7 @@ function postSnapshot(simMs, steps) {
         bestRays, bestReadings, bestControls,
         bestSpeed, bestMaxSpeed, bestDamaged,
         bestCheckpoints, bestLaps, bestLapTimes,
+        bestInputs, bestOutputActivations,
         simMs, steps
     }, transfer);
 }

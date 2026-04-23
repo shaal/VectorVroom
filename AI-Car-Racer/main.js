@@ -489,7 +489,14 @@ function makeBestCarProxy(){
         speed: 0, maxSpeed: 0,
         checkPointsCount: 0, laps: 0, lapTimes: '--',
         controls: { forward: false, left: false, right: false, reverse: false },
-        sensor: { rayCount: 7, rays: [], readings: [] }
+        sensor: { rayCount: 7, rays: [], readings: [] },
+        // Task 2.D brain-decision viz. Populated from the sim-worker snapshot's
+        // bestInputs (10-float NN input vector) and bestOutputActivations
+        // (4-float pre-threshold sum-minus-bias per output). Start as null so
+        // inputVisual() can skip the bar panel on the very first frame before
+        // a snapshot arrives.
+        brainInputs: null,
+        brainOutputActivations: null
     };
     // Lazy-inflated brain — save() and archiveBrain() both read bestCar.brain.
     // We key the cache on _cachedBestBrainSeq so a stale inflate survives only
@@ -555,6 +562,11 @@ function updateBestCarProxy(p, m){
     }
     p.sensor.rays = rays;
     p.sensor.readings = readings;
+    // Task 2.D: carry the NN input + pre-threshold output vectors over to the
+    // proxy so inputVisual() can draw them. These arrays are transferred from
+    // the worker — the message holds them briefly; we keep our own reference.
+    p.brainInputs = m.bestInputs || null;
+    p.brainOutputActivations = m.bestOutputActivations || null;
 }
 
 function handleGenEnd(m){
@@ -1029,7 +1041,11 @@ function animate(){
                 drawFromSnapshot(latestSnapshot);
             }
             if (bestCar){
-                inputVisual(bestCar.controls);
+                // Pass the whole bestCar proxy — inputVisual still reads
+                // .controls for the existing 4-box display, and now also
+                // reads .brainInputs / .brainOutputActivations (Task 2.D) to
+                // render the NN decision bars.
+                inputVisual(bestCar);
                 drawBestCar(bestCar);
             }
             playerCar.draw(ctx,"#E6194B",true);
