@@ -49,6 +49,13 @@
     '  <span data-eli15="vectordb-hnsw" role="button" tabindex="0" aria-label="Learn: nearest-neighbour search via HNSW"></span>',
     '  <span data-eli15="cnn-embedder" role="button" tabindex="0" aria-label="Learn: CNN track embedder"></span>',
     '</div>',
+    // P3.F — per-generation seed-source breakdown. Shows how the last
+    // buildBrainsBuffer split the population across archive-recall / saved
+    // bestBrain / pure-random. Hidden before the first gen ships; the sum
+    // must equal the population N (the bridge tracks total for asserts).
+    '<div class="rv-seed-sources" data-rv="seed-sources" hidden>',
+    '  <span class="rv-seed-sources-text" data-rv="seed-sources-text"></span>',
+    '</div>',
     // The reranker line, when visible, gets a badge pointing at the EMA chapter.
     // The badge is a sibling of reranker text in the same line.
     '<div class="rv-reranker" data-rv="reranker" hidden>',
@@ -215,6 +222,8 @@
     abIndexBtns: root.querySelectorAll('[data-rv="ab-index-opt"]'),
     masterToggle: root.querySelector('[data-rv="master-toggle"]'),
     masterToggleLabel: root.querySelector('[data-rv="master-toggle-label"]'),
+    seedSources: root.querySelector('[data-rv="seed-sources"]'),
+    seedSourcesText: root.querySelector('[data-rv="seed-sources-text"]'),
   };
 
   // Master toggle: mutating window.rvDisabled is enough — every bridgeReady()
@@ -370,6 +379,9 @@
     adapterPolicy: null,
     dynamicsPolicy: null,
     indexPolicy: null,
+    // P3.F — seed-source generation stamp. -1 means "never rendered"; bumps
+    // on every buildBrainsBuffer call so the panel always repaints per-gen.
+    seedSourcesGen: -1,
   };
 
   // Reranker indicator state (P5.C). Track the previous top-K ordering so we
@@ -406,6 +418,31 @@
       ' · ' + info.observations + ' obs' +
       ' · ' + (info.reranker || (info.gnn ? 'gnn' : 'ema'));
     el.info.className = 'rv-info';
+  }
+
+  // P3.F — render the seed-source breakdown for the most-recent generation.
+  // `info.seedSources.total` is 0 before the first buildBrainsBuffer call
+  // ships; we keep the row hidden in that case so new users don't see a
+  // misleading "archive 0 · prior 0 · random 0" line.
+  function renderSeedSources(info) {
+    if (!el.seedSources) return;
+    if (window.rvDisabled) {
+      el.seedSources.hidden = true;
+      return;
+    }
+    const s = info && info.seedSources;
+    if (!s || (s.total | 0) === 0) {
+      el.seedSources.hidden = true;
+      return;
+    }
+    el.seedSources.hidden = false;
+    const archive = s.archive_recall | 0;
+    const prior = s.localStorage_prior | 0;
+    const random = s.random_init | 0;
+    el.seedSourcesText.textContent =
+      'gen seed sources: archive ' + archive +
+      ' · prior ' + prior +
+      ' · random ' + random;
   }
 
   // Spearman's footrule over the union of ids. Ids present in only one list
@@ -883,6 +920,10 @@
     const adapterPolicy = policy ? policy.adapter : null;
     const dynamicsPolicy = policy ? !!policy.dynamics : null;
     const indexPolicy = policy ? policy.index : null;
+    // P3.F — the generation stamp is the cheap memo key: bridge.setLastSeedSources
+    // writes a fresh `generation` on every buildBrainsBuffer call, so a change
+    // here means a new tally to render.
+    const seedSourcesGen = (info && info.seedSources) ? (info.seedSources.generation | 0) : -1;
 
     // Fast-path: nothing changed → no DOM writes, no recommendSeeds call.
     if (
@@ -907,7 +948,8 @@
       last.rerankerPolicy === rerankerPolicy &&
       last.adapterPolicy === adapterPolicy &&
       last.dynamicsPolicy === dynamicsPolicy &&
-      last.indexPolicy === indexPolicy
+      last.indexPolicy === indexPolicy &&
+      last.seedSourcesGen === seedSourcesGen
     ) return;
 
     // Stage the current dynamics query vector so recommendSeeds can mix it
@@ -952,6 +994,7 @@
     }
 
     renderInfo(info);
+    renderSeedSources(info);
     renderRerankerMode(info);
     renderReranker(info);
     renderLora(info);
@@ -985,6 +1028,7 @@
       adapterPolicy: adapterPolicy,
       dynamicsPolicy: dynamicsPolicy,
       indexPolicy: indexPolicy,
+      seedSourcesGen: seedSourcesGen,
     };
   }
 

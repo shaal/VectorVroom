@@ -85,6 +85,34 @@ const GNN_MIN_ARCHIVE = 10;
 
 let _rerankerMode = 'none'; // 'gnn' | 'ema' | 'none' — most recent path actually taken
 
+// P3.F — per-generation seeding-source breakdown. Counters are set by the
+// caller (main.js buildBrainsBuffer) via setLastSeedSources() *after* it has
+// assigned every slot, because the localStorage_prior / random_init buckets
+// are decisions made outside this module. `total` lets the UI assert that
+// archive + prior + random sums to the full population N — any drift means
+// some slot was silently unaccounted for. `generation` is the gen index at
+// which the snapshot was taken; rendering clients use it as a cache key.
+let _lastSeedSources = {
+  archive_recall: 0,
+  localStorage_prior: 0,
+  random_init: 0,
+  total: 0,
+  generation: -1,
+};
+export function setLastSeedSources(obj) {
+  if (!obj || typeof obj !== 'object') return;
+  const archive = Math.max(0, (obj.archive_recall | 0));
+  const prior = Math.max(0, (obj.localStorage_prior | 0));
+  const random = Math.max(0, (obj.random_init | 0));
+  _lastSeedSources = {
+    archive_recall: archive,
+    localStorage_prior: prior,
+    random_init: random,
+    total: archive + prior + random,
+    generation: Number.isFinite(obj.generation) ? (obj.generation | 0) : -1,
+  };
+}
+
 // P4.A — UI-facing policy switches. The A/B toggle strip sets these; the
 // test harnesses can still reach the low-level boolean overrides (setForceEma,
 // setBypassLora) for backwards compatibility.
@@ -627,6 +655,19 @@ export function info() {
     // straight from the wasm side; `droppedEdges` is >0 only if malformed
     // parent ids somehow produced a cycle.
     lineageDag: dagInfo(),
+    // P3.F — per-generation seed-source breakdown. `archive_recall` counts
+    // slots filled from a ruvector similarity-search hit (elite + light + heavy
+    // mutation slots in main.js). `localStorage_prior` counts slots filled from
+    // a saved bestBrain when the bridge returned nothing. `random_init` counts
+    // pure-random fallbacks (novel-car slots and cold-boot). `total` must
+    // equal the population N; the UI asserts this and logs if it drifts.
+    seedSources: {
+      archive_recall: _lastSeedSources.archive_recall,
+      localStorage_prior: _lastSeedSources.localStorage_prior,
+      random_init: _lastSeedSources.random_init,
+      total: _lastSeedSources.total,
+      generation: _lastSeedSources.generation,
+    },
     // P4.A — A/B policy snapshot so uiPanels can reflect + round-trip the
     // toggle strip state. `rerankerPolicy` is what the user picked;
     // `reranker` above is what recommendSeeds actually did on the last call.

@@ -951,6 +951,17 @@ label {
 }
 .rv-info-muted { color: var(--ink-700); font-style: italic; }
 
+/* P3.F — per-generation seed-source breakdown line. Sits just below the
+   info row; same muted typographic weight since it's diagnostic, not a KPI. */
+.rv-seed-sources {
+    margin-top: 0.25rem;
+    font-size: 0.72rem;
+    color: var(--ink-600);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+.rv-seed-sources[hidden] { display: none; }
+
 /* Master toggle — custom switch */
 .rv-master-toggle {
     display: inline-flex;

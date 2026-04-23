@@ -731,6 +731,10 @@ function buildBrainsBuffer(N){
     const out = new Float32Array(N * FLAT_LENGTH);
     currentSeedIds = [];
     let seededFromBridge = false;
+    // P3.F — per-generation seed-source tally. Every slot increments exactly
+    // one bucket so the three sum to N. Handed to the bridge below for
+    // exposure via bridge.info().seedSources → the Vector Memory panel.
+    let srcArchive = 0, srcPrior = 0, srcRandom = 0;
 
     if (bridgeReady()){
         try {
@@ -756,12 +760,16 @@ function buildBrainsBuffer(N){
                     const off = i * FLAT_LENGTH;
                     if (i < nElite){
                         copyFlat(out, off, seeds[0].vector);
+                        srcArchive++;
                     } else if (i < nElite + nLight){
                         fillMutated(out, off, seeds[(i - nElite) % seeds.length].vector, lightAmt);
+                        srcArchive++;
                     } else if (i < nElite + nLight + nHeavy){
                         fillMutated(out, off, seeds[(i - nElite - nLight) % seeds.length].vector, heavyAmt);
+                        srcArchive++;
                     } else {
                         fillRandom(out, off);
+                        srcRandom++;
                     }
                 }
                 console.log('[ruvector] seeded ' + N + ' cars from ' + seeds.length +
@@ -790,6 +798,7 @@ function buildBrainsBuffer(N){
                 const off = i * FLAT_LENGTH;
                 if (i === 0) copyFlat(out, off, savedFlat);
                 else fillMutated(out, off, savedFlat, mutateValue);
+                srcPrior++;
             }
         } else {
             // Cold-random init (no ruvector seed, no localStorage bestBrain).
@@ -798,11 +807,26 @@ function buildBrainsBuffer(N){
             // path (novel-car fillRandom calls above) and skipped when a
             // saved bestBrain is seeding the population.
             fillRandom(out, 0, true);
+            srcRandom++;
             for (let i = 1; i < N; i++){
                 const off = i * FLAT_LENGTH;
                 fillRandom(out, off, true);
+                srcRandom++;
             }
         }
+    }
+    // P3.F — publish the tally to the bridge *after* every slot is assigned.
+    // Sum must equal N (= srcArchive + srcPrior + srcRandom). We pass the
+    // current generation so the UI can use it as a memo key.
+    if (window.__rvBridge && typeof window.__rvBridge.setLastSeedSources === 'function'){
+        try {
+            window.__rvBridge.setLastSeedSources({
+                archive_recall: srcArchive,
+                localStorage_prior: srcPrior,
+                random_init: srcRandom,
+                generation: (typeof generation === 'number') ? generation : -1,
+            });
+        } catch (e) { /* non-fatal */ }
     }
     return out;
 }
