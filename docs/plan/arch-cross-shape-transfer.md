@@ -1,6 +1,6 @@
 # Architecture changes to enable cross-shape transfer
 
-**Status:** A0 shipped 2026-04-22. A1 attempted + reverted 2026-04-23 (`arch-a1/PROOF.md`). **A1' (scaled-distance variant) shipped 2026-04-23 — cross-track Δ flipped positive (+0.013 vs Phase 2 cold-tri baseline 0.714); see `arch-a1-prime/PROOF.md`.** A2/A3 are now unblocked.
+**Status:** A0 shipped 2026-04-22. A1 attempted + reverted 2026-04-23 (`arch-a1/PROOF.md`). **A1' (scaled-distance variant) shipped 2026-04-23 — cross-track Δ +0.013 vs Phase 2 baseline; see `arch-a1-prime/PROOF.md`.** A2 attempted + reverted 2026-04-23 — layer norm on 8-unit hidden regressed cross-track by −0.074 vs A1' (the plan anticipated this: *"might be a no-op or even mildly negative for 8 hidden units"*). See `arch-a2/PROOF.md`. **A3 is unblocked** (A1' alone produces the positive cross-track result A3 measures).
 **Origin:** Phase 3.5 experiments (`docs/plan/ruvector-proof/phase3.5/PROOF.md` + `phase3.5-samesame/PROOF-SAME-TRACK.md`) showed ruvector's archive currently *hurts* cross-track generalization because the 6→8→4 network overfits to track-specific sensor sequences. This plan proposes the architecture changes that should flip that result.
 **How to use:** each phase is scoped for an independent `/ship-task` invocation. Run them in order (A0 → A1 → A2 → A3). Acceptance criteria at the end of each phase are the ship-task confidence-gate targets.
 
@@ -123,6 +123,8 @@ Also re-run same-track (Phase 3.5 follow-up) to confirm no regression.
 ---
 
 ## Phase A2 — Hidden-layer normalization (~1 sitting, optional on top of A1)
+
+**Attempted 2026-04-23, reverted. See `docs/plan/ruvector-proof/arch-a2/PROOF.md`.** Parameter-free layer norm on the 8-unit hidden layer (with A1' scaled-distance features in place) regressed cross-track transfer by −0.074 vs A1' (rect-seeded-tri 0.653 vs A1''s 0.727) and dented within-track on both tracks. The plan's A2 note predicted this exact outcome: *"this phase might be a no-op or even mildly negative for 8 hidden units. Layer norm's benefits grow with layer size. Worth trying, easy to remove if it doesn't help."* Action per the plan's A2 acceptance block: *"If it hurts, keep A1 and drop A2 (record the finding)."* Done. The section below is the original spec, preserved for reference.
 
 **Goal:** layer-normalize the hidden-layer pre-activations so cross-track drift in numeric ranges doesn't destabilize learned weights.
 
