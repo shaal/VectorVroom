@@ -298,14 +298,15 @@ function metricsEnsureHud(){
     if (metricsHud) return metricsHud;
     metricsHud = document.createElement('div');
     metricsHud.id = 'metrics-hud';
-    // Stacked on the LEFT under the Guided-tour pill.
-    // .eli15-fab sits at top:16px (~40px tall); .eli15-tour-fab stacks below
-    // it at top:calc(16 + 40 + 8)=64px (~40px tall). Metrics goes below that:
-    // top = 64 + 40 + 8 = 112px. Left-aligned with the pills at 16px.
-    metricsHud.style.cssText = 'position:fixed;top:112px;left:16px;z-index:99998;' +
+    // Centered at the top of the screen — out of the way of the left-column
+    // pills (Explain / Guided tour / preset picker) and the right-column
+    // training controls. `left:50%;transform:translateX(-50%)` centers the
+    // box regardless of its width; `text-align:center` keeps the metric
+    // lines centered within the box.
+    metricsHud.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:99998;' +
         'background:rgba(12,14,18,.88);color:#a8c8ff;padding:8px 10px;' +
         'border-radius:4px;font:11px/1.35 ui-monospace,Menlo,monospace;' +
-        'pointer-events:none;min-width:180px;';
+        'pointer-events:none;min-width:180px;text-align:center;';
     document.body.appendChild(metricsHud);
     return metricsHud;
 }
