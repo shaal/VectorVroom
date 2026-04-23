@@ -1,6 +1,6 @@
 # Architecture changes to enable cross-shape transfer
 
-**Status:** A0 shipped 2026-04-22. A1 attempted + reverted 2026-04-23 (`arch-a1/PROOF.md`). **A1' (scaled-distance variant) shipped 2026-04-23 — cross-track Δ +0.013 vs Phase 2 baseline; see `arch-a1-prime/PROOF.md`.** A2 attempted + reverted 2026-04-23 — layer norm on 8-unit hidden regressed cross-track by −0.074 vs A1' (the plan anticipated this: *"might be a no-op or even mildly negative for 8 hidden units"*). See `arch-a2/PROOF.md`. **A3 is unblocked** (A1' alone produces the positive cross-track result A3 measures).
+**Status:** A0 shipped 2026-04-22. A1 attempted + reverted 2026-04-23 (`arch-a1/PROOF.md`). **A1' (scaled-distance variant) shipped 2026-04-23** — see `arch-a1-prime/PROOF.md`. A2 attempted + reverted 2026-04-23 — layer norm on 8-unit hidden regressed cross-track (the plan anticipated this: *"might be a no-op or even mildly negative for 8 hidden units"*); see `arch-a2/PROOF.md`. **A3 shipped 2026-04-23** — 6 CSVs in `phase3.5-v2/`, both directions measured. Cross-shape transfer is directional: Tri→Rect +0.056 (n=3), Rect→Tri −0.031 (n=6 combined A1'+A3). UI caveats in `eli15/chapters/track-similarity.js` and `what-is-this-project.js` rewritten to match new reality — archive no longer actively hurts cross-shape seeding; directional modest positive effect; save-and-resume on same track remains the most reliable behaviour. See `phase3.5-v2/PROOF.md`.
 **Origin:** Phase 3.5 experiments (`docs/plan/ruvector-proof/phase3.5/PROOF.md` + `phase3.5-samesame/PROOF-SAME-TRACK.md`) showed ruvector's archive currently *hurts* cross-track generalization because the 6→8→4 network overfits to track-specific sensor sequences. This plan proposes the architecture changes that should flip that result.
 **How to use:** each phase is scoped for an independent `/ship-task` invocation. Run them in order (A0 → A1 → A2 → A3). Acceptance criteria at the end of each phase are the ship-task confidence-gate targets.
 
@@ -153,6 +153,8 @@ Also re-run same-track (Phase 3.5 follow-up) to confirm no regression.
 ---
 
 ## Phase A3 — Combined proof run + UI update (~1 sitting)
+
+**Shipped 2026-04-23. See `docs/plan/ruvector-proof/phase3.5-v2/PROOF.md` for full measurement and `commit history` for UI caveat edits.** Headline numbers: Tri→Rect cross-track Δ = +0.056 (n=3, positive); Rect→Tri cross-track Δ = −0.031 (n=6 combined A1'+A3 sessions, roughly neutral and much better than Phase 3.5's −0.056). Transfer is direction-asymmetric, consistent with a "hard-first curriculum transfers to easy" intuition. Same-track warm Δ = +0.002 (unchanged from A1' and Phase 3.5 follow-up). 6 CSVs saved. UI caveats in `track-similarity.js` and `what-is-this-project.js` updated — the "actively hurts" framing is gone; the new copy says cross-shape transfer is directional and modest, and save-and-resume is the most reliable behaviour. Section below is the original spec, preserved for reference.
 
 **Goal:** capture the full updated proof run and, if the cross-track result is positive, revert the A3-era UI caveats.
 
