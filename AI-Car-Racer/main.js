@@ -3,8 +3,48 @@ const ctx = canvas.getContext("2d");
 canvas.width = 3200;
 canvas.height = 1800;
 
-const startInfo = {x: canvas.width - canvas.width/10, y: canvas.height/2, startWidth: canvas.width/40};
+// Fallback matches the Rectangle preset — Road/roadEditor take startInfo by
+// reference, so computeStartInfoInPlace() below mutates it to the actual
+// first-checkpoint midpoint once track geometry is known.
+const startInfo = {x: canvas.width - canvas.width/10, y: canvas.height/2, startWidth: canvas.width/40, heading: 0};
 const road=new Road(startInfo);
+
+// Track-relative spawn: midpoint of checkpoint[0], heading toward
+// checkpoint[1]'s midpoint. Falls back to the original world-coord anchor
+// when no checkpoints are loaded yet (shouldn't happen past getTrack() but
+// the guard keeps first-render robust).
+function computeStartInfoInPlace(cpList){
+    if (!cpList || !cpList.length || !cpList[0] || cpList[0].length < 2) return startInfo;
+    const g0 = cpList[0];
+    const mx = (g0[0].x + g0[1].x) / 2;
+    const my = (g0[0].y + g0[1].y) / 2;
+    let hx, hy;
+    if (cpList.length >= 2 && cpList[1] && cpList[1].length >= 2){
+        const g1 = cpList[1];
+        hx = (g1[0].x + g1[1].x) / 2 - mx;
+        hy = (g1[0].y + g1[1].y) / 2 - my;
+    } else {
+        // Single-checkpoint fallback: perpendicular to the gate, rotated 90° CCW.
+        hx = -(g0[1].y - g0[0].y);
+        hy =  (g0[1].x - g0[0].x);
+    }
+    // Car uses sin=dx, cos=dy convention (car.js:177-178), so heading = atan2(dx, dy).
+    startInfo.x = mx;
+    startInfo.y = my;
+    startInfo.heading = Math.atan2(hx, hy);
+    return startInfo;
+}
+
+// Pick checkpoints from whichever snapshot is available: road.checkPointList
+// after getTrack() has run, otherwise the roadEditor's live editor array
+// (populated from localStorage at page load).
+function currentCheckpointList(){
+    if (road.checkPointList && road.checkPointList.length) return road.checkPointList;
+    const ed = road.roadEditor && road.roadEditor.checkPointListEditor;
+    return (ed && ed.length) ? ed : null;
+}
+
+computeStartInfoInPlace(currentCheckpointList());
 var batchSize = 10;
 var nextSeconds = 15;
 var seconds;
@@ -597,8 +637,9 @@ function buildBrainsBuffer(N){
 function begin(){
     seconds = nextSeconds;
     pause = false;
-    playerCar = new Car(startInfo.x, startInfo.y, 30, 50, "KEYS", maxSpeed);
-    playerCar2 = new Car(startInfo.x, startInfo.y, 30, 50, "WASD", maxSpeed);
+    computeStartInfoInPlace(currentCheckpointList());
+    playerCar = new Car(startInfo.x, startInfo.y, 30, 50, "KEYS", maxSpeed, startInfo.heading);
+    playerCar2 = new Car(startInfo.x, startInfo.y, 30, 50, "WASD", maxSpeed, startInfo.heading);
     frameCount = 0;
     wallStart = performance.now();
     _simStepAccum = 1;
@@ -636,7 +677,7 @@ function performBegin(N){
     simWorker.postMessage({
         type: 'begin',
         N, seconds, maxSpeed, traction,
-        startInfo: { x: startInfo.x, y: startInfo.y },
+        startInfo: { x: startInfo.x, y: startInfo.y, heading: startInfo.heading || 0 },
         brains
     }, [brains.buffer]);
 }

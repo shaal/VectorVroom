@@ -113,6 +113,27 @@ This works for every existing preset because checkpoints already define the corr
 
 **Acceptance:** re-run both benchmarks. Rectangle median checkpoints ≥ baseline. START marker visually lands at the first checkpoint gate on every preset.
 
+### Phase 1 — Implementation status (2026-04-22)
+
+**Shipped.** Files changed: `AI-Car-Racer/main.js`, `AI-Car-Racer/sim-worker.js`, `AI-Car-Racer/car.js`. ~40 lines total.
+
+- `main.js:6`: kept fallback startInfo but added `heading` field and helper `computeStartInfoInPlace(cpList)` that mutates startInfo to the midpoint of `checkPointListEditor[0]` with heading = `atan2(dx, dy)` toward checkpoint[1]'s midpoint (matching the car's `sin(θ)=dx, cos(θ)=dy` convention). Called at module load, and again inside `begin()` for training correctness.
+- `car.js:2`: Car constructor gains an optional 7th `angle=0` parameter; `this.angle=angle` replaces `this.angle=0` before `#createPolygon()` so first-tick polygons are correct from the start.
+- `sim-worker.js:114`: AI cars receive heading via the `startInfo` message.
+
+**Programmatic verification on all 10 presets:** every computed spawn lands in the corridor (inside the outer polygon, outside the inner polygon) via point-in-polygon test. Headings confirmed against the first-to-second checkpoint vector.
+
+**Empirical results — Rectangle and Triangle, 30-gen benchmarks at batchSize=1000, simSpeed=100, cold start:**
+
+| Run | surv@5s (baseline → Phase 1) | med cp | max cp | wall-bumps |
+|---|---|---|---|---|
+| Rectangle cold | 0.455 → 0.433 | **0 → 1** | 3.0 → 3.0 | 616 → 606 |
+| Triangle cold | **0.248 → 0.583** | **0 → 1** | **0.4 → 2.0** | **759 → 536** |
+
+Triangle survival more than doubled; median checkpoints lifted off zero for the first time in any baseline run. Rectangle within noise on survival but also lifts median 0 → 1.
+
+CSVs saved to `docs/plan/ruvector-proof/phase1/`.
+
 ---
 
 ## Phase 2 — Pose randomization during training (~1–2 sittings)

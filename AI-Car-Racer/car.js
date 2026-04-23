@@ -1,5 +1,5 @@
 class Car{
-    constructor(x,y,width,height,controlType, maxSpeed=3){
+    constructor(x,y,width,height,controlType, maxSpeed=3, angle=0){
         this.origin={x:x,y:y};
         this.x=x;
         this.y=y;
@@ -16,7 +16,7 @@ class Car{
         this.breakAccel=maxSpeed/60;
         this.maxSpeed=maxSpeed;
         this.friction=0.02;
-        this.angle=0;
+        this.angle=angle;
         this.damaged=false;
         // this.driftVelocity={x:0,y:0};
         this.slideSpeed=traction*this.maxSpeed;

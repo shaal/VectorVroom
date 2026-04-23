@@ -111,7 +111,7 @@ function handleBegin(m) {
     const flat = m.brains;
     cars = new Array(N);
     for (let i = 0; i < N; i++) {
-        const c = new Car(startInfo.x, startInfo.y, 30, 50, 'AI', m.maxSpeed);
+        const c = new Car(startInfo.x, startInfo.y, 30, 50, 'AI', m.maxSpeed, startInfo.heading || 0);
         assignBrainFromFlat(c.brain, flat, i * FLAT_LENGTH);
         cars[i] = c;
     }
