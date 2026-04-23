@@ -219,7 +219,9 @@ function stepOnce() {
         }
         self.frameCount++;
         for (let i = 0; i < cars.length; i++) {
+            const prevDamaged = cars[i].damaged;
             cars[i].update(self.road.borders, self.road.checkPointList);
+            if (!prevDamaged && cars[i].damaged) cars[i].deathFrame = self.frameCount;
         }
         // O(N) bestCar scan — mirror of main.js's pre-worker logic.
         let bestFit = -Infinity, bestC = null;
@@ -362,6 +364,26 @@ function endGen() {
     const bc = self.bestCar;
     const flat = flattenBrain(bc.brain);
     const cpLen = self.road.checkPointList.length || 0;
+
+    // Population-wide stats: per-car checkpoint counts + death frames. Main
+    // thread derives median / p90 / survival@T percentiles from these arrays,
+    // so new buckets can be added without touching the worker.
+    const N = cars.length;
+    const popCheckpoints = new Int16Array(N);
+    const popDeathFrames = new Int32Array(N);   // -1 sentinel = survived to timeout
+    let wallBumps = 0, stillAlive = 0;
+    for (let i = 0; i < N; i++) {
+        const c = cars[i];
+        popCheckpoints[i] = c.checkPointsCount | 0;
+        if (c.damaged) {
+            wallBumps++;
+            popDeathFrames[i] = (c.deathFrame != null ? c.deathFrame : self.frameCount) | 0;
+        } else {
+            stillAlive++;
+            popDeathFrames[i] = -1;
+        }
+    }
+
     self.postMessage({
         type: 'genEnd',
         bestBrain: flat,
@@ -369,8 +391,13 @@ function endGen() {
         laps: bc.laps,
         lapTimes: Array.isArray(bc.lapTimes) ? bc.lapTimes.slice() : [],
         checkPointsCount: bc.checkPointsCount,
-        frameCount: self.frameCount
-    }, [flat.buffer]);
+        frameCount: self.frameCount,
+        popN: N,
+        popWallBumps: wallBumps,
+        popStillAlive: stillAlive,
+        popCheckpoints, popDeathFrames,
+        genSeconds: seconds
+    }, [flat.buffer, popCheckpoints.buffer, popDeathFrames.buffer]);
     // Wait for main's next `begin` — stepping is paused until then.
     pause = true;
 }

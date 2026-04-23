@@ -213,6 +213,86 @@ function bridgeReady(){
 }
 
 // -----------------------------------------------------------------------------
+// Metrics HUD — per-generation survival %, median / p90 checkpoints, wall-bumps.
+// Also serves as the on-screen data source for __runBenchmark / __abTest CSVs.
+// -----------------------------------------------------------------------------
+var metricsHud = null;
+var metricsEnabled = true;
+var __metricsLog = [];          // every genEnd appends one row (HUD ring + CSV source)
+var __metricsLiveAlive = 0;     // updated per-tick from handleSnapshot
+var __benchmarkCtx = null;      // set while __runBenchmark is active
+
+function metricsEnsureHud(){
+    if (metricsHud) return metricsHud;
+    metricsHud = document.createElement('div');
+    metricsHud.id = 'metrics-hud';
+    metricsHud.style.cssText = 'position:fixed;top:8px;right:196px;z-index:99998;' +
+        'background:rgba(12,14,18,.88);color:#a8c8ff;padding:8px 10px;' +
+        'border-radius:4px;font:11px/1.35 ui-monospace,Menlo,monospace;' +
+        'pointer-events:none;min-width:180px;';
+    document.body.appendChild(metricsHud);
+    return metricsHud;
+}
+
+function __percentileI16(sortedArr, q){
+    if (!sortedArr.length) return 0;
+    const idx = Math.min(sortedArr.length - 1, Math.floor(sortedArr.length * q));
+    return sortedArr[idx];
+}
+
+function metricsComputeRow(m){
+    const FPS = 60;
+    const N = m.popN | 0;
+    if (!N || !m.popCheckpoints) return null;
+    const cpSorted = Int16Array.from(m.popCheckpoints).sort();
+    const df = m.popDeathFrames;
+    const survivedAt = (frameBudget) => {
+        let alive = 0;
+        for (let i = 0; i < N; i++){ if (df[i] === -1 || df[i] > frameBudget) alive++; }
+        return alive / N;
+    };
+    return {
+        gen: generation,
+        popN: N,
+        medCheckpoints: __percentileI16(cpSorted, 0.5),
+        p90Checkpoints: __percentileI16(cpSorted, 0.9),
+        maxCheckpoints: cpSorted[N - 1],
+        wallBumps: m.popWallBumps | 0,
+        stillAlive: m.popStillAlive | 0,
+        survival5s:  +survivedAt(5  * FPS).toFixed(4),
+        survival10s: +survivedAt(10 * FPS).toFixed(4),
+        survivalEnd: +(m.popStillAlive / N).toFixed(4),
+        bestFitness: m.fitness,
+        bestLaps: m.laps,
+        bestLapMin: (m.lapTimes && m.lapTimes.length) ? Math.min.apply(null, m.lapTimes) : null,
+        genSeconds: m.genSeconds
+    };
+}
+
+function metricsRender(){
+    if (!metricsEnabled) return;
+    const hud = metricsEnsureHud();
+    const last = __metricsLog[__metricsLog.length - 1];
+    const liveN = latestSnapshot ? latestSnapshot.N : 0;
+    const pct = (v) => (v * 100).toFixed(0) + '%';
+    let body = '<div style="color:#fff;margin-bottom:3px;"><b>metrics</b></div>';
+    body += '<div>alive ' + __metricsLiveAlive + ' / ' + liveN + '</div>';
+    if (last){
+        body += '<div style="margin-top:4px;opacity:.75;font-size:.9em;">gen ' + last.gen + ' · N=' + last.popN + '</div>';
+        body += '<div>med cp  <b>' + last.medCheckpoints + '</b> · p90 <b>' + last.p90Checkpoints + '</b> · max <b>' + last.maxCheckpoints + '</b></div>';
+        body += '<div>wall-bumps <b>' + last.wallBumps + '</b></div>';
+        body += '<div>surv 5s <b>' + pct(last.survival5s) + '</b> · 10s <b>' + pct(last.survival10s) + '</b> · end <b>' + pct(last.survivalEnd) + '</b></div>';
+    } else {
+        body += '<div style="opacity:.6;">(awaiting first genEnd)</div>';
+    }
+    if (__benchmarkCtx){
+        body += '<div style="margin-top:4px;color:#f0c060;">bench: ' + __benchmarkCtx.label +
+                ' (' + __benchmarkCtx.done + '/' + __benchmarkCtx.target + ')</div>';
+    }
+    hud.innerHTML = body;
+}
+
+// -----------------------------------------------------------------------------
 // Worker bootstrap + message plumbing
 // -----------------------------------------------------------------------------
 const simWorker = new Worker('sim-worker.js');
@@ -271,6 +351,13 @@ function handleSnapshot(m){
     }
     latestSnapshot = m;
     frameCount = m.frameCount;
+    // Live alive-count: position stride is 5 per car, field 3 is damaged 0|1.
+    if (m.positions && m.N){
+        let alive = 0;
+        const N = m.N, pos = m.positions;
+        for (let i = 0; i < N; i++){ if (!pos[i*5 + 3]) alive++; }
+        __metricsLiveAlive = alive;
+    }
     if (m.bestIdx >= 0){
         if (m.bestEpoch !== _bestProxyEpoch || !bestCar){
             bestCar = makeBestCarProxy();
@@ -369,6 +456,25 @@ function handleGenEnd(m){
         bestCar.lapTimes = m.lapTimes && m.lapTimes.length ? m.lapTimes : '--';
         bestCar.checkPointsCount = m.checkPointsCount;
     }
+    try {
+        const row = metricsComputeRow(m);
+        if (row){
+            __metricsLog.push(row);
+            if (__metricsLog.length > 5000) __metricsLog.shift();
+            metricsRender();
+            if (__benchmarkCtx && !__benchmarkCtx.done_flag){
+                __benchmarkCtx.done += 1;
+                const liveRv = __rvToggleSnapshot();
+                liveRv.trackLabel = __benchmarkCtx.config.trackLabel;
+                liveRv.cold = __benchmarkCtx.config.cold;
+                __benchmarkCtx.rows.push(Object.assign({label: __benchmarkCtx.label}, liveRv, row));
+                if (__benchmarkCtx.done >= __benchmarkCtx.target){
+                    __benchmarkCtx.done_flag = true;
+                    __benchmarkCtx.resolve(__benchmarkCtx.rows.slice());
+                }
+            }
+        }
+    } catch (e){ console.warn('[metrics] genEnd handler failed', e); }
     performNextBatch(m);
 }
 
@@ -708,7 +814,7 @@ function animate(){
             perfPush('draw', _perfDraw);
             perfPush('rAF', performance.now() - _perfFrameStart);
             perfPush('steps', steps);
-            if ((++perfTick % 10) === 0) perfRender();
+            if ((++perfTick % 10) === 0) { perfRender(); metricsRender(); }
         } catch (e){
             console.error('[perf] HUD error — disabling instrumentation', e);
             perfEnabled = false;
@@ -796,3 +902,161 @@ function drawBestCar(bc){
         }
     }
 }
+
+// -----------------------------------------------------------------------------
+// Benchmark console helpers — __runBenchmark, __abTest, __clearArchive,
+// __downloadCSV. Used to produce CSVs for the Phase 0 baseline captures and
+// the ruvector A/B proof charts in docs/plan/generalization-fix.md.
+// -----------------------------------------------------------------------------
+function __rvToggleSnapshot(){
+    const info = (window.__rvBridge && window.__rvBridge.info) ? window.__rvBridge.info() : null;
+    const policy = info && info.policy ? info.policy : {};
+    return {
+        vectorMemory: !window.rvDisabled,
+        reranker: policy.reranker || '',
+        adapter: policy.adapter || '',
+        index: policy.index || '',
+        dynamics: !!policy.dynamics,
+        archiveBrains: info ? (info.brains | 0) : 0,
+        archiveTracks: info ? (info.tracks | 0) : 0,
+        archiveObservations: info ? (info.observations | 0) : 0
+    };
+}
+
+function __applyRvConfig(cfg){
+    if (!cfg) return;
+    if (typeof cfg.vectorMemory === 'boolean') window.rvDisabled = !cfg.vectorMemory;
+    const b = window.__rvBridge;
+    if (!b) return;
+    if (cfg.reranker && b.setRerankerMode) b.setRerankerMode(cfg.reranker);
+    if (cfg.adapter  && b.setAdapterMode)  b.setAdapterMode(cfg.adapter);
+    if (cfg.index    && b.setIndexKind)    b.setIndexKind(cfg.index);
+    if (typeof cfg.dynamics === 'boolean' && b.setUseDynamics) b.setUseDynamics(cfg.dynamics);
+}
+
+window.__clearArchive = async function(){
+    if (!window.__rvBridge || !window.__rvBridge._debugReset){
+        console.warn('[bench] __rvBridge._debugReset unavailable'); return;
+    }
+    await window.__rvBridge._debugReset();
+    try { localStorage.removeItem('bestBrain'); localStorage.removeItem('progress'); } catch (_) {}
+    console.log('[bench] archive cleared');
+};
+
+window.__runBenchmark = async function(gens, opts){
+    opts = opts || {};
+    const label = opts.label || 'run';
+    if (phase !== 4) throw new Error('__runBenchmark requires phase 4 (training). Current phase=' + phase);
+    if (__benchmarkCtx) throw new Error('__runBenchmark already active ("' + __benchmarkCtx.label + '"). Await it or cancel before starting another.');
+
+    // Soft-warn on settings that produce thin or slow data.
+    if (typeof batchSize !== 'undefined' && batchSize < 100){
+        console.warn('[bench] batchSize=' + batchSize + ' is low — population-wide stats are noisy. Raise via the Training tuning slider (target: 500–1000).');
+    }
+    if (typeof simSpeed !== 'undefined' && simSpeed < 50){
+        console.warn('[bench] simSpeed=' + simSpeed + ' is low — ' + gens + ' gens will take ' + Math.round(gens * (typeof nextSeconds !== 'undefined' ? nextSeconds : 15) / simSpeed) + 's wall time. Raise simSpeed to ~100 for fast benchmarks.');
+    }
+
+    if (opts.cold){
+        await window.__clearArchive();
+        generation = 0;
+    }
+    if (opts.config) __applyRvConfig(opts.config);
+
+    const configSnapshot = { trackLabel: opts.track || '', cold: !!opts.cold };
+
+    const ctx = { label, target: gens, done: 0, rows: [], config: configSnapshot };
+    const promise = new Promise((resolve, reject) => { ctx.resolve = resolve; ctx.reject = reject; });
+    __benchmarkCtx = ctx;
+
+    // Watchdog: if no progress for (nextSeconds * 4) wall seconds per expected
+    // gen, abort — the sim is probably paused or the tab was backgrounded.
+    const secs = typeof nextSeconds !== 'undefined' ? nextSeconds : 15;
+    const watchMs = Math.max(30000, (secs * 4) * gens * 1000);
+    const watchdog = setTimeout(() => {
+        if (__benchmarkCtx !== ctx || ctx.done_flag) return;
+        ctx.done_flag = true;
+        __benchmarkCtx = null;
+        ctx.reject(new Error('[bench] watchdog fired after ' + (watchMs/1000) + 's — completed ' + ctx.done + '/' + gens + ' gens'));
+    }, watchMs);
+
+    if (opts.restart !== false){
+        try { if (typeof nextBatch === 'function') nextBatch(); }
+        catch (e){ console.warn('[bench] restart failed', e); }
+    }
+
+    console.log('[bench] "' + label + '" running ' + gens + ' gens (cold=' + !!opts.cold + ', batchSize=' + (typeof batchSize !== 'undefined' ? batchSize : '?') + ', simSpeed=' + (typeof simSpeed !== 'undefined' ? simSpeed : '?') + ')');
+    try {
+        const rows = await promise;
+        clearTimeout(watchdog);
+        __benchmarkCtx = null;
+        console.log('[bench] "' + label + '" complete, ' + rows.length + ' rows');
+        if (opts.download !== false){
+            try { window.__downloadCSV(label, rows); } catch (e){ console.warn('[bench] download failed', e); }
+        }
+        return rows;
+    } catch (e){
+        clearTimeout(watchdog);
+        __benchmarkCtx = null;
+        throw e;
+    }
+};
+
+window.__abTest = async function(gens, configA, configB, opts){
+    opts = opts || {};
+    const labelA = (opts.label || 'ab') + '-A';
+    const labelB = (opts.label || 'ab') + '-B';
+    console.log('[abTest] running A then B, ' + gens + ' gens each');
+    const rowsA = await window.__runBenchmark(gens, {
+        label: labelA, config: configA, cold: opts.coldA !== false,
+        track: opts.track, download: false
+    });
+    const rowsB = await window.__runBenchmark(gens, {
+        label: labelB, config: configB, cold: opts.coldB !== false,
+        track: opts.track, download: false
+    });
+    const diff = { A: _summariseRows(rowsA), B: _summariseRows(rowsB) };
+    console.table(diff);
+    window.__downloadCSV((opts.label || 'ab') + '-combined', rowsA.concat(rowsB));
+    return { A: rowsA, B: rowsB, diff };
+};
+
+function _summariseRows(rows){
+    if (!rows.length) return {};
+    const last = rows[rows.length - 1];
+    const first = rows[0];
+    const avg = (k) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0) / rows.length;
+    return {
+        gens: rows.length,
+        gen1_medCp: first.medCheckpoints,
+        genN_medCp: last.medCheckpoints,
+        gen1_survival5s: first.survival5s,
+        genN_survival5s: last.survival5s,
+        avg_wallBumps: +avg('wallBumps').toFixed(1),
+        avg_maxCp: +avg('maxCheckpoints').toFixed(1),
+        vectorMemory: first.vectorMemory,
+        reranker: first.reranker,
+        adapter: first.adapter
+    };
+}
+
+window.__downloadCSV = function(label, rows){
+    rows = rows || __metricsLog;
+    if (!rows.length){ console.warn('[bench] no rows to export'); return; }
+    const keys = Array.from(rows.reduce((s, r) => { Object.keys(r).forEach(k => s.add(k)); return s; }, new Set()));
+    const esc = (v) => {
+        if (v == null) return '';
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    };
+    const csv = [keys.join(',')].concat(rows.map(r => keys.map(k => esc(r[k])).join(','))).join('\n');
+    const blob = new Blob([csv], {type: 'text/csv'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = label + '-' + new Date().toISOString().replace(/[:.]/g, '-') + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+    console.log('[bench] downloaded CSV "' + a.download + '" (' + rows.length + ' rows)');
+};
