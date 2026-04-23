@@ -1,5 +1,11 @@
 export const TOPOLOGY = [6, 8, 4];
 export const FLAT_LENGTH = 92;
+// Bump whenever the network's *inference semantics* or wire shape change in a
+// way that makes stored brains behave differently at runtime. Inference-only
+// changes (A0: hidden-layer tanh swap) count — the weights load fine but
+// produce different outputs for the same inputs, so old archive hits would
+// mislead rather than seed. Bumped to 2 at Phase A0.
+export const BRAIN_SCHEMA_VERSION = 2;
 
 function flatLengthFor(topology) {
   let n = 0;

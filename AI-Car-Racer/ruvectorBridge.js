@@ -7,7 +7,7 @@
 
 import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js';
 import initCnn, { CnnEmbedder } from '../vendor/ruvector/ruvector_cnn_wasm/index.js';
-import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY } from './brainCodec.js';
+import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY, BRAIN_SCHEMA_VERSION } from './brainCodec.js';
 import { loadGnn, isReady as gnnIsReady, gnnScore } from './gnnReranker.js';
 // P3.A — hyperbolic HNSW swap. `loadHyperbolic` boots the wasm side; the
 // adapter mimics the slice of VectorDB the bridge actually calls (insert /
@@ -219,10 +219,39 @@ function _tEnd(label, start) {
 }
 if (typeof window !== 'undefined') { window.__bootTimings = _bootTimings; }
 
+// Phase A0 — brain schema version guard. A mismatch means stored brains were
+// produced by a different inference pipeline (e.g. v1 threshold vs v2 tanh),
+// so seeding from them would be actively misleading. We wipe IDB + the
+// localStorage sidecars and write the current version so subsequent boots
+// skip this path. `null` (no key) is treated as an implicit v1 because that
+// was the state before versioning shipped.
+async function migrateBrainSchemaIfNeeded() {
+  if (typeof localStorage === 'undefined') return;
+  const stored = localStorage.getItem('brainSchemaVersion');
+  const effective = stored == null ? '1' : stored;
+  const current = String(BRAIN_SCHEMA_VERSION);
+  if (effective === current) return;
+  console.log(`[ruvector] brain schema v${effective} → v${current} — clearing archive`);
+  if (typeof indexedDB !== 'undefined') {
+    try {
+      await new Promise((resolve) => {
+        const req = indexedDB.deleteDatabase(IDB_NAME);
+        req.onsuccess = req.onerror = req.onblocked = () => resolve();
+      });
+    } catch (e) { console.warn('[ruvector] schema migrate: DB delete failed', e); }
+  }
+  try { localStorage.removeItem('bestBrain'); } catch (_) {}
+  try { localStorage.removeItem('oldBestBrain'); } catch (_) {}
+  try { localStorage.removeItem('progress'); } catch (_) {}
+  try { localStorage.setItem('brainSchemaVersion', current); } catch (_) {}
+}
+
 export function ready() {
   if (_ready) return _ready;
   _ready = (async () => {
     const _t0 = _tStart();
+    // Run BEFORE any IDB reads so hydrate() sees an empty DB on mismatch.
+    await migrateBrainSchemaIfNeeded();
     // P3.A — boot hyperbolic wasm in parallel with the Euclidean / CNN
     // inits. We always load it so the A/B toggle can flip to hyperbolic
     // without a cold-start stall, even when the URL flag isn't set.

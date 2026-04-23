@@ -1,6 +1,6 @@
 # Architecture changes to enable cross-shape transfer
 
-**Status:** planned, not started.
+**Status:** A0 shipped (2026-04-22); A1/A2/A3 not yet started.
 **Origin:** Phase 3.5 experiments (`docs/plan/ruvector-proof/phase3.5/PROOF.md` + `phase3.5-samesame/PROOF-SAME-TRACK.md`) showed ruvector's archive currently *hurts* cross-track generalization because the 6→8→4 network overfits to track-specific sensor sequences. This plan proposes the architecture changes that should flip that result.
 **How to use:** each phase is scoped for an independent `/ship-task` invocation. Run them in order (A0 → A1 → A2 → A3). Acceptance criteria at the end of each phase are the ship-task confidence-gate targets.
 
@@ -54,6 +54,15 @@ Together, the bet is: same input distribution + weights that encode smooth rathe
 **Files:** `network.js`, `sim-worker.js` (mirror the forward path), `brainCodec.js`, `ruvectorBridge.js`, `main.js`.
 
 **Expected effort:** half day. Small code, careful archive handling.
+
+**Outcome (shipped 2026-04-22):** tanh swap is empirically neutral, as hypothesised.
+
+| Track | Baseline last-5 surv@5s | A0 last-5 surv@5s (n=3) | Δ | Acceptance (±0.05) |
+|---|---|---|---|---|
+| Rectangle cold | 0.492 | **0.488** (reps: 0.492, 0.571, 0.400) | −0.004 | ✓ |
+| Triangle cold  | 0.714 | **0.717** (reps: 0.707, 0.815, 0.629) | +0.003 | ✓ |
+
+Schema migrator fired cleanly on the cold-boot test (`[ruvector] brain schema v1 → v2 — clearing archive`); post-migration `localStorage.brainSchemaVersion === '2'`. `sim-worker.js` picked up the new activation transparently via `importScripts('network.js')` — no duplicate forward-path edit needed. Output layer still hard-thresholded so `car.js` can keep reading `outputs[i]` as booleans (a tanh output would produce non-zero floats that are truthy in JS → controls stuck "on").
 
 ---
 

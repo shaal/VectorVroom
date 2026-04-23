@@ -575,6 +575,11 @@ function handleGenEnd(m){
 // weights (no intermediate NeuralNetwork objects for the bulk of the population).
 // -----------------------------------------------------------------------------
 const FLAT_LENGTH = 92;
+// Mirror of brainCodec.BRAIN_SCHEMA_VERSION — duplicated because main.js is a
+// classic script and can't import ES modules. Keep in sync with brainCodec.js.
+// Used to gate the localStorage.bestBrain seeding path below; ruvector owns the
+// actual schema migration (see migrateBrainSchemaIfNeeded in ruvectorBridge.js).
+const BRAIN_SCHEMA_VERSION = 2;
 
 function flattenBrainInline(brain){
     const out = new Float32Array(FLAT_LENGTH);
@@ -662,7 +667,14 @@ function buildBrainsBuffer(N){
     }
 
     if (!seededFromBridge){
-        if (localStorage.getItem("bestBrain")){
+        // Only trust localStorage.bestBrain when the persisted schema version
+        // matches. On a version miss, the bridge's migrator has either
+        // already cleared the key or is about to — either way, seeding from
+        // a stale-semantics brain would inject wrong-era weights into a
+        // fresh population, so fall through to random.
+        const schemaOK = (typeof localStorage !== 'undefined') &&
+            (localStorage.getItem('brainSchemaVersion') === String(BRAIN_SCHEMA_VERSION));
+        if (schemaOK && localStorage.getItem("bestBrain")){
             const savedBrain = JSON.parse(localStorage.getItem("bestBrain"));
             const savedNN = reviveBrain(savedBrain);
             const savedFlat = flattenBrainInline(savedNN);

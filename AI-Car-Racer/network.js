@@ -20,10 +20,15 @@ class NeuralNetwork{
         }
     }
 
+    // Phase A0: hidden levels use tanh; the final (output) level keeps the
+    // hard threshold so car.js can treat outputs as booleans (controls.forward
+    // = outputs[0]). A tanh on the last level would emit floats like -0.5
+    // which JS sees as truthy, pinning the controls "on" every tick.
     static feedForward(givenInputs,network){
-        let outputs=Level.feedForward(givenInputs,network.levels[0]);
-        for(let i=1;i<network.levels.length;i++){
-            outputs=Level.feedForward(outputs,network.levels[i]);
+        const L = network.levels.length;
+        let outputs = Level.feedForward(givenInputs, network.levels[0], L === 1);
+        for(let i=1;i<L;i++){
+            outputs = Level.feedForward(outputs, network.levels[i], i === L - 1);
         }
         return outputs;
     }
@@ -64,22 +69,33 @@ class Level{
         for(let k=0;k<b.length;k++) b[k] = Math.random()*2-1;
     }
 
-    static feedForward(givenInputs,level){
+    static feedForward(givenInputs,level,isOutput){
         const inC = level.inputCount, outC = level.outputCount;
         const inputs = level.inputs, outputs = level.outputs;
         const weights = level.weights, biases = level.biases;
         // Copy inputs into scratch (givenInputs may be a plain Array from the
         // sensor path — we want the contiguous Float32Array for the loop).
         for(let i=0;i<inC;i++) inputs[i] = givenInputs[i];
-        for(let i=0;i<outC;i++){
-            let sum = 0;
-            // Flat index: weight from input j to output i lives at j*outC+i.
-            let k = i;
-            for(let j=0;j<inC;j++){
-                sum += inputs[j] * weights[k];
-                k += outC;
+        if (isOutput){
+            for(let i=0;i<outC;i++){
+                let sum = 0;
+                let k = i;
+                for(let j=0;j<inC;j++){
+                    sum += inputs[j] * weights[k];
+                    k += outC;
+                }
+                outputs[i] = sum > biases[i] ? 1 : 0;
             }
-            outputs[i] = sum > biases[i] ? 1 : 0;
+        } else {
+            for(let i=0;i<outC;i++){
+                let sum = 0;
+                let k = i;
+                for(let j=0;j<inC;j++){
+                    sum += inputs[j] * weights[k];
+                    k += outC;
+                }
+                outputs[i] = Math.tanh(sum - biases[i]);
+            }
         }
         return outputs;
     }
