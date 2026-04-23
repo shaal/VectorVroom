@@ -63,9 +63,10 @@ const TICK_BUDGET_MS = 20;
 // Flat-brain layout — see brainCodec.js on the main side. Hard-coded here so
 // the worker doesn't have to importScripts a module (importScripts only loads
 // classic scripts). If TOPOLOGY changes upstream, bump both sides.
-// Phase P1: [10,8,4] topology (7 rays + speed + local_forward + local_right).
-const FLAT_LENGTH = 124;
-const TOPOLOGY = [10, 8, 4];
+// Phase P5: [10,16,4] topology — hidden width 8→16 capacity bump for the
+// Triangle-apex policy. Inputs unchanged from P1 (7 rays + speed + lf + lr).
+const FLAT_LENGTH = 244;
+const TOPOLOGY = [10, 16, 4];
 
 // --- message handling --------------------------------------------------------
 
@@ -450,7 +451,7 @@ function endGen() {
     }
 
     // Elite's last-tick hidden-layer activations for SONA trajectory
-    // recording. Network topology is [10, 8, 4]; level 0's outputs is the
+    // recording. Network topology is [10, 16, 4]; level 0's outputs is the
     // most informative internal state. Copied (not transferred in-place)
     // because the worker continues to own the underlying brain object.
     let bestHiddenActivations = null;

@@ -39,7 +39,7 @@ class Car{
             // "fraction of the longest possible straight line." Preserves the
             // distance signal that A1's unit-vector variant erased.
             this.brain=new NeuralNetwork(
-                [this.sensor.rayCount+3,8,4]
+                [this.sensor.rayCount+3,16,4]
             );
         }
         this.controls=new Controls(controlType);

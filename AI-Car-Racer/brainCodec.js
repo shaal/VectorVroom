@@ -1,8 +1,9 @@
-// Phase P1 — input width bumped 8→10 to carry two extra lidar rays
-// (rayCount 5→7) closing the 30° angular blind gap that was hiding apex
-// corners. Flat layout: 10*8+8 (hidden) + 8*4+4 (output) = 88 + 36.
-export const TOPOLOGY = [10, 8, 4];
-export const FLAT_LENGTH = 124;
+// Phase P5 — hidden width bumped 8→16 to test whether apex policy
+// (slow-near-walls + steer + commit-through-narrowing) needs more
+// representational capacity than 8 units provide. Flat layout:
+// 10*16+16 (hidden) + 16*4+4 (output) = 176 + 68 = 244.
+export const TOPOLOGY = [10, 16, 4];
+export const FLAT_LENGTH = 244;
 // Bump whenever the network's *inference semantics* or wire shape change in a
 // way that makes stored brains behave differently at runtime. Inference-only
 // changes (A0: hidden-layer tanh swap) count — the weights load fine but
@@ -12,8 +13,9 @@ export const FLAT_LENGTH = 124;
 //   3 — A1 unit-vector direction (reverted; see arch-a1/PROOF.md)
 //   4 — A1' scaled-distance direction
 //   5 — P1 rayCount 5→7 (input width 8→10)
+//   6 — P5 hidden width 8→16 (capacity bump for Triangle apex)
 // v3 is skipped so any testers whose localStorage holds '3' from A1 get wiped.
-export const BRAIN_SCHEMA_VERSION = 5;
+export const BRAIN_SCHEMA_VERSION = 6;
 
 function flatLengthFor(topology) {
   let n = 0;
