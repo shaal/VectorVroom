@@ -457,7 +457,7 @@ function makeBestCarProxy(){
         speed: 0, maxSpeed: 0,
         checkPointsCount: 0, laps: 0, lapTimes: '--',
         controls: { forward: false, left: false, right: false, reverse: false },
-        sensor: { rayCount: 5, rays: [], readings: [] }
+        sensor: { rayCount: 7, rays: [], readings: [] }
     };
     // Lazy-inflated brain — save() and archiveBrain() both read bestCar.brain.
     // We key the cache on _cachedBestBrainSeq so a stale inflate survives only
@@ -583,12 +583,12 @@ function handleGenEnd(m){
 // Applies ruvector seeding / localStorage fallback + mutation directly on flat
 // weights (no intermediate NeuralNetwork objects for the bulk of the population).
 // -----------------------------------------------------------------------------
-const FLAT_LENGTH = 108;
+const FLAT_LENGTH = 124;
 // Mirror of brainCodec.BRAIN_SCHEMA_VERSION — duplicated because main.js is a
 // classic script and can't import ES modules. Keep in sync with brainCodec.js.
 // Used to gate the localStorage.bestBrain seeding path below; ruvector owns the
 // actual schema migration (see migrateBrainSchemaIfNeeded in ruvectorBridge.js).
-const BRAIN_SCHEMA_VERSION = 4;
+const BRAIN_SCHEMA_VERSION = 5;
 
 function flattenBrainInline(brain){
     const out = new Float32Array(FLAT_LENGTH);
@@ -606,7 +606,7 @@ function inflateBrainInline(flat){
     if (!flat) return null;
     const NN = globalThis.NeuralNetwork;
     if (!NN) return null;
-    const net = new NN([8, 8, 4]);
+    const net = new NN([10, 8, 4]);
     let k = 0;
     for (let L = 0; L < net.levels.length; L++){
         const level = net.levels[L];

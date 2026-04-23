@@ -1,8 +1,8 @@
-// Phase A1' — input width bumped 6→8 to carry the two track-orientation
-// features (car-local direction to next checkpoint, scaled by canvas
-// diagonal). Flat layout: 8*8+8 (hidden) + 8*4+4 (output) = 72 + 36.
-export const TOPOLOGY = [8, 8, 4];
-export const FLAT_LENGTH = 108;
+// Phase P1 — input width bumped 8→10 to carry two extra lidar rays
+// (rayCount 5→7) closing the 30° angular blind gap that was hiding apex
+// corners. Flat layout: 10*8+8 (hidden) + 8*4+4 (output) = 88 + 36.
+export const TOPOLOGY = [10, 8, 4];
+export const FLAT_LENGTH = 124;
 // Bump whenever the network's *inference semantics* or wire shape change in a
 // way that makes stored brains behave differently at runtime. Inference-only
 // changes (A0: hidden-layer tanh swap) count — the weights load fine but
@@ -10,9 +10,10 @@ export const FLAT_LENGTH = 108;
 // mislead rather than seed. Versions:
 //   2 — A0 tanh on hidden
 //   3 — A1 unit-vector direction (reverted; see arch-a1/PROOF.md)
-//   4 — A1' scaled-distance direction (current)
+//   4 — A1' scaled-distance direction
+//   5 — P1 rayCount 5→7 (input width 8→10)
 // v3 is skipped so any testers whose localStorage holds '3' from A1 get wiped.
-export const BRAIN_SCHEMA_VERSION = 4;
+export const BRAIN_SCHEMA_VERSION = 5;
 
 function flatLengthFor(topology) {
   let n = 0;
