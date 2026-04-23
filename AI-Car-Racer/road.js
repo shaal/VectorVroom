@@ -31,6 +31,19 @@ class Road{
         this.innerList = this.roadEditor.points;
         this.outerList=this.roadEditor.points2;
         this.checkPointList=this.roadEditor.checkPointListEditor;
+        // Reset borders to just the canvas edges before appending wall
+        // segments. Without this, repeated calls (e.g. nextPhase triggers
+        // submitTrack on both phase-3 and phase-4 transitions, so auto-boot
+        // calls getTrack twice) leave duplicated wall segments in borders
+        // and balloon the collision-test workload.
+        const w = this.right - this.left;
+        const h = this.bottom - this.top;
+        this.borders = [
+            [{x:this.left,  y:this.top   },{x:this.left,  y:this.bottom}],
+            [{x:this.right, y:this.top   },{x:this.right, y:this.bottom}],
+            [{x:this.left,  y:this.top   },{x:this.right, y:this.top   }],
+            [{x:this.left,  y:this.bottom},{x:this.right, y:this.bottom}]
+        ];
         for(let i=0; i<this.innerList.length; i++){
             this.borders.push([this.innerList[i],this.innerList[(i+1)%this.innerList.length]]);
         }

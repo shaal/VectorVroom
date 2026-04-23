@@ -4,12 +4,17 @@
 //
 // Spawn: the car's initial position is the midpoint of checkpoint[0], with
 // heading pointing toward the midpoint of checkpoint[1] (main.js:16-46).
-// For every preset, cp[0] is placed where the car has room to drive forward.
+// For every preset, cp[0] is in the bottom-right area and cp[1] is placed
+// directly ABOVE cp[0] (mirrored across the track's y=900 axis), so the
+// spawn heading works out to 0° — cars start facing screen-up, the natural
+// "forward" direction for a top-down racer. This also keeps the sensor ray
+// orientation consistent across presets, which helps the ruvector cross-
+// track seed recall.
 //
-// Checkpoint count: each preset uses 4 ordered gates — top, left, bottom,
-// right-mid — giving a denser fitness gradient than the previous 3 (a 4th
-// reward along each lap helps partial survivors get ranked during early
-// generations, before any car can complete a full lap). See
+// Checkpoint order (4 gates per preset): bottom-right → top-right →
+// top-mid → left-mid → back to bottom-right (CW in canvas). The 4-gate
+// layout gives a 33% denser fitness gradient than the old 3-gate one,
+// helping partial survivors get ranked before any full laps. See
 // sim-worker.js:295 for the fitness formula consuming checkPointsCount.
 //
 // Data format matches roadEditor.js:
@@ -42,10 +47,10 @@ window.TRACK_PRESETS = [
       { x: 250,  y: 1500 }
     ],
     checkPointListEditor: [
-      [{ x: 1600, y: 300  }, { x: 1600, y: 700  }],  // 1: top-mid (spawn)
-      [{ x: 250,  y: 900  }, { x: 650,  y: 900  }],  // 2: left-mid
-      [{ x: 1600, y: 1500 }, { x: 1600, y: 1100 }],  // 3: bottom-mid
-      [{ x: 3100, y: 900  }, { x: 2450, y: 900  }]   // 4: right-mid
+      [{ x: 3100, y: 1200 }, { x: 2450, y: 1200 }],  // 1: right-low (spawn)
+      [{ x: 3100, y: 600  }, { x: 2450, y: 600  }],  // 2: right-top (above cp[0] → heading up)
+      [{ x: 1600, y: 300  }, { x: 1600, y: 700  }],  // 3: top-mid
+      [{ x: 250,  y: 900  }, { x: 650,  y: 900  }]   // 4: left-mid
     ]
   },
   {
@@ -83,19 +88,20 @@ window.TRACK_PRESETS = [
       { x: 2899, y: 600  }
     ],
     checkPointListEditor: [
-      [{ x: 1600, y: 300  }, { x: 1600, y: 600  }],  // 1: top (spawn)
-      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }],  // 2: left
-      [{ x: 1600, y: 1500 }, { x: 1600, y: 1200 }],  // 3: bottom
-      [{ x: 3100, y: 900  }, { x: 2550, y: 900  }]   // 4: right
+      // Gate at θ=45° (lower-right diagonal). Inner at (2272,1112), outer (2660,1324).
+      [{ x: 2660, y: 1324 }, { x: 2272, y: 1112 }],  // 1: lower-right (spawn)
+      // Mirror of cp[0] across y=900 → upper-right diagonal, directly above.
+      [{ x: 2660, y: 476  }, { x: 2272, y: 688  }],  // 2: upper-right (heading up)
+      [{ x: 1600, y: 300  }, { x: 1600, y: 600  }],  // 3: top
+      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }]   // 4: left
     ]
   },
   {
     name: 'Triangle',
     description: 'Apex points left; spawn sits in the spacious right lobe.',
-    // Apex-left so the spawn (cp[0] on the right edge) sits comfortably in
-    // the wide right lobe. The previous cp-order put cp[0] at the left apex,
-    // pinning the spawn into the narrow corner — this rotation matches the
-    // original design intent.
+    // Apex-left triangle. cp[0] sits low on the right edge and cp[1] sits
+    // high on the same edge (directly above), so the car spawns facing
+    // screen-up and drives up the right edge before cornering toward the apex.
     points: [
       { x: 500,  y: 900  }, // left apex (inner)
       { x: 2400, y: 500  }, // top-right
@@ -107,10 +113,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1550 }  // bottom-right
     ],
     checkPointListEditor: [
-      [{ x: 3100, y: 900  }, { x: 2400, y: 900  }], // 1: right-mid (spawn)
-      [{ x: 1500, y: 550  }, { x: 1500, y: 720  }], // 2: top edge
-      [{ x: 150,  y: 900  }, { x: 500,  y: 900  }], // 3: left apex
-      [{ x: 1500, y: 1250 }, { x: 1500, y: 1080 }]  // 4: bottom edge
+      [{ x: 3100, y: 1200 }, { x: 2400, y: 1200 }], // 1: right-low (spawn)
+      [{ x: 3100, y: 600  }, { x: 2400, y: 600  }], // 2: right-top (above cp[0] → heading up)
+      [{ x: 1500, y: 550  }, { x: 1500, y: 720  }], // 3: top edge
+      [{ x: 150,  y: 900  }, { x: 500,  y: 900  }]  // 4: left apex
     ]
   },
   {
@@ -135,10 +141,13 @@ window.TRACK_PRESETS = [
       { x: 2350, y: 380  }
     ],
     checkPointListEditor: [
-      [{ x: 1600, y: 380  }, { x: 1600, y: 510  }], // 1: top flat (spawn)
-      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }], // 2: left vertex
-      [{ x: 1600, y: 1420 }, { x: 1600, y: 1290 }], // 3: bottom flat
-      [{ x: 3100, y: 900  }, { x: 2550, y: 900  }]  // 4: right vertex
+      // Lower-right slant-edge midpoint. Inner edge (2550,900)↔(2075,1290)
+      // mid (2313,1095); outer edge (3100,900)↔(2350,1420) mid (2725,1160).
+      [{ x: 2725, y: 1160 }, { x: 2313, y: 1095 }], // 1: lower-right slant (spawn)
+      // Mirror across y=900 → upper-right slant, directly above.
+      [{ x: 2725, y: 640  }, { x: 2313, y: 705  }], // 2: upper-right slant (heading up)
+      [{ x: 1600, y: 380  }, { x: 1600, y: 510  }], // 3: top flat
+      [{ x: 100,  y: 900  }, { x: 650,  y: 900  }]  // 4: left vertex
     ]
   },
   {
@@ -163,10 +172,13 @@ window.TRACK_PRESETS = [
       { x: 2200, y: 1550 }
     ],
     checkPointListEditor: [
-      [{ x: 1500, y: 320  }, { x: 1500, y: 610  }], // 1: top (spawn)
-      [{ x: 300,  y: 900  }, { x: 700,  y: 900  }], // 2: left
-      [{ x: 1500, y: 1510 }, { x: 1500, y: 1180 }], // 3: bottom
-      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]  // 4: right apex
+      // Lower-right edge midpoint. Inner edge (2500,900)↔(2000,1250)
+      // mid (2250,1075); outer edge (3100,900)↔(2200,1550) mid (2650,1225).
+      [{ x: 2650, y: 1225 }, { x: 2250, y: 1075 }], // 1: lower-right edge (spawn)
+      // Mirror across y=900 → upper-right edge, directly above.
+      [{ x: 2650, y: 575  }, { x: 2250, y: 725  }], // 2: upper-right edge (heading up)
+      [{ x: 1500, y: 320  }, { x: 1500, y: 610  }], // 3: top
+      [{ x: 300,  y: 900  }, { x: 700,  y: 900  }]  // 4: left
     ]
   },
 
@@ -228,10 +240,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // 1: top after Roggia (spawn)
-      [{ x: 200,  y: 900  }, { x: 500,  y: 900  }],  // 2: left link
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }],  // 3: bottom after Ascari
-      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
+      [{ x: 3100, y: 1100 }, { x: 2500, y: 1100 }],  // 1: pit-exit right-low (spawn)
+      [{ x: 3100, y: 700  }, { x: 2500, y: 700  }],  // 2: pit-entry right-top (heading up)
+      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // 3: top after Roggia
+      [{ x: 200,  y: 900  }, { x: 500,  y: 900  }]   // 4: left link
     ]
   },
 
@@ -284,10 +296,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // 1: mid Becketts (spawn)
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: Club hairpin apex
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }],  // 3: bot after Stowe
-      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
+      [{ x: 3100, y: 1100 }, { x: 2500, y: 1100 }],  // 1: pit-exit right-low (spawn)
+      [{ x: 3100, y: 700  }, { x: 2500, y: 700  }],  // 2: pit-entry right-top (heading up)
+      [{ x: 1500, y: 350  }, { x: 1500, y: 800  }],  // 3: mid Becketts
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }]   // 4: Club hairpin apex
     ]
   },
 
@@ -337,10 +349,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1100, y: 300  }, { x: 1100, y: 700  }],  // 1: after Piscine (spawn)
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: Grand Hotel
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1100 }],  // 3: after Mirabeau
-      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
+      [{ x: 3100, y: 1100 }, { x: 2500, y: 1100 }],  // 1: pit-exit right-low (spawn)
+      [{ x: 3100, y: 700  }, { x: 2500, y: 700  }],  // 2: pit-entry right-top (heading up)
+      [{ x: 1100, y: 300  }, { x: 1100, y: 700  }],  // 3: after Piscine
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }]   // 4: Grand Hotel
     ]
   },
 
@@ -393,10 +405,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1200, y: 350  }, { x: 1200, y: 800  }],  // 1: after Les Combes (spawn)
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: La Source
-      [{ x: 1500, y: 1500 }, { x: 1500, y: 1150 }],  // 3: mid Pouhon
-      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
+      [{ x: 3100, y: 1100 }, { x: 2500, y: 1100 }],  // 1: pit-exit right-low (spawn)
+      [{ x: 3100, y: 700  }, { x: 2500, y: 700  }],  // 2: pit-entry right-top (heading up)
+      [{ x: 1200, y: 350  }, { x: 1200, y: 800  }],  // 3: after Les Combes
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }]   // 4: La Source
     ]
   },
 
@@ -456,10 +468,10 @@ window.TRACK_PRESETS = [
       { x: 3100, y: 1100 }
     ],
     checkPointListEditor: [
-      [{ x: 1450, y: 400  }, { x: 1450, y: 800  }],  // 1: mid Esses (spawn)
-      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }],  // 2: Hairpin
-      [{ x: 1500, y: 1600 }, { x: 1500, y: 1200 }],  // 3: mid Spoon
-      [{ x: 3100, y: 900  }, { x: 2500, y: 900  }]   // 4: right-mid (pre-spawn)
+      [{ x: 3100, y: 1100 }, { x: 2500, y: 1100 }],  // 1: pit-exit right-low (spawn)
+      [{ x: 3100, y: 700  }, { x: 2500, y: 700  }],  // 2: pit-entry right-top (heading up)
+      [{ x: 1450, y: 400  }, { x: 1450, y: 800  }],  // 3: mid Esses
+      [{ x: 100,  y: 900  }, { x: 400,  y: 900  }]   // 4: Hairpin
     ]
   }
 ];
@@ -514,6 +526,24 @@ window.loadTrackPreset = function(nameOrIdx) {
     road.roadEditor.points               = copy.points;
     road.roadEditor.points2              = copy.points2;
     road.roadEditor.checkPointListEditor = copy.checkPointListEditor;
+    // Rebuild road.borders from the new editor geometry. Without this the
+    // physics keeps using the PREVIOUS preset's walls while the render shows
+    // the new ones — producing "invisible wall" crashes on driving forward.
+    // Mirrors the rebuild in __switchTrackInMemory (main.js:756-777).
+    try {
+      road.innerList = [];
+      road.outerList = [];
+      road.checkPointList = [];
+      const w = (typeof canvas !== 'undefined') ? canvas.width  : 3200;
+      const h = (typeof canvas !== 'undefined') ? canvas.height : 1800;
+      road.borders = [
+        [{x:0,y:0},{x:0,y:h}],
+        [{x:w,y:0},{x:w,y:h}],
+        [{x:0,y:0},{x:w,y:0}],
+        [{x:0,y:h},{x:w,y:h}]
+      ];
+      road.getTrack();
+    } catch (_) {}
     // Recompute the spawn arrow from the new cp[0] so edit mode shows where
     // training will actually place the car — otherwise the START triangle
     // lags behind the track geometry until the next phase-4 begin().
@@ -522,6 +552,32 @@ window.loadTrackPreset = function(nameOrIdx) {
         computeStartInfoInPlace(copy.checkPointListEditor);
       }
     } catch (_) {}
+    // Teleport existing player cars to the fresh spawn. Without this they
+    // stay at the previous preset's spawn location and drive straight into
+    // the new track's walls.
+    try {
+      if (typeof playerCar !== 'undefined' && playerCar) {
+        playerCar.x = startInfo.x; playerCar.y = startInfo.y;
+        playerCar.angle = startInfo.heading || 0;
+        playerCar.speed = 0;
+        playerCar.velocity = { x: 0, y: 0 };
+        playerCar.damaged = false;
+        playerCar.checkPointsCount = 0;
+        playerCar.checkPointsPassed = [];
+      }
+      if (typeof playerCar2 !== 'undefined' && playerCar2) {
+        playerCar2.x = startInfo.x; playerCar2.y = startInfo.y;
+        playerCar2.angle = startInfo.heading || 0;
+        playerCar2.speed = 0;
+        playerCar2.velocity = { x: 0, y: 0 };
+        playerCar2.damaged = false;
+        playerCar2.checkPointsCount = 0;
+        playerCar2.checkPointsPassed = [];
+      }
+    } catch (_) {}
+    // Force the AI-worker to re-init with the new borders/checkpoints on the
+    // next begin() — otherwise AI cars would also race against stale walls.
+    try { if (typeof invalidateWorkerInit === 'function') invalidateWorkerInit(); } catch (_) {}
     try { road.roadEditor.redraw(); } catch (_) { /* redraw only works in phase 1/2 */ }
   }
 

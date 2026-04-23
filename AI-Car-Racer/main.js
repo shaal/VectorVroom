@@ -28,19 +28,23 @@ function computeStartInfoInPlace(cpList){
         hx = -(g0[1].y - g0[0].y);
         hy =  (g0[1].x - g0[0].x);
     }
-    // Car uses sin=dx, cos=dy convention (car.js:177-178), so heading = atan2(dx, dy).
-    const heading = Math.atan2(hx, hy);
-    // Offset the spawn forward along the heading by a safe distance. The first
-    // checkpoint gate often runs wall-to-wall (e.g. the Triangle preset's left
-    // apex), so sitting exactly on the gate leaves no lateral margin for a
-    // 30×50 car body under heading jitter. One car-length of forward offset
-    // puts the spawn deeper into the corridor while preserving "starts at the
-    // first checkpoint" semantics (the car still has to pass cp0 on its way
-    // back around on lap 2+).
+    // Car motion convention (car.js:322-323): `this.x -= velocity.x` where
+    // velocity = (sin(angle), cos(angle)) * speed — so the car moves in
+    // direction (-sin, -cos), not (sin, cos). To face cp[1] we therefore need
+    // atan2(-hx, -hy), not atan2(hx, hy). The earlier code had the sign
+    // inverted, which worked by accident for axis-aligned gates (polygon
+    // overlap masked the bug) but drove cars away from cp[1] on diagonal
+    // gates like the Oval's lower-right slant.
+    const heading = Math.atan2(-hx, -hy);
+    // Spawn just shy of cp[0] on the side opposite cp[1], so simple forward
+    // driving crosses cp[0] in the first frame. Offset ≈ 20px is small enough
+    // that the 30×50 car polygon already straddles cp[0] at spawn (leading
+    // edge ~5px past the gate), yet large enough to keep the tip clear of
+    // the gate endpoints that sit on the corridor walls.
     const len = Math.sqrt(hx*hx + hy*hy);
-    const offset = Math.min(80, len * 0.15);   // ≤15% toward cp1, capped at 80px
-    startInfo.x = mx + (len > 0 ? hx / len * offset : 0);
-    startInfo.y = my + (len > 0 ? hy / len * offset : 0);
+    const offset = Math.min(20, len * 0.05);
+    startInfo.x = mx - (len > 0 ? hx / len * offset : 0);
+    startInfo.y = my - (len > 0 ? hy / len * offset : 0);
     startInfo.heading = heading;
     return startInfo;
 }
@@ -294,7 +298,11 @@ function metricsEnsureHud(){
     if (metricsHud) return metricsHud;
     metricsHud = document.createElement('div');
     metricsHud.id = 'metrics-hud';
-    metricsHud.style.cssText = 'position:fixed;top:8px;right:196px;z-index:99998;' +
+    // Stacked on the LEFT under the Guided-tour pill.
+    // .eli15-fab sits at top:16px (~40px tall); .eli15-tour-fab stacks below
+    // it at top:calc(16 + 40 + 8)=64px (~40px tall). Metrics goes below that:
+    // top = 64 + 40 + 8 = 112px. Left-aligned with the pills at 16px.
+    metricsHud.style.cssText = 'position:fixed;top:112px;left:16px;z-index:99998;' +
         'background:rgba(12,14,18,.88);color:#a8c8ff;padding:8px 10px;' +
         'border-radius:4px;font:11px/1.35 ui-monospace,Menlo,monospace;' +
         'pointer-events:none;min-width:180px;';

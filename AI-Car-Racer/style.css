@@ -766,16 +766,30 @@ label {
 #inputsContainer {
     display: flex;
     flex-direction: column;
-    gap: var(--sp-2);
+    /* No uniform gap — we want asymmetric spacing: the output label should
+       sit tight against its own slider, and the NEXT slider should sit
+       further down. */
+    gap: 0;
     padding: var(--sp-2) var(--sp-3) var(--sp-3);
     background: var(--surface-2);
     border: 1px solid var(--line);
     border-radius: var(--r-md);
 }
+/* Sliders (all but the first) get a bigger top margin, pushing them away
+   from the preceding output so each label visually belongs to its slider
+   above. */
+#inputsContainer > input[type="range"] { margin-top: var(--sp-3); }
+#inputsContainer > input[type="range"]:first-child { margin-top: 0; }
 #inputsContainer output {
     font-size: 0.82em;
     color: var(--ink-700);
+    /* Small negative margin pulls the label tight under the slider knob. */
+    margin-top: -2px;
+    line-height: 1.1;
 }
+/* Sim Speed label sits after the last output — keep it spaced from the
+   preceding variance label. */
+#inputsContainer > #simSpeedLabel { margin-top: var(--sp-3) !important; }
 
 #timer {
     text-align: center;

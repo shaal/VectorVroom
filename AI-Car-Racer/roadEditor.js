@@ -3,25 +3,42 @@ class roadEditor{
         this.startInfo=startInfo;
         this.checkPointMode=false;
         this.editMode = true;
+        // Fresh visitors land with the Rectangle preset exactly (same walls
+        // AND same 4-gate bottom-right-spawn checkpoint layout as clicking
+        // "Load preset: Rectangle" from the dropdown). If TRACK_PRESETS is
+        // loaded by the time we boot (it's a sibling script), mirror it;
+        // otherwise fall back to the hardcoded values that match the preset
+        // at the time of this file's authoring. localStorage always wins.
+        const rectPreset = (typeof window !== 'undefined' && window.TRACK_PRESETS && window.TRACK_PRESETS[0]) || null;
         if(localStorage.getItem("trackInner") && localStorage.getItem("trackOuter")){
             this.points=JSON.parse(localStorage.getItem("trackInner"));
             this.points2=JSON.parse(localStorage.getItem("trackOuter"));
         }
+        else if (rectPreset){
+            this.points  = rectPreset.points.map(p => ({x:p.x, y:p.y}));
+            this.points2 = rectPreset.points2.map(p => ({x:p.x, y:p.y}));
+        }
         else{
-            // Rectangle preset (mirrors trackPresets.js entry "Rectangle") — a
-            // fresh visitor lands with a usable corridor so main.js can boot
-            // straight into phase-4 training and show cars racing immediately.
             this.points  = [{x:650,y:700},{x:2450,y:700},{x:2450,y:1100},{x:650,y:1100}];
             this.points2 = [{x:250,y:300},{x:3100,y:300},{x:3100,y:1500},{x:250,y:1500}];
         }
         if(localStorage.getItem("checkPointList")){
             this.checkPointListEditor=JSON.parse(localStorage.getItem("checkPointList"));
         }
+        else if (rectPreset){
+            this.checkPointListEditor = rectPreset.checkPointListEditor.map(seg => [
+                { x: seg[0].x, y: seg[0].y },
+                { x: seg[1].x, y: seg[1].y }
+            ]);
+        }
         else{
+            // Fallback mirroring Rectangle preset's 4-gate layout: bottom-right
+            // spawn, right-top, top-mid, left-mid.
             this.checkPointListEditor = [
-                [{x:1600,y:300},{x:1600,y:700}],
-                [{x:250,y:900},{x:650,y:900}],
-                [{x:1600,y:1500},{x:1600,y:1100}]
+                [{x:3100,y:1200},{x:2450,y:1200}],
+                [{x:3100,y:600 },{x:2450,y:600 }],
+                [{x:1600,y:300 },{x:1600,y:700 }],
+                [{x:250, y:900 },{x:650, y:900 }]
             ];
         }
         this.drag_point = -1;

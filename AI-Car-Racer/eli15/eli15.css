@@ -88,9 +88,13 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 1.1em;
+    /* Compact circular badge — a "?" glyph in an ~14px disc. Previously this
+       had padding:0 0.3em + min-width:1.1em which produced a pill ~1.7em
+       wide; that ate space next to every slider label. Using width=height
+       with no padding gives a tidy round indicator. */
+    width: 1.1em;
     height: 1.1em;
-    padding: 0 0.3em;
+    padding: 0;
     margin-left: 0.35em;
     border-radius: 999px;
     background: #fff4e2;
@@ -107,6 +111,7 @@
     vertical-align: baseline;
     user-select: none;
     transition: background-color 100ms ease-out;
+    flex: 0 0 auto;
 }
 [data-eli15]::before { content: '?'; }
 [data-eli15]:empty::before { content: '?'; }

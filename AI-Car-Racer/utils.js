@@ -124,7 +124,7 @@ function phaseToLayout(phase){
                 <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('grind')" title="Elite drives laps: N=500, 20×, 15s, variance 0.20">🏎️ Grind</button>
                 <button class='controlButton' style='flex:1;min-width:0;' onclick="applyTrainingPreset('polish')" title="Refine competent brain: N=1000, 2×, 25s, variance 0.05">✨ Polish</button>
             </div>
-            <details id="trainingTuning" class="more-actions">
+            <details id="trainingTuning" class="more-actions" open>
                 <summary>Training tuning (sliders)</summary>
                 <div id="inputsContainer">
                     <input min="0" max="2000" id="batchSizeInput" step="50" onkeydown="return false;" type="range" onchange='setN(this.value)' oninput="document.getElementById('batchSizeOutput').value = 'Batch Size: ' + this.value" >
@@ -147,7 +147,7 @@ function phaseToLayout(phase){
                     </label>
                 </div>
             </details>
-            <details id='moreActions' class='more-actions'>
+            <details id='moreActions' class='more-actions' open>
                 <summary>More actions</summary>
                 <div class='more-actions-body'>
                     <button class='controlButton' onclick='destroyBrain(); nextBatch();'>Reset Brain</button>
@@ -175,6 +175,17 @@ function phaseToLayout(phase){
                 document.getElementById(idArray[i]+"Output").value = document.getElementById(idArray[i]+"Output").name + ": " +  window[idArray[i]];
                 document.getElementById(idArray[i]+"Input").setAttribute("value", window[idArray[i]]);
             }
+            // Move "More actions" panel to sit below #rv-panel (Vector Memory)
+            // so it lives at the bottom of the right column instead of above
+            // it. The details element was rendered inside #verticalButtons by
+            // the innerHTML above; we relocate it after the DOM is committed.
+            try {
+                const moreActionsEl = document.getElementById('moreActions');
+                const rvPanelEl = document.getElementById('rv-panel');
+                if (moreActionsEl && rvPanelEl && rvPanelEl.parentNode) {
+                    rvPanelEl.parentNode.insertBefore(moreActionsEl, rvPanelEl.nextSibling);
+                }
+            } catch (_) {}
             showInputCanvas();
             showGraphCanvas();
             graphProgress();
