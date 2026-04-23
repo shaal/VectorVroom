@@ -193,6 +193,24 @@ Statistically indistinguishable. Slightly higher variance (tri3 was an outlier l
 
 CSVs: `docs/plan/ruvector-proof/phase3/`.
 
+### Phase 3.5 — Ruvector proof run (2026-04-22)
+
+**Shipped.** Tight scope — the two experiments the user's original question ("does it get smarter across tracks as experience accumulates?") most directly hinges on:
+
+1. **Close-the-loop fix** — `__runBenchmark` now calls `endPhase4Trajectory` at run completion so SONA patterns crystallize (`agent.forceLearn` fires), then re-opens a fresh trajectory for the next run. Without this, `sona.patterns` stayed at 0 because the trajectory never closed. Verified: 3-gen smoke test takes patterns from 0 → 9, the full experiment chain reaches 96.
+2. **`__switchTrackInMemory(name)` helper** — rebuilds `road.borders` / `road.checkPointList` and re-embeds the track vector without a page reload, so SONA's in-memory pattern bank (which does NOT persist to IndexedDB) survives a track switch. Used by the transfer experiment.
+3. **Cross-track transfer experiment** — 3 replicates of {clear archive → train 30 gens Rectangle → in-memory switch to Triangle → train 30 gens}. Measured Triangle gen-0 / gen-1 / last-5 survival vs Phase 2's cold-tri control.
+
+**Headline result (the one that answers the user's question):**
+
+> Rectangle-seeded archive + Rectangle-trained SONA patterns **hurt** Triangle performance relative to cold-starting Triangle. Phase 2 cold-tri last-5 survival 0.714 ± 0.066; Phase 3.5 rect-seeded-tri last-5 survival 0.658 ± 0.030. Gen-0 gap is larger (~0.13 lower with seed).
+
+**What actually generalizes across track shapes** (found in Phases 1–2, confirmed by 3.5 negative result): the heading-relative sensor model plus track-relative spawn. The GA finds basic driving behavior fast when the input distribution at t=0 is similar across tracks. Ruvector's archive + SONA are valuable for **same-track continuation** (warm-restart a track you've trained on) — not cross-shape transfer.
+
+Full numbers, per-replicate details, interpretation, and caveats in `docs/plan/ruvector-proof/phase3.5/PROOF.md`.
+
+**What this reframes about the overall plan:** Phase 3.5 was originally scoped as "the proof run that makes ruvector's value visible." The data says ruvector's value lives in a different scenario than the one we tested. Updating the UI or docs to claim cross-track transfer would be incorrect. The untested positive scenario — same-track warm-restart with Phase 3's SONA wiring on — is the follow-up experiment worth running.
+
 ---
 
 ## Phase 2 — Pose randomization during training (~1–2 sittings)

@@ -738,6 +738,32 @@ function performBegin(N){
 // reuses road.borders but with different geometry).
 function invalidateWorkerInit(){ workerInited = false; }
 
+// In-memory track switch for benchmarking — preserves SONA patterns and other
+// window-level state that page reload would wipe. Caller is responsible for
+// ensuring the preset exists in window.TRACK_PRESETS.
+window.__switchTrackInMemory = function(name){
+    if (typeof loadTrackPreset !== 'function') return false;
+    if (!loadTrackPreset(name)) return false;
+    // road.getTrack() appends to road.borders, so reset to the canvas-edge
+    // quad before rebuilding (mirrors the initial state in road.js:18-22).
+    road.innerList = [];
+    road.outerList = [];
+    road.checkPointList = [];
+    const w = canvas.width, h = canvas.height;
+    road.borders = [
+        [{x:0,y:0},{x:0,y:h}],
+        [{x:w,y:0},{x:w,y:h}],
+        [{x:0,y:0},{x:w,y:0}],
+        [{x:0,y:h},{x:w,y:h}]
+    ];
+    try { road.getTrack(); } catch (_) {}
+    computeStartInfoInPlace(currentCheckpointList());
+    invalidateWorkerInit();
+    // Re-embed track vector for the new track so SONA patterns key correctly.
+    try { if (typeof embedCurrentTrack === 'function') embedCurrentTrack(); } catch (_) {}
+    return true;
+};
+
 // Called from the Reset Brain button — user-initiated restart, no archive.
 function nextBatch(){ begin(); }
 
@@ -1083,6 +1109,27 @@ window.__runBenchmark = async function(gens, opts){
         const rows = await promise;
         clearTimeout(watchdog);
         __benchmarkCtx = null;
+        // Close the SONA trajectory so patterns crystallize (endTrajectory calls
+        // agent.forceLearn, which bumps patterns_stored). Re-open immediately so
+        // subsequent benchmarks still record. endPhase4Trajectory no-ops cleanly
+        // if no trajectory is open or if SONA isn't ready.
+        try {
+            const b = window.__rvBridge;
+            if (!window.rvDisabled && b && b.info){
+                const info = b.info();
+                const trajOpen = info.sona && info.sona.trajectoryOpen;
+                if (trajOpen && b.endPhase4Trajectory){
+                    const finalFitness = rows.length ? (rows[rows.length - 1].bestFitness || 0) : 0;
+                    b.endPhase4Trajectory(finalFitness);
+                }
+                if (b.beginPhase4Trajectory){
+                    if (!window.currentTrackVec && typeof embedCurrentTrack === 'function'){
+                        try { embedCurrentTrack(); } catch (_) {}
+                    }
+                    b.beginPhase4Trajectory(window.currentTrackVec || null);
+                }
+            }
+        } catch (sonaErr){ console.warn('[sona] end/restart at bench boundary failed', sonaErr); }
         console.log('[bench] "' + label + '" complete, ' + rows.length + ' rows');
         if (opts.download !== false){
             try { window.__downloadCSV(label, rows); } catch (e){ console.warn('[bench] download failed', e); }
