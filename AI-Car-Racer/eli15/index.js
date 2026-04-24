@@ -118,6 +118,50 @@
       oneLiner: 'Swap the flat-space neighbour graph for a Poincaré-ball one; trees embed with less distortion.',
       loader: function () { return import('./chapters/hyperbolic-space.js'); },
     },
+    // ─── RuLake-inspired roadmap chapters (Phase 0 stubs; real content
+    //     ships phase-by-phase per docs/plan/rulake-inspired-features.md). ─
+    'warm-restart': {
+      title: 'Saving and reopening the whole brain archive',
+      oneLiner: 'A brain archive is a museum — you can save it, reopen it tomorrow, or give it to a friend.',
+      comingSoon: true,
+      loader: function () { return import('./chapters/warm-restart.js'); },
+    },
+    'quantization': {
+      title: 'Throwing away 31/32 bits and still finding the right neighbour',
+      oneLiner: 'RaBitQ + Hadamard: shrink the archive 32× without losing recall.',
+      comingSoon: true,
+      loader: function () { return import('./chapters/quantization.js'); },
+    },
+    'consistency-modes': {
+      title: 'Fresh / Eventual / Frozen — three ways training looks at the archive',
+      oneLiner: 'Re-query every generation, periodically, or lock in a snapshot. Three modes, one radio row.',
+      comingSoon: true,
+      loader: function () { return import('./chapters/consistency-modes.js'); },
+    },
+    'content-addressing': {
+      title: 'Giving every brain a fingerprint',
+      oneLiner: 'ID brains by hash of their weights; duplicates collide, the DAG stops double-counting, cross-tab sync becomes free.',
+      comingSoon: true,
+      loader: function () { return import('./chapters/content-addressing.js'); },
+    },
+    'federation': {
+      title: 'Asking two different maps of brain-space at once',
+      oneLiner: 'Query Euclidean + Hyperbolic in parallel; over-request k\' = k + ⌈√(k ln S)⌉; GNN reranks the union.',
+      comingSoon: true,
+      loader: function () { return import('./chapters/federation.js'); },
+    },
+    'cross-tab-federation': {
+      title: 'Two browser tabs training in sync',
+      oneLiner: 'BroadcastChannel + content-addressing = lockless cross-tab archive convergence.',
+      comingSoon: true,
+      loader: function () { return import('./chapters/cross-tab-federation.js'); },
+    },
+    'where-the-time-goes': {
+      title: 'Where each generation\'s milliseconds actually go',
+      oneLiner: 'Per-stage timings: HNSW / rerank / LoRA / sensor embed / GA. Observability as a teaching tool.',
+      comingSoon: true,
+      loader: function () { return import('./chapters/where-the-time-goes.js'); },
+    },
   };
 
   // In-memory chapter body cache: once loaded, reuse on subsequent opens.
