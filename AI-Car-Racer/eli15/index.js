@@ -22,7 +22,12 @@
   // Static map — edit one line here + drop one file in chapters/ to add a
   // chapter. `loader` returns a Promise<{default: ChapterBody}>; the import
   // is deferred until the user actually opens the chapter.
+  // Registry ordering is pedagogical (Phase 3B): Foundations → Vector memory
+  // basics → Lineage & reasoning → Geometry choice → RuLake-inspired
+  // extensions. The tour.js playlist follows the same arc. See
+  // docs/plan/rulake-inspired-features.md §3B.
   const REGISTRY = {
+    // ─── Foundations ───────────────────────────────────────────────────────
     'what-is-this-project': {
       title: 'What is this project even doing?',
       oneLiner: 'A browser-based genetic-algorithm racer with a vector-memory bridge.',
@@ -53,6 +58,8 @@
       oneLiner: 'Checkpoints passed + completed laps × track length.',
       loader: function () { return import('./chapters/fitness-function.js'); },
     },
+
+    // ─── Vector memory basics ──────────────────────────────────────────────
     'cnn-embedder': {
       title: 'Turning a track picture into 512 numbers',
       oneLiner: 'A tiny CNN squashes a track drawing into a fixed-length vector we can compare.',
@@ -63,20 +70,27 @@
       oneLiner: 'HNSW builds a multi-layer graph so queries only touch log(N) vectors.',
       loader: function () { return import('./chapters/vectordb-hnsw.js'); },
     },
+    'track-similarity': {
+      title: 'Not starting from scratch on every new track',
+      oneLiner: 'Use brains that did well on similar-shaped past tracks as starting seeds.',
+      loader: function () { return import('./chapters/track-similarity.js'); },
+    },
     'ema-reranker': {
       title: 'Learning which recommendations actually help',
       oneLiner: 'An EMA per retrieved brain nudges future rankings toward ones that paid off.',
       loader: function () { return import('./chapters/ema-reranker.js'); },
     },
+
+    // ─── Lineage & reasoning ───────────────────────────────────────────────
     'lineage': {
       title: 'Every brain has parents',
       oneLiner: 'parentIds + getLineage() reconstruct a brain\'s family tree on demand.',
       loader: function () { return import('./chapters/lineage.js'); },
     },
-    'track-similarity': {
-      title: 'Not starting from scratch on every new track',
-      oneLiner: 'Use brains that did well on similar-shaped past tracks as starting seeds.',
-      loader: function () { return import('./chapters/track-similarity.js'); },
+    'lineage-dag': {
+      title: 'Lineage as a DAG — a family tree with no time-loops',
+      oneLiner: 'Parents point to children; cycles rejected at insert. Powers the 🌳 Lineage viewer.',
+      loader: function () { return import('./chapters/lineage-dag.js'); },
     },
     'gnn': {
       title: 'GNN reranker — like EMA, but with peer pressure',
@@ -87,11 +101,6 @@
       title: 'LoRA — a tiny matrix that bends the embedding',
       oneLiner: 'Two skinny matrices learn to nudge the 512-number track vector toward better-retrieving arrangements.',
       loader: function () { return import('./chapters/lora.js'); },
-    },
-    'dynamics-embedding': {
-      title: 'Dynamics embedding — how the car drove, not just what it saw',
-      oneLiner: 'Squash a whole lap of sensor+control readings into a single 64-number vector we can search on.',
-      loader: function () { return import('./chapters/dynamics-embedding.js'); },
     },
     'sona-trajectory': {
       title: 'SONA trajectories — framing a whole session\'s worth of driving',
@@ -108,58 +117,66 @@
       oneLiner: 'A penalty term that pins "important" weights so fine-tuning on a new track doesn\'t clobber prior skills.',
       loader: function () { return import('./chapters/ewc.js'); },
     },
-    'lineage-dag': {
-      title: 'Lineage as a DAG — a family tree with no time-loops',
-      oneLiner: 'Parents point to children; cycles rejected at insert. Powers the 🌳 Lineage viewer.',
-      loader: function () { return import('./chapters/lineage-dag.js'); },
+    'dynamics-embedding': {
+      title: 'Dynamics embedding — how the car drove, not just what it saw',
+      oneLiner: 'Squash a whole lap of sensor+control readings into a single 64-number vector we can search on.',
+      loader: function () { return import('./chapters/dynamics-embedding.js'); },
     },
+
+    // ─── Geometry choice ───────────────────────────────────────────────────
     'hyperbolic-space': {
       title: 'Hyperbolic HNSW — why trees fit better on a saddle',
       oneLiner: 'Swap the flat-space neighbour graph for a Poincaré-ball one; trees embed with less distortion.',
       loader: function () { return import('./chapters/hyperbolic-space.js'); },
     },
-    // ─── RuLake-inspired roadmap chapters (Phase 0 stubs; real content
-    //     ships phase-by-phase per docs/plan/rulake-inspired-features.md). ─
-    'warm-restart': {
-      title: 'Saving and reopening the whole brain archive',
-      oneLiner: 'A brain archive is a museum — you can save it, reopen it tomorrow, or give it to a friend.',
-      comingSoon: true,
-      loader: function () { return import('./chapters/warm-restart.js'); },
+
+    // ─── RuLake-inspired extensions (Phase 1/2/3 per
+    //     docs/plan/rulake-inspired-features.md). Ordered so that the
+    //     dedup/hash primitive (F5) lands before the features that compose
+    //     with it: quantization (archive size claim), warm-restart (hash-
+    //     keyed lineage), consistency (hash-stable freeze), federation (hash
+    //     de-duplicates the cross-shard union), cross-tab (hash-indexed wire
+    //     convergence), and the observability panel last. ─────────────────
+    'content-addressing': {
+      title: 'Giving every brain a fingerprint',
+      oneLiner: 'ID brains by hash of their weights; duplicates collide, the DAG stops double-counting, cross-tab sync becomes free.',
+      related: ['lineage-dag', 'warm-restart'],
+      loader: function () { return import('./chapters/content-addressing.js'); },
     },
     'quantization': {
       title: 'Throwing away 31/32 bits and still finding the right neighbour',
       oneLiner: 'RaBitQ + Hadamard: shrink the archive 32× without losing recall.',
-      comingSoon: true,
+      related: ['vectordb-hnsw', 'federation'],
       loader: function () { return import('./chapters/quantization.js'); },
+    },
+    'warm-restart': {
+      title: 'Saving and reopening the whole brain archive',
+      oneLiner: 'A brain archive is a museum — you can save it, reopen it tomorrow, or give it to a friend.',
+      related: ['lineage-dag', 'content-addressing'],
+      loader: function () { return import('./chapters/warm-restart.js'); },
     },
     'consistency-modes': {
       title: 'Fresh / Eventual / Frozen — three ways training looks at the archive',
       oneLiner: 'Re-query every generation, periodically, or lock in a snapshot. Three modes, one radio row.',
-      comingSoon: true,
+      related: ['warm-restart', 'track-similarity'],
       loader: function () { return import('./chapters/consistency-modes.js'); },
-    },
-    'content-addressing': {
-      title: 'Giving every brain a fingerprint',
-      oneLiner: 'ID brains by hash of their weights; duplicates collide, the DAG stops double-counting, cross-tab sync becomes free.',
-      comingSoon: true,
-      loader: function () { return import('./chapters/content-addressing.js'); },
     },
     'federation': {
       title: 'Asking two different maps of brain-space at once',
       oneLiner: 'Query Euclidean + Hyperbolic in parallel; over-request k\' = k + ⌈√(k ln S)⌉; GNN reranks the union.',
-      comingSoon: true,
+      related: ['vectordb-hnsw', 'hyperbolic-space', 'gnn'],
       loader: function () { return import('./chapters/federation.js'); },
     },
     'cross-tab-federation': {
       title: 'Two browser tabs training in sync',
       oneLiner: 'BroadcastChannel + content-addressing = lockless cross-tab archive convergence.',
-      comingSoon: true,
+      related: ['content-addressing', 'warm-restart'],
       loader: function () { return import('./chapters/cross-tab-federation.js'); },
     },
     'where-the-time-goes': {
       title: 'Where each generation\'s milliseconds actually go',
       oneLiner: 'Per-stage timings: HNSW / rerank / LoRA / sensor embed / GA. Observability as a teaching tool.',
-      comingSoon: true,
+      related: ['federation', 'gnn', 'cnn-embedder'],
       loader: function () { return import('./chapters/where-the-time-goes.js'); },
     },
   };

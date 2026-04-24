@@ -122,6 +122,49 @@
       anchor: '#rv-panel [data-rv="ab-index"]',
       rationale: 'The index toggle flips the nearest-neighbour geometry — flat vs. Poincaré-ball.',
     },
+
+    // ─── RuLake-inspired extensions (Phase 1/2/3). These tour steps are
+    //     conceptual-only (anchor: null) because the features they describe
+    //     are either flag-gated, live in worker code, or ship as small UI
+    //     affordances (Export/Import row, consistency radio, tab pulse dot)
+    //     that aren't guaranteed to be on-screen during the tour. The
+    //     chapters themselves have the visuals — this reads as a tour
+    //     epilogue walking through the RuLake-inspired roadmap. ────────────
+    {
+      id: 'content-addressing',
+      anchor: null,
+      rationale: 'Every brain now carries a hash of its own weights — the primitive that dedup, warm-restart, and cross-tab sync all lean on.',
+    },
+    {
+      id: 'quantization',
+      anchor: null,
+      rationale: 'A 1-bit archive via RaBitQ + Hadamard. 32× smaller, still ≥0.9 recall@10.',
+    },
+    {
+      id: 'warm-restart',
+      anchor: null,
+      rationale: 'Export the whole archive, reload the page, import it back in ~40ms. A brain archive is a museum.',
+    },
+    {
+      id: 'consistency-modes',
+      anchor: null,
+      rationale: 'Fresh re-queries every generation; Eventual every N; Frozen pins a snapshot. Three modes, one radio row.',
+    },
+    {
+      id: 'federation',
+      anchor: null,
+      rationale: 'Query Euclidean + Hyperbolic in parallel; over-request per shard; GNN reranks the union.',
+    },
+    {
+      id: 'cross-tab-federation',
+      anchor: null,
+      rationale: 'Two tabs converge via BroadcastChannel. Content-addressing makes it lockless by construction.',
+    },
+    {
+      id: 'where-the-time-goes',
+      anchor: null,
+      rationale: 'Per-stage timings so you can see where each generation\'s milliseconds actually go. (Phase 3A — coming soon.)',
+    },
   ];
 
   let _running = false;
