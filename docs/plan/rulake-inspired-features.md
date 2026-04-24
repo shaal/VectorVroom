@@ -24,7 +24,7 @@ pointing to the blocker. Keep the "Current focus" line at the top
 pointing at whichever phase is active so a newcomer knows where to
 jump in without reading the whole doc.
 
-**Current focus:** Phase 1 wave 2 — 1A + 1C (sequential, both touch ruvectorBridge.js)
+**Current focus:** Phase 1 wave 2 — 1C only (1A landed; 1C is last remaining Phase 1 task)
 **Last updated:** 2026-04-24
 
 ### Phase 0 — Foundations _(sequential, 1 owner)_
@@ -43,7 +43,7 @@ jump in without reading the whole doc.
 
 | Status | ID | Task | Owner | PR/SHA | Done date |
 |:--:|:--:|------|-------|--------|-----------|
-| ⬜ | 1A | F3 — Warm-restart bundles + shareable snapshots |  |  |  |
+| ✅ | 1A | F3 — Warm-restart bundles + shareable snapshots | Claude (subagent) | — | 2026-04-24 |
 | ✅ | 1B | F1 — 1-bit quantized archive (RaBitQ + Hadamard) | Claude (subagent) | — | 2026-04-24 |
 | ⬜ | 1C | F4 — Consistency modes (Fresh/Eventual/Frozen) |  |  |  |
 | ✅ | 1D | F5 — Content-addressed dedup + hash-keyed lineage | Claude (subagent) | — | 2026-04-24 |
