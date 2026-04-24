@@ -12,7 +12,13 @@
 # protects against stale bundles on top of this.
 
 /vendor/ruvector/*
-  Cache-Control: public, max-age=3600
+  # `no-transform` is load-bearing: CF Pages (with Auto Minify / Rocket
+  # Loader / similar) was rewriting `ruvector_wasm.js` in-transit — the
+  # reorder broke wasm-bindgen's import table (LinkError on
+  # `__wbg_..._clone_ref` because the expected shim wasn't at the
+  # expected key after reorder). `no-transform` is the HTTP-spec way
+  # to tell caches/proxies not to mangle the body.
+  Cache-Control: public, max-age=3600, no-transform
 
 /AI-Car-Racer/*
   Cache-Control: public, max-age=300
