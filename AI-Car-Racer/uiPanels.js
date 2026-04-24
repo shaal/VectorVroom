@@ -1412,4 +1412,22 @@
   // Initial paint so the panel isn't blank before the bridge finishes loading.
   tick();
   setInterval(tick, REFRESH_MS);
+
+  // === Phase 3A observability mount point ===
+  // Default-on because this is pure telemetry with no behaviour change.
+  // The container sits BELOW every existing row (including the lineage
+  // DAG viewer, which is the last static section above). We dynamic-
+  // import the panel module so the initial rv-panel render isn't
+  // delayed by the observability code — it shows up ~a tick later. The
+  // anchor comment above is load-bearing: future Phase 3C edits should
+  // mount above/below it, not replace it.
+  const obsContainer = document.createElement('div');
+  obsContainer.className = 'rv-obs-panel';
+  const trainingPanel = root; // #rv-panel is the training panel host
+  trainingPanel.appendChild(obsContainer);
+  import('./observability/panel.js').then(({ mountObservabilityPanel }) => {
+    mountObservabilityPanel(obsContainer, () => window.__rvBridge?.getIndexStats?.() || null);
+  }).catch((e) => {
+    console.warn('[rv-panel] observability mount failed', e);
+  });
 })();

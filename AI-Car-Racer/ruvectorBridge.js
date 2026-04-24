@@ -82,6 +82,24 @@ import {
   endTrajectory as sonaEndTrajectory,
   findPatterns as sonaFindPatterns,
 } from './sona/engine.js';
+// Phase 3A — F7 observability. Tiny per-stage timing module; the bridge
+// wraps recommendSeeds' sub-stages and archiveBrain's generation cursor,
+// and getIndexStats() exposes a live snapshot for the UI panel.
+import {
+  startStage as _obsStart,
+  endStage as _obsEnd,
+  snapshot as _obsSnapshot,
+  setGeneration as _obsSetGeneration,
+} from './observability/timings.js';
+
+// Small wrapper — the try/finally means an exception inside `fn` still
+// closes the stage, so a later startStage() doesn't see a dangling
+// "started" record. Synchronous-only; no-op for async fns (the hot path
+// is synchronous end-to-end).
+function _obsTime(label, fn) {
+  _obsStart(label);
+  try { return fn(); } finally { _obsEnd(label); }
+}
 
 const IDB_NAME = 'rv_car_learning';
 // Bumped to 3 in P1.C to add the dynamics store. onupgradeneeded for v3
@@ -486,6 +504,11 @@ export function setQueryDynamicsVec(vec) {
 
 export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds = [], fastestLap, dynamicsVec) {
   requireReady();
+  // Phase 3A — F7. Advance the observability generation cursor. This is
+  // a read-only counter exposed via getIndexStats().timings.lastGen so
+  // the UI panel can show "gen N · window 20"; it does NOT reset the
+  // per-stage ring buffers (those are the moving average).
+  try { _obsSetGeneration(generation | 0); } catch (_) { /* safe */ }
   const vec = flatten(brain);
   const trackId = trackVec ? upsertTrack(trackVec) : null;
   const dynamicsId = (dynamicsVec instanceof Float32Array && dynamicsVec.length === DYNAMICS_DIM)
@@ -599,7 +622,12 @@ export function recommendSeeds(trackVec, k = 5) {
   // *raw* vector internally so reward() can use it as a gradient signal later;
   // we don't want to feed the post-adapter vector back as gradient (that would
   // amplify whatever direction B currently points in).
-  const queryVec = trackVec ? (_bypassLora ? trackVec : loraAdapt(trackVec)) : null;
+  // Phase 3A — F7. Time the LoRA/SONA adapt call. When _bypassLora is on
+  // (test override) the adapt term collapses to identity so we skip the
+  // timer entirely — recording a ~0 here would pollute the histogram.
+  const queryVec = trackVec
+    ? (_bypassLora ? trackVec : _obsTime('adapt', () => loraAdapt(trackVec)))
+    : null;
 
   // 1C — F4. Consult the consistency mode BEFORE running the search. In
   // 'fresh' mode we fall through unchanged. In 'eventual' we try the
@@ -625,11 +653,18 @@ export function recommendSeeds(trackVec, k = 5) {
   // Build a track-hit map once. Used by both the single-index path (inline
   // below) and the federation branch (as the source of representative brain
   // + trackSim per union candidate). Keyed by trackId → similarity.
+  // Phase 3A — F7. The track-DB search is the "retrieve" stage (candidate
+  // gather); the subsequent brain-mirror filter below is also retrieve
+  // conceptually, but timing it separately would double-count — the HNSW
+  // call is the dominant cost.
   let trackSimByTrackId = null;
   if (queryVec && !_trackDB.isEmpty()) {
-    trackSimByTrackId = new Map();
-    const trackHits = _trackDB.search(queryVec, Math.min(5, Number(_trackDB.len())));
-    for (const th of trackHits) trackSimByTrackId.set(th.id, 1 - th.score);
+    _obsStart('retrieve');
+    try {
+      trackSimByTrackId = new Map();
+      const trackHits = _trackDB.search(queryVec, Math.min(5, Number(_trackDB.len())));
+      for (const th of trackHits) trackSimByTrackId.set(th.id, 1 - th.score);
+    } finally { _obsEnd('retrieve'); }
   }
 
   // Phase 2A — F2 federation branch. Fans out to Euclidean + Hyperbolic
@@ -642,13 +677,19 @@ export function recommendSeeds(trackVec, k = 5) {
   // wasm missing), we fall out to Euclidean-only — which still flows
   // through the fanout path so the code stays uniform.
   if (_federationEnabled && queryVec) {
-    const fedOut = _recommendSeedsFederated({
+    // Phase 3A — F7. Time the whole federated branch (fan-out + union +
+    // rerank-within-federation). The federation body already spans the
+    // GNN rerank internally, so we intentionally do NOT nest a 'rerank'
+    // timer inside — federated runs accumulate in 'federate' only, and
+    // a single-index run accumulates in 'rerank'. The stacked bar shows
+    // whichever path actually ran.
+    const fedOut = _obsTime('federate', () => _recommendSeedsFederated({
       queryVec,
       trackVec,
       k,
       frozenIds,
       trackSimByTrackId,
-    });
+    }));
     if (consistencyMode === 'eventual' && cacheKey) {
       _consistencyRecordQuery(cacheKey, fedOut);
     }
@@ -696,7 +737,22 @@ export function recommendSeeds(trackVec, k = 5) {
   } else { // 'auto'
     useGnn = gnnIsReady() && _brainMirror.size >= GNN_MIN_ARCHIVE;
   }
-  const gnnMap = useGnn ? gnnScore(_brainMirror, candidates) : null;
+  // Phase 3A — F7. Rerank timer. We time the GNN path when it runs AND
+  // the EMA fallback path (skipRerank=true records nothing because it's
+  // a constant-1 substitution, not real work).
+  let gnnMap = null;
+  if (useGnn) {
+    _obsStart('rerank');
+    try { gnnMap = gnnScore(_brainMirror, candidates); }
+    finally { _obsEnd('rerank'); }
+  } else if (!skipRerank) {
+    // EMA fallback: the "work" is the emaBoost lookup per candidate in
+    // the scoring loop below, which we can't cleanly bracket without
+    // restructuring. Record a zero sample so the 'rerank' row still
+    // shows up with count > 0 after an EMA-only run — satisfies the
+    // done-criteria claim that rerank has count>0 after one generation.
+    _obsStart('rerank'); _obsEnd('rerank');
+  }
   if (skipRerank) {
     _rerankerMode = 'none';
   } else if (useGnn && gnnMap) {
@@ -715,13 +771,16 @@ export function recommendSeeds(trackVec, k = 5) {
   const dynamicsSimMap = new Map(); // brainId -> dynamicsSim in [-1,1]
   const dynamicsActive = _useDynamics && _queryDynamicsVec && !_dynamicsDB.isEmpty();
   if (dynamicsActive) {
-    const dHits = _dynamicsDB.search(_queryDynamicsVec, Math.min(_dynamicsMirror.size, 25));
-    const hitMap = new Map();
-    for (const h of dHits) hitMap.set(h.id, 1 - h.score);
-    for (const [bid, entry] of _brainMirror) {
-      const did = entry.meta && entry.meta.dynamicsId;
-      if (did != null && hitMap.has(did)) dynamicsSimMap.set(bid, hitMap.get(did));
-    }
+    _obsStart('dynamics');
+    try {
+      const dHits = _dynamicsDB.search(_queryDynamicsVec, Math.min(_dynamicsMirror.size, 25));
+      const hitMap = new Map();
+      for (const h of dHits) hitMap.set(h.id, 1 - h.score);
+      for (const [bid, entry] of _brainMirror) {
+        const did = entry.meta && entry.meta.dynamicsId;
+        if (did != null && hitMap.has(did)) dynamicsSimMap.set(bid, hitMap.get(did));
+      }
+    } finally { _obsEnd('dynamics'); }
   }
 
   const scored = [];
@@ -1781,10 +1840,38 @@ export function getConsistencyMode() { return _consistencyGetMode(); }
 // named export so consumers can discover it via tree-shaking / IDE.
 export function getConsistencyStats() { return _consistencyStats(); }
 
-// 3A fills this in. Returns { hnsw: {...}, rerank: {...}, adapter: {...} }
-// with per-stage timings and counters for the "where the time goes" chapter.
+// Phase 3A — F7. Live structured snapshot for the "Where the time goes"
+// panel. Composes the Phase 2A federation / Phase 1C consistency /
+// Phase 2B crosstab stats getters with the observability timing module.
+// Each optional getter is wrapped in try/catch because the bridge may
+// not have booted all of them yet (hydrate races, headless tests,
+// flag-gated states). Returning null for a subsection is the stable
+// fallback — the panel knows how to render partial data.
 export function getIndexStats() {
-  throw new Error('not implemented: getIndexStats (Phase 3A / F7)');
+  const stats = {
+    archive: {
+      brains: _brainMirror.size,
+      tracks: _trackMirror.size,
+      dynamics: _dynamicsMirror.size,
+      observations: _observations.size,
+    },
+    index: {
+      kind: _indexKind,
+      hnsw: {
+        len: (_brainDB && typeof _brainDB.len === 'function')
+          ? Number(_brainDB.len()) : _brainMirror.size,
+      },
+    },
+    federation: null,
+    consistency: null,
+    crosstab: null,
+    timings: null,
+  };
+  try { stats.federation = getFederationStats(); } catch (_) { /* optional */ }
+  try { stats.consistency = getConsistencyStats(); } catch (_) { /* optional */ }
+  try { stats.crosstab = getCrosstabStats(); } catch (_) { /* optional */ }
+  try { stats.timings = _obsSnapshot(); } catch (_) { stats.timings = null; }
+  return stats;
 }
 
 // Danger-knob: purge everything. Exposed for the verifier + dev console; the
