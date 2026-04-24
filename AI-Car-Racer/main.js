@@ -404,6 +404,41 @@ if (typeof window !== 'undefined') {
     __applyUrlFederationFlag();
 }
 
+// Phase 2B (F6) — honour `?crosstab=1` at boot. Opt-in flag that opens the
+// BroadcastChannel('vectorvroom-archive') and wires archiveBrain's broadcast
+// hook. Default off → no channel is opened and archiveBrain's hot path is
+// one boolean check per insert. Mirrors the ?federation=1 poll-until-ready
+// pattern because the bridge sidecar can finish loading slightly after the
+// DOM is ready on slow first-loads.
+async function __applyUrlCrosstabFlag(){
+    let on = false;
+    try {
+        var usp = new URLSearchParams(window.location.search || '');
+        on = usp.get('crosstab') === '1';
+    } catch (_) { return; }
+    if (!on) return;
+    var b = null;
+    for (let i = 0; i < 20; i++) {
+        b = window.__rvBridge;
+        if (b && typeof b.ready === 'function' && typeof b.setCrosstabEnabled === 'function') break;
+        await new Promise(res => setTimeout(res, 100));
+    }
+    if (!b || typeof b.ready !== 'function' || typeof b.setCrosstabEnabled !== 'function') {
+        console.warn('[ruvector] URL flag ?crosstab=1 — bridge never appeared');
+        return;
+    }
+    try {
+        await b.ready();
+        b.setCrosstabEnabled(true);
+        console.log('[ruvector] cross-tab live training enabled via URL flag');
+    } catch (e) {
+        console.warn('[ruvector] setCrosstabEnabled from URL flag failed', e);
+    }
+}
+if (typeof window !== 'undefined') {
+    __applyUrlCrosstabFlag();
+}
+
 // -----------------------------------------------------------------------------
 // Metrics HUD — per-generation survival %, median / p90 checkpoints, wall-bumps.
 // Also serves as the on-screen data source for __runBenchmark / __abTest CSVs.

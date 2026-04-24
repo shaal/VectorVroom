@@ -2088,3 +2088,32 @@ label {
     white-space: nowrap;
     border: 0;
 }
+
+/* =============================================================
+   Phase 2B (F6) — cross-tab live-training pill
+   ============================================================= */
+.rv-crosstab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 0;
+}
+.rv-crosstab-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(98, 240, 184, 0.14);
+    color: #cbd8ff;
+    font-size: 12px;
+    user-select: none;
+    transition: background-color 200ms ease-out, box-shadow 200ms ease-out;
+}
+.rv-crosstab-pill-pulse {
+    animation: rv-crosstab-pulse 600ms ease-out forwards;
+}
+@keyframes rv-crosstab-pulse {
+    0%   { background: #62f0b8; box-shadow: 0 0 10px rgba(98, 240, 184, 0.65); }
+    100% { background: rgba(98, 240, 184, 0.14); box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
+}
