@@ -209,7 +209,9 @@
       // and don't load the module at all. If the probe succeeds we inject
       // the sidecar module dynamically with the same body as before.
       (async () => {
-        const VENDOR_PROBE = '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js';
+        // Must match the `?v=...` suffix in ruvectorBridge.js to probe
+        // the same edge-cache key the real import will fetch.
+        const VENDOR_PROBE = '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js?v=hnsw-wasm-20260424';
         const probeUrl = new URL(VENDOR_PROBE, document.baseURI).href;
         let reachable = false;
         try {

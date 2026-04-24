@@ -5,7 +5,14 @@
 // a GNN over the lineage DAG when enough archived brains are present, falling
 // back to the EMA-weighted path otherwise.
 
-import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js';
+// Cache-bust query is load-bearing on the live site: CF Pages edge
+// had a pre-2026-04 cached entry for the bare URL with `immutable`
+// set, which kept serving a Rocket-Loader/auto-minify-transformed
+// copy even after the hnsw-wasm rebuild. A new query-stringed URL
+// has no stale edge entry and inherits the current `no-transform`
+// header policy. Bump `?v=...` on any future vendor rebuild if the
+// stale entry bites again.
+import initVec, { VectorDB } from '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js?v=hnsw-wasm-20260424';
 import initCnn, { CnnEmbedder } from '../vendor/ruvector/ruvector_cnn_wasm/index.js';
 import { flatten, unflatten, FLAT_LENGTH, TOPOLOGY, BRAIN_SCHEMA_VERSION } from './brainCodec.js';
 import { loadGnn, isReady as gnnIsReady, gnnScore } from './gnnReranker.js';
