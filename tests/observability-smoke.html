@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<!--
+  observability-smoke.html
+  Phase 3A (F7) — timings-module smoke harness.
+
+  How to run:
+    python3 -m http.server 8767       # from repo root
+    open http://localhost:8767/tests/observability-smoke.html
+
+  Asserts (matches the /ship-task done criteria):
+    1. stages.foo.count === 5 after 5× record('foo', 10).
+    2. stages.foo.avgMs === 10.
+    3. stages.bar.p95Ms >= 20 after 3× record('bar', 20).
+    4. snapshot().lastGen reflects the last setGeneration() value.
+    5. Ring-buffer moving average: push 25 samples into a 20-window buffer;
+       only the last 20 are reflected (count === 20, avg reflects the
+       newer samples, not the dropped ones).
+
+  PASS/FAIL lands in the DOM and on window.__obsSmokeResult.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Observability smoke (F7)</title>
+  <style>
+    body { font: 14px/1.5 system-ui, -apple-system, sans-serif; max-width: 820px; margin: 2em auto; padding: 0 1em; color: #222; }
+    h1 { font-size: 1.2rem; margin: 0 0 .4em; }
+    #summary { padding: .7em 1em; border-radius: 6px; margin: 1em 0; font-weight: 600; }
+    #summary.pass { background: #d3f9d8; color: #2b8a3e; }
+    #summary.fail { background: #ffe3e3; color: #c92a2a; }
+    #summary.pending { background: #fff3bf; color: #5c3c00; }
+    table { border-collapse: collapse; width: 100%; margin-top: .6em; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
+    th { background: #f4f4f4; }
+    tr.fail { background: #fff5f5; }
+    tr.pass td:first-child { color: #2b8a3e; }
+    pre { background: #f4f4f4; padding: .4em .6em; border-radius: 3px; overflow-x: auto; font-size: 11px; margin: .3em 0; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Observability smoke (Phase 3A / F7)</h1>
+  <p>Exercises <code>observability/timings.js</code>: record, snapshot,
+     setGeneration, and the ring-buffer moving-average behaviour.</p>
+  <div id="summary" class="pending">Running…</div>
+  <table id="results">
+    <thead><tr><th>#</th><th>claim</th><th>verdict</th><th>detail</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <script type="module">
+    import {
+      record, snapshot, setGeneration, setWindow, _debugReset,
+    } from '../AI-Car-Racer/observability/timings.js';
+
+    const rows = document.getElementById('rows');
+    const summary = document.getElementById('summary');
+    const results = [];
+    function record_claim(name, ok, detail){
+      results.push({ name, ok, detail });
+      const tr = document.createElement('tr');
+      tr.className = ok ? 'pass' : 'fail';
+      tr.innerHTML =
+        '<td>' + results.length + '</td>' +
+        '<td>' + name + '</td>' +
+        '<td>' + (ok ? 'PASS' : 'FAIL') + '</td>' +
+        '<td><pre>' + escapeHtml(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)) + '</pre></td>';
+      rows.appendChild(tr);
+    }
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    function approxEq(a, b, tol = 1e-9) {
+      return Math.abs(a - b) <= tol;
+    }
+
+    // ── Claim 1/2/3: record + snapshot basic shape ───────────────────
+    _debugReset();
+    for (let i = 0; i < 5; i++) record('foo', 10);
+    for (let i = 0; i < 3; i++) record('bar', 20);
+    setGeneration(7);
+
+    const snap1 = snapshot();
+    record_claim(
+      'stages.foo.count === 5 after 5× record(foo, 10)',
+      snap1.stages.foo && snap1.stages.foo.count === 5,
+      snap1.stages.foo,
+    );
+    record_claim(
+      'stages.foo.avgMs === 10',
+      snap1.stages.foo && approxEq(snap1.stages.foo.avgMs, 10),
+      { avgMs: snap1.stages.foo && snap1.stages.foo.avgMs },
+    );
+    record_claim(
+      'stages.bar.p95Ms >= 20',
+      snap1.stages.bar && snap1.stages.bar.p95Ms >= 20,
+      { p95Ms: snap1.stages.bar && snap1.stages.bar.p95Ms },
+    );
+
+    // ── Claim 4: setGeneration is reflected in snapshot ──────────────
+    record_claim(
+      'lastGen reflects the last setGeneration() value',
+      snap1.lastGen === 7,
+      { lastGen: snap1.lastGen },
+    );
+
+    // ── Claim 5: ring-buffer moving-average over a 20-window buffer ──
+    // Push 25 samples; the first 5 (value 1..5) should fall off the
+    // buffer, leaving only values 6..25. Expected count=20, avg=15.5.
+    _debugReset();
+    setWindow(20);
+    for (let i = 1; i <= 25; i++) record('ring', i);
+    const snap2 = snapshot();
+    const expectAvg = (6 + 25) / 2; // = 15.5
+    const ringCountOk = snap2.stages.ring && snap2.stages.ring.count === 20;
+    const ringAvgOk = snap2.stages.ring && approxEq(snap2.stages.ring.avgMs, expectAvg, 1e-9);
+    record_claim(
+      'ring buffer: 25 records into window=20 → only last 20 reflected',
+      ringCountOk && ringAvgOk,
+      {
+        count: snap2.stages.ring && snap2.stages.ring.count,
+        avgMs: snap2.stages.ring && snap2.stages.ring.avgMs,
+        expectedCount: 20,
+        expectedAvg: expectAvg,
+      },
+    );
+
+    // ── Finalise summary ─────────────────────────────────────────────
+    const passed = results.filter(r => r.ok).length;
+    const total  = results.length;
+    const allOk  = passed === total;
+    summary.className = allOk ? 'pass' : 'fail';
+    summary.textContent = `${passed}/${total} ${allOk ? 'PASS' : 'FAIL'} — observability/timings.js`;
+    window.__obsSmokeResult = { passed, total, allOk, results };
+  </script>
+</body>
+</html>
