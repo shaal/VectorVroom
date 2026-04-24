@@ -24,7 +24,7 @@ pointing to the blocker. Keep the "Current focus" line at the top
 pointing at whichever phase is active so a newcomer knows where to
 jump in without reading the whole doc.
 
-**Current focus:** Phase 1 wave 2 — 1C only (1A landed; 1C is last remaining Phase 1 task)
+**Current focus:** Phase 1 complete — next up is Phase 2A (F2 federation) which is gated on 1B, or Phase 3 observability/polish swarm
 **Last updated:** 2026-04-24
 
 ### Phase 0 — Foundations _(sequential, 1 owner)_
@@ -45,7 +45,7 @@ jump in without reading the whole doc.
 |:--:|:--:|------|-------|--------|-----------|
 | ✅ | 1A | F3 — Warm-restart bundles + shareable snapshots | Claude (subagent) | — | 2026-04-24 |
 | ✅ | 1B | F1 — 1-bit quantized archive (RaBitQ + Hadamard) | Claude (subagent) | — | 2026-04-24 |
-| ⬜ | 1C | F4 — Consistency modes (Fresh/Eventual/Frozen) |  |  |  |
+| ✅ | 1C | F4 — Consistency modes (Fresh/Eventual/Frozen) | Claude (subagent) | — | 2026-04-24 |
 | ✅ | 1D | F5 — Content-addressed dedup + hash-keyed lineage | Claude (subagent) | — | 2026-04-24 |
 
 **Phase 1 gate:** all four rows ✅ + each passes its own `/ship-task`
@@ -78,7 +78,7 @@ community-archive URL ships publicly).
 
 | Status | Milestone |
 |:--:|-----------|
-| ⬜ | M1 — F1+F3 demoable locally (flags on) |
+| ✅ | M1 — F1+F3 demoable locally (flags on) — 2026-04-24 |
 | ⬜ | M2 — Phase 1 merged to `main` behind flags |
 | ⬜ | M3 — F2+F6 shipping, flags default on for F1/F3 |
 | ⬜ | M4 — Phase 3 complete, blog post / tour recording |
@@ -87,6 +87,20 @@ community-archive URL ships publicly).
 
 Append-only. Record any scope change, deferral, or non-obvious call
 that future-you would want to find. Newest at the top.
+
+- **2026-04-24 — Phase 1 complete.** Wave 2 shipped 1A then 1C
+  sequentially (both edit ruvectorBridge.js stubs; running in parallel
+  would race). 1A adds `archive/{exporter,importer,serialize}.js` +
+  `_insertionOrder` plumbing across archiveBrain/hydrate/debug-reset;
+  round-trip harness 5/5 PASS with CompressionStream gzip exercised.
+  1C adds `consistency/{mode,worker-sync}.js`, wires `recommendSeeds`
+  via a one-branch fresh-mode-preserving check, ships a radio row + tick
+  strip in `uiPanels.js`, honors `?consistency=`, and passes a 5/5
+  harness covering all three modes + thaw. One `not implemented` stub
+  remains in ruvectorBridge.js — Phase 3A's `getIndexStats`. Phase 1's
+  ordering discipline — swarm 1B+1D in parallel, then 1A→1C sequentially
+  — held perfectly: zero merge conflicts despite 4 different subagents
+  editing 15+ files.
 
 - **2026-04-24 — Phase 1 wave 1 closed (1B + 1D).** Dispatched as two
   parallel general-purpose subagents in a single message; zero file

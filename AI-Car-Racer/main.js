@@ -328,6 +328,48 @@ if (typeof window !== 'undefined') {
     __runStagedSnapshotImport();
 }
 
+// Phase 1C (F4) — honour `?consistency=fresh|eventual|frozen` at boot.
+// Default is `fresh` (today's behaviour), so the flag is opt-in. The
+// URL flag is also how the A/B harness pins a known mode across a
+// page reload. Invalid values are ignored with a warn; the bridge
+// stays on `fresh`. Mirrors the `?hhnsw=1` / `?snapshots=1` pattern.
+async function __applyUrlConsistencyFlag(){
+    let m = null;
+    try {
+        var usp = new URLSearchParams(window.location.search || '');
+        m = usp.get('consistency');
+    } catch (_) { return; }
+    if (!m) return;
+    const valid = ['fresh', 'eventual', 'frozen'];
+    if (!valid.includes(m)) {
+        console.warn('[ruvector] ignoring invalid ?consistency=' + m);
+        return;
+    }
+    // The sidecar module that assigns window.__rvBridge loads
+    // asynchronously; poll briefly so we don't race with it on slow
+    // first loads. 20×100ms ≈ 2s ceiling matches existing patterns.
+    var b = null;
+    for (let i = 0; i < 20; i++) {
+        b = window.__rvBridge;
+        if (b && typeof b.ready === 'function' && typeof b.setConsistencyMode === 'function') break;
+        await new Promise(res => setTimeout(res, 100));
+    }
+    if (!b || typeof b.ready !== 'function' || typeof b.setConsistencyMode !== 'function') {
+        console.warn('[ruvector] URL flag ?consistency=' + m + ' — bridge never appeared');
+        return;
+    }
+    try {
+        await b.ready();
+        b.setConsistencyMode(m);
+        console.log('[ruvector] consistency mode set via URL flag: ' + m);
+    } catch (e) {
+        console.warn('[ruvector] setConsistencyMode from URL flag failed', e);
+    }
+}
+if (typeof window !== 'undefined') {
+    __applyUrlConsistencyFlag();
+}
+
 // -----------------------------------------------------------------------------
 // Metrics HUD — per-generation survival %, median / p90 checkpoints, wall-bumps.
 // Also serves as the on-screen data source for __runBenchmark / __abTest CSVs.

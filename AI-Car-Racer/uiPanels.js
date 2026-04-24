@@ -167,6 +167,25 @@
     '    <span data-eli15="hyperbolic-space" role="button" tabindex="0" aria-label="Learn: hyperbolic HNSW — why trees fit better on a saddle"></span>',
     '  </div>',
     '</div>',
+    // 1C — F4 Consistency modes. A radio row selects the query-path
+    // consistency semantics: Fresh (re-query each call — the default
+    // and today's behaviour), Eventual (TTL cache), Frozen (pin the
+    // archive at mode-entry; new brains don't appear in results).
+    // The tick strip below the radios pulses on every fresh query —
+    // no pulse on a cache hit or a frozen-filter query that short-
+    // circuits, so the learner can *see* the mode at work.
+    '<div class="rv-consistency" data-rv="consistency">',
+    '  <div class="rv-consistency-head">',
+    '    <span class="rv-consistency-label">🧊 Consistency:</span>',
+    '    <div class="rv-consistency-radios" role="radiogroup" aria-label="Archive consistency mode" data-rv="consistency-radios">',
+    '      <label><input type="radio" name="rv-consistency" value="fresh" checked /> Fresh</label>',
+    '      <label><input type="radio" name="rv-consistency" value="eventual" /> Eventual</label>',
+    '      <label><input type="radio" name="rv-consistency" value="frozen" /> Frozen</label>',
+    '    </div>',
+    '    <span data-eli15="consistency-modes" role="button" tabindex="0" aria-label="Learn: fresh, eventual, frozen consistency modes"></span>',
+    '  </div>',
+    '  <div class="rv-consistency-ticks" data-rv="consistency-ticks" aria-hidden="true"></div>',
+    '</div>',
     // Dynamics trajectory toggle (P1.C). Off by default — the plan keeps
     // this opt-in because it changes retrieval ordering. The count next to
     // the label shows how many archived brains have a dynamics vector
@@ -328,7 +347,92 @@
     seedSources: root.querySelector('[data-rv="seed-sources"]'),
     seedSourcesText: root.querySelector('[data-rv="seed-sources-text"]'),
     abToggle: root.querySelector('[data-rv="ab-toggle"]'),
+    // 1C — F4 Consistency-mode selector + tick strip.
+    consistency: root.querySelector('[data-rv="consistency"]'),
+    consistencyRadios: root.querySelectorAll('[data-rv="consistency-radios"] input[type="radio"]'),
+    consistencyTicks: root.querySelector('[data-rv="consistency-ticks"]'),
   };
+
+  // 1C — F4. Build the tick strip: 30 tiny <span> dots that pulse via a
+  // CSS class flip whenever recommendSeeds *actually* re-queries (i.e.
+  // bridge.getConsistencyStats().cacheMisses increments). Cache hits
+  // do not pulse, so the strip visibly slows in eventual mode and
+  // flat-lines in frozen mode (which is satisfied by the live
+  // archive's state at freeze time — no new misses beyond the ones
+  // spent on fresh queries before the freeze).
+  const TICK_COUNT = 30;
+  if (el.consistencyTicks) {
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < TICK_COUNT; i++) {
+      const dot = document.createElement('span');
+      dot.className = 'rv-consistency-tick';
+      frag.appendChild(dot);
+    }
+    el.consistencyTicks.appendChild(frag);
+  }
+  let _consistencyTickIdx = 0;
+  let _consistencyLastMisses = 0;
+  function pulseConsistencyTick() {
+    if (!el.consistencyTicks) return;
+    const tick = el.consistencyTicks.children[_consistencyTickIdx % TICK_COUNT];
+    if (!tick) return;
+    tick.classList.remove('rv-consistency-tick-pulse');
+    // Force a reflow so re-adding the class restarts the CSS animation.
+    // (getBoundingClientRect is the cheap well-known reflow trigger.)
+    void tick.getBoundingClientRect();
+    tick.classList.add('rv-consistency-tick-pulse');
+    _consistencyTickIdx = (_consistencyTickIdx + 1) % TICK_COUNT;
+  }
+
+  // Wire the radio handlers. setConsistencyMode throws on invalid mode
+  // (shouldn't happen from our fixed radio values, but wrap in try for
+  // defensiveness — a future URL-flag import could feed an unexpected
+  // string).
+  el.consistencyRadios.forEach(function (r) {
+    r.addEventListener('change', function () {
+      if (!r.checked) return;
+      const b = window.__rvBridge;
+      if (!b || typeof b.setConsistencyMode !== 'function') return;
+      try { b.setConsistencyMode(r.value); }
+      catch (e) { console.warn('[rv-panel] setConsistencyMode failed', e); }
+    });
+  });
+  // Reflect an externally-set mode (URL flag boot, console call, tour
+  // step) back into the radio group on every tick. Cheap — 3 DOM reads
+  // at 2 Hz.
+  function renderConsistency() {
+    const b = window.__rvBridge;
+    if (!b || typeof b.getConsistencyMode !== 'function') return;
+    let mode;
+    try { mode = b.getConsistencyMode(); } catch (_) { return; }
+    el.consistencyRadios.forEach(function (r) {
+      if (r.value === mode && !r.checked) r.checked = true;
+    });
+    // Tick-strip pulse: drive by cacheMisses increments. Fresh mode
+    // misses every call; eventual misses only when cache expires;
+    // frozen misses every call too (we still run the search, just
+    // against a filtered archive — "no new insertions visible" is
+    // the frozen contract, not "no queries").
+    if (typeof b.getConsistencyStats === 'function') {
+      try {
+        const s = b.getConsistencyStats();
+        const misses = (s && s.cacheMisses) | 0;
+        if (misses > _consistencyLastMisses) {
+          const delta = Math.min(TICK_COUNT, misses - _consistencyLastMisses);
+          for (let i = 0; i < delta; i++) pulseConsistencyTick();
+          _consistencyLastMisses = misses;
+        } else if (misses < _consistencyLastMisses) {
+          // stats reset (debugReset or mode-change clearCache) — track
+          // the new baseline without pulsing.
+          _consistencyLastMisses = misses;
+        }
+        // Eventual mode ALSO pulses on fresh misses; to make Fresh vs
+        // Eventual visually distinct we could also count hits, but the
+        // spec asks for a pulse only on fresh re-queries — so cacheHits
+        // intentionally doesn't drive the strip.
+      } catch (_) { /* ignore */ }
+    }
+  }
 
   // Master toggle: mutating window.rvDisabled is enough — every bridgeReady()
   // / bridgeReadyLocal() call site already re-reads the flag on each call
@@ -1047,6 +1151,14 @@
     // writes a fresh `generation` on every buildBrainsBuffer call, so a change
     // here means a new tally to render.
     const seedSourcesGen = (info && info.seedSources) ? (info.seedSources.generation | 0) : -1;
+
+    // 1C — F4. Poll the consistency stats on every tick so the tick
+    // strip animates in real time (training-loop recommendSeeds calls
+    // happen outside the UI memoisation window — if we gate this on
+    // the memo, the strip would freeze between panel-input changes).
+    // Radio-group reflection is idempotent; the cost is ~3 DOM reads
+    // at 2Hz.
+    renderConsistency();
 
     // Fast-path: nothing changed → no DOM writes, no recommendSeeds call.
     if (
