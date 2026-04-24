@@ -201,6 +201,16 @@
     '  <span data-eli15="federation" role="button" tabindex="0" aria-label="Learn: federated Euclidean + Hyperbolic search"></span>',
     '  <div class="rv-federation-viewer" data-rv="federation-viewer" hidden></div>',
     '</div>',
+    // Phase 2B (F6) — cross-tab live training connection indicator. Rendered
+    // only when the ?crosstab=1 flag is on (the pill doesn't belong in the
+    // default panel while the feature is baking). Pulses briefly on every
+    // received remote brain so the learner can *see* the link working.
+    '<div class="rv-crosstab" data-rv="crosstab" hidden>',
+    '  <span class="rv-crosstab-pill" data-rv="crosstab-pill" title="Cross-tab live training">',
+    '    🔗 <span data-rv="crosstab-peers">0</span> peer<span data-rv="crosstab-s">s</span>',
+    '  </span>',
+    '  <span data-eli15="cross-tab-federation" role="button" tabindex="0" aria-label="Learn: cross-tab live training"></span>',
+    '</div>',
     // Dynamics trajectory toggle (P1.C). Off by default — the plan keeps
     // this opt-in because it changes retrieval ordering. The count next to
     // the label shows how many archived brains have a dynamics vector
@@ -371,6 +381,11 @@
     federationToggle: root.querySelector('[data-rv="federation-toggle"]'),
     federationStatus: root.querySelector('[data-rv="federation-status"]'),
     federationViewer: root.querySelector('[data-rv="federation-viewer"]'),
+    // Phase 2B (F6) — cross-tab peer indicator (flag-gated by ?crosstab=1).
+    crosstab: root.querySelector('[data-rv="crosstab"]'),
+    crosstabPill: root.querySelector('[data-rv="crosstab-pill"]'),
+    crosstabPeers: root.querySelector('[data-rv="crosstab-peers"]'),
+    crosstabS: root.querySelector('[data-rv="crosstab-s"]'),
   };
 
   // 1C — F4. Build the tick strip: 30 tiny <span> dots that pulse via a
@@ -488,6 +503,60 @@
       if (on) await ensureFederationViewer();
     });
   }
+  // Phase 2B (F6) — cross-tab pill. Visible only when ?crosstab=1 URL flag is
+  // present (feature is baking behind a flag). Subscribes to the bridge's
+  // setCrosstabListeners so we get a callback on every received remote brain
+  // (for the green pulse) and on peer-count changes (for the "N peer(s)"
+  // readout). The subscription attempt is best-effort and retries a few
+  // times because the bridge sidecar can land slightly after the panel.
+  let _crosstabFlagOn = false;
+  try {
+    if (typeof URLSearchParams === 'function') {
+      _crosstabFlagOn = new URLSearchParams(window.location.search || '').get('crosstab') === '1';
+    }
+  } catch (_) { _crosstabFlagOn = false; }
+  if (el.crosstab && _crosstabFlagOn) el.crosstab.hidden = false;
+  function renderCrosstabPeers(n) {
+    if (!el.crosstabPeers) return;
+    const count = Math.max(0, n | 0);
+    el.crosstabPeers.textContent = String(count);
+    if (el.crosstabS) el.crosstabS.textContent = count === 1 ? '' : 's';
+  }
+  function pulseCrosstab() {
+    if (!el.crosstabPill) return;
+    el.crosstabPill.classList.remove('rv-crosstab-pill-pulse');
+    void el.crosstabPill.getBoundingClientRect();
+    el.crosstabPill.classList.add('rv-crosstab-pill-pulse');
+  }
+  let _crosstabWired = false;
+  async function ensureCrosstabWiring() {
+    if (_crosstabWired) return;
+    for (let i = 0; i < 20 && !_crosstabWired; i++) {
+      const b = window.__rvBridge;
+      if (b && typeof b.setCrosstabListeners === 'function') {
+        try {
+          b.setCrosstabListeners({
+            onReceive: () => pulseCrosstab(),
+            onPeerCount: (n) => renderCrosstabPeers(n),
+          });
+          _crosstabWired = true;
+          // Paint the current peer count once on wire-up (zero until a peer
+          // actually says hello, but we want to replace any stale default).
+          try {
+            const s = (typeof b.getCrosstabStats === 'function') ? b.getCrosstabStats() : null;
+            if (s) renderCrosstabPeers(s.peerCount);
+          } catch (_) {}
+        } catch (e) {
+          console.warn('[rv-panel] setCrosstabListeners failed', e);
+          return;
+        }
+      } else {
+        await new Promise(res => setTimeout(res, 100));
+      }
+    }
+  }
+  if (_crosstabFlagOn) ensureCrosstabWiring();
+
   function renderFederation() {
     const b = window.__rvBridge;
     if (!b || typeof b.isFederationEnabled !== 'function') return;

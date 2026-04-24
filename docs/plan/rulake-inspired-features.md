@@ -24,7 +24,7 @@ pointing to the blocker. Keep the "Current focus" line at the top
 pointing at whichever phase is active so a newcomer knows where to
 jump in without reading the whole doc.
 
-**Current focus:** Phase 2B (F6 cross-tab) — gated on 1A snapshot format and 1D dedup (both shipped)
+**Current focus:** Phase 3 — observability + polish swarm (3A, 3B, 3C parallel-safe)
 **Last updated:** 2026-04-24
 
 ### Phase 0 — Foundations _(sequential, 1 owner)_
@@ -57,7 +57,7 @@ claims (n=6+ across ≥2 sessions, tested on both Rect and Tri tracks).
 | Status | ID | Task | Depends on | Owner | PR/SHA | Done date |
 |:--:|:--:|------|-----------|-------|--------|-----------|
 | ✅ | 2A | F2 — Federated search with GNN rerank | 1B | Claude (subagent) | — | 2026-04-24 |
-| ⬜ | 2B | F6 — Cross-tab live training via BroadcastChannel | 1A, 1D |  |  |  |
+| ✅ | 2B | F6 — Cross-tab live training via BroadcastChannel | 1A, 1D | Claude (subagent) | — | 2026-04-24 |
 
 **Phase 2 gate:** both rows ✅ + A/B convergence test (two-tab demo
 for 2B; recall@10 ≥ max(E,H) for 2A).
@@ -79,14 +79,25 @@ community-archive URL ships publicly).
 | Status | Milestone |
 |:--:|-----------|
 | ✅ | M1 — F1+F3 demoable locally (flags on) — 2026-04-24 |
-| ⬜ | M2 — Phase 1 merged to `main` behind flags |
-| ⬜ | M3 — F2+F6 shipping, flags default on for F1/F3 |
+| ✅ | M2 — Phase 1 merged to `main` behind flags — 2026-04-24 |
+| 🟡 | M3 — F2+F6 shipping (behind flags); flags default-on for F1/F3 deferred |
 | ⬜ | M4 — Phase 3 complete, blog post / tour recording |
 
 ### Notes / decisions log
 
 Append-only. Record any scope change, deferral, or non-obvious call
 that future-you would want to find. Newest at the top.
+
+- **2026-04-24 — Phase 2B shipped (Phase 2 complete).** Cross-tab live
+  training via BroadcastChannel. `archiveBrain` broadcasts a wire
+  payload on successful insert; remote brains arrive and re-enter
+  `archiveBrain` under a `_crosstabReceiving` guard that blocks
+  re-broadcast (echo-free by construction). F5's content-hash IDs make
+  the whole thing lockless: two tabs computing the same brain produce
+  the same hash, and dedup collapses the repeat automatically. Gated
+  behind `?crosstab=1`. Harness 3/3 PASS with live wire-decode,
+  dedup collapse on duplicate, and sender-echo suppression. Only
+  Phase 3A's `getIndexStats` stub remains unimplemented in the bridge.
 
 - **2026-04-24 — Phase 2A shipped.** Federation replaces the single-
   index query with a fan-out to BOTH Euclidean and Hyperbolic

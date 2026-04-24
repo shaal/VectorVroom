@@ -33,6 +33,18 @@ import {
 import { fanOut, fanOutSync, kPrime as _kPrime } from './federation/fanout.js';
 import { unionByHash, selectTopK } from './federation/rerank.js';
 import { hashBrain } from './archive/hash.js';
+// Phase 2B — F6 cross-tab live training. Thin wrapper over BroadcastChannel;
+// when enabled, archiveBrain broadcasts a single-brain delta after a
+// successful insert, and received deltas are routed back through archiveBrain
+// locally (the F5 dedup short-circuits identical brains automatically).
+import {
+  start as crosstabStart,
+  stop as crosstabStop,
+  broadcastBrain as crosstabBroadcast,
+  isStarted as crosstabIsStarted,
+  stats as crosstabStats,
+} from './crosstab/channel.js';
+import { toWire as crosstabToWire, fromWire as crosstabFromWire } from './crosstab/wire.js';
 // P3.B — lineage DAG. Replaces the hand-walked parentIds traversal in
 // getLineage() with a cycle-safe DAG structure (ruvector_dag_wasm) shadowed
 // by a JS-side adjacency list for O(depth) queries. Same fallback discipline
@@ -211,6 +223,18 @@ const _federationStats = {
 // setFederationCapturer so that headless smoke tests don't pay for the render
 // hook. Plain object with an `onSnapshot(snap)` method.
 let _federationCapturer = null;
+
+// Phase 2B — F6 cross-tab. Off by default → archiveBrain is byte-identical to
+// the pre-2B path (one boolean check). Flipped via setCrosstabEnabled(true)
+// which opens the BroadcastChannel; setCrosstabEnabled(false) closes it.
+// `_crosstabReceiving` guards the receive path so the receive-then-archiveBrain
+// call doesn't re-broadcast and trigger an infinite echo loop across tabs.
+let _crosstabEnabled = false;
+let _crosstabReceiving = false;
+// Optional UI hook — uiPanels subscribes to get a pulse when a remote brain
+// lands. Stays null so headless tests don't render.
+let _crosstabOnReceive = null;
+let _crosstabOnPeerCount = null;
 
 // P3.A — index geometry. `_indexKind` is the *active* backend ('euclidean' or
 // 'hyperbolic'), flipped at ready() time based on the `?hhnsw=1` URL flag OR
@@ -492,6 +516,23 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   }
   // F3 — remember the insertion order so exportSnapshot can replay it.
   _insertionOrder.push(id);
+  // Phase 2B — F6 cross-tab broadcast. One boolean check on the hot path when
+  // disabled. When enabled AND we're not currently replaying a remote brain
+  // (see _crosstabReceiving guard in _onRemoteBrain below), post a single-
+  // brain delta. The receiving tabs hash-dedup via F5, so a re-broadcast from
+  // A → B → A is collapsed to a single node — the echo guard is belt-and-
+  // -braces against runaway traffic, not correctness.
+  if (_crosstabEnabled && !_crosstabReceiving) {
+    try {
+      const wireMeta = {
+        generation: meta.generation,
+        parentIds: meta.parentIds,
+      };
+      if (meta.fastestLap !== undefined) wireMeta.fastestLap = meta.fastestLap;
+      if (dynamicsVec instanceof Float32Array) wireMeta.dynamicsVec = dynamicsVec;
+      crosstabBroadcast(crosstabToWire(vec, meta.fitness, trackVec || null, wireMeta));
+    } catch (e) { console.warn('[crosstab] broadcast failed', e); }
+  }
   // P3.B — incremental DAG add. Safe no-op when the dag wasm didn't load.
   // The DAG uses meta.parentIds to wire edges; unknown parents (not yet in
   // the mirror) are silently skipped — same relaxed contract as the legacy
@@ -970,6 +1011,96 @@ export function getFederationStats() {
 }
 export function setFederationCapturer(capturer) {
   _federationCapturer = capturer && typeof capturer.onSnapshot === 'function' ? capturer : null;
+}
+
+// ─── Phase 2B — F6 cross-tab live training ──────────────────────────────────
+//
+// setCrosstabEnabled(true) opens a BroadcastChannel('vectorvroom-archive')
+// and wires the receive callback to _onRemoteBrain below. setCrosstabEnabled
+// (false) closes it. Off by default (URL flag ?crosstab=1 flips it on at boot
+// via main.js). The receive path re-enters archiveBrain under the
+// _crosstabReceiving guard so the broadcast hook above short-circuits — that
+// guard is what keeps two tabs from echoing forever when they see each
+// other's delta on the channel.
+export function setCrosstabEnabled(on) {
+  const want = !!on;
+  if (want === _crosstabEnabled) return _crosstabEnabled;
+  if (want) {
+    crosstabStart({
+      onBrain: (payload /* senderId unused here */) => _onRemoteBrain(payload),
+      onPeerCount: (n) => {
+        if (typeof _crosstabOnPeerCount === 'function') {
+          try { _crosstabOnPeerCount(n); } catch (_) {}
+        }
+      },
+    });
+    _crosstabEnabled = crosstabIsStarted();
+  } else {
+    crosstabStop();
+    _crosstabEnabled = false;
+  }
+  return _crosstabEnabled;
+}
+export function isCrosstabEnabled() { return !!_crosstabEnabled; }
+export function getCrosstabStats() { return crosstabStats(); }
+// UI subscription hooks — uiPanels wires these so the pill can animate on
+// remote-brain receive and update the peer count. Both are optional; passing
+// null clears the subscription.
+export function setCrosstabListeners({ onReceive, onPeerCount } = {}) {
+  _crosstabOnReceive = typeof onReceive === 'function' ? onReceive : null;
+  _crosstabOnPeerCount = typeof onPeerCount === 'function' ? onPeerCount : null;
+}
+
+// Receive path: decode the wire payload and route it back through archiveBrain.
+// Setting _crosstabReceiving before the call prevents the broadcast hook from
+// firing on this re-entrant insert — otherwise tab A → broadcast → tab B
+// receives → archiveBrain → broadcast → tab A receives → archiveBrain ...
+// infinite ping-pong. Dedup (F5) would eventually collapse the nodes but the
+// message traffic would still saturate the channel. The guard shuts it down
+// at the source.
+//
+// NOTE: we intentionally DO NOT short-circuit here even if we recognise the
+// hash — the plan calls out trusting dedup instead of re-implementing
+// idempotency. archiveBrain → (insert) → (mirror set) is the hot path that
+// already answers "have I seen this hash?" via dedup; re-checking here would
+// fork the invariant into two places.
+export function _onRemoteBrain(payload) {
+  if (!payload) return null;
+  if (!_brainDB) return null; // not ready — drop silently (pre-ready deltas will re-arrive)
+  let decoded;
+  try { decoded = crosstabFromWire(payload); }
+  catch (e) { console.warn('[crosstab] fromWire failed', e); return null; }
+  const { flat, fitness, trackVec, meta } = decoded;
+  let brain;
+  try { brain = unflatten(flat); }
+  catch (e) { console.warn('[crosstab] unflatten failed', e); return null; }
+  const dynamicsVec = (meta && meta.dynamicsVec instanceof Float32Array) ? meta.dynamicsVec : undefined;
+  const fastestLap = (meta && Number.isFinite(meta.fastestLap)) ? meta.fastestLap : undefined;
+  const generation = (meta && Number.isFinite(meta.generation)) ? meta.generation : 0;
+  const parentIds = (meta && Array.isArray(meta.parentIds)) ? meta.parentIds : [];
+  // Defensive: the sender might be on a slightly different build that
+  // encoded a trackVec of a different dim. Feed it through only when
+  // length matches this tab's TRACK_DIM — else pass null and let the
+  // received brain land track-less (archiveBrain supports that path).
+  const safeTrackVec = (trackVec instanceof Float32Array && trackVec.length === TRACK_DIM)
+    ? trackVec : null;
+  _crosstabReceiving = true;
+  let id = null;
+  try {
+    id = archiveBrain(brain, fitness, safeTrackVec, generation, parentIds, fastestLap, dynamicsVec);
+  } catch (e) {
+    console.warn('[crosstab] archiveBrain on receive failed', e);
+  } finally {
+    _crosstabReceiving = false;
+  }
+  // Fire the UI callback regardless of whether dedup made this a no-op
+  // (from the UI's perspective "a remote brain arrived" is the interesting
+  // event; whether the archive grew is an implementation detail).
+  if (typeof _crosstabOnReceive === 'function') {
+    try { _crosstabOnReceive({ id, hash: decoded.hash }); }
+    catch (_) {}
+  }
+  return id;
 }
 
 // Pull the frozen brain-id set out of the consistency module's opaque
