@@ -29,14 +29,22 @@
 // every other call becomes a no-op (or an empty-result return). Same pattern
 // as gnnReranker.js.
 
+import { hashBrain } from '../archive/hash.js';
+import {
+  maybeInsert as dedupMaybeInsert,
+  stats as dedupStats,
+  _debugReset as dedupDebugReset,
+} from '../archive/dedup.js';
+
 let _dagReady = null;
 let _dagMod = null;
 let _dag = null;                 // WasmDag instance
 let _idToIdx = new Map();        // string brain id → u32 slot in the DAG
 let _idxToId = [];               // reverse lookup by slot index
-let _nodeMeta = [];              // [{ fitness, generation, parentIds: string[] }]
+let _nodeMeta = [];              // [{ fitness, generation, parentIds: string[], duplicateCount }]
 let _childToParents = new Map(); // childIdx → number[] (parent indices)
 let _droppedEdges = 0;           // edges rejected by WasmDag's cycle check
+let _hashToIdx = new Map();      // content-hash → slot idx, for F5 dedup
 
 // Load + init the DAG wasm module. Resolves to a truthy handle when ready,
 // or null if loading fails. Safe to call multiple times.
@@ -84,7 +92,7 @@ export function addBrain(id, meta) {
   const idx = _dag.add_node(0, fitness);
   _idToIdx.set(id, idx);
   _idxToId[idx] = id;
-  _nodeMeta[idx] = { fitness, generation, parentIds };
+  _nodeMeta[idx] = { fitness, generation, parentIds, duplicateCount: 0 };
 
   const myParents = [];
   for (const pid of parentIds) {
@@ -102,6 +110,82 @@ export function addBrain(id, meta) {
   }
   _childToParents.set(idx, myParents);
   return idx;
+}
+
+// F5 — content-addressed variant of addBrain. If a node with the same flat-
+// weights hash already exists, we increment its duplicateCount instead of
+// creating a new DAG node. The canonical hash becomes the returned id key
+// so callers can use it as the archive's stable id.
+//
+// Returns { idx, canonicalId, inserted, duplicateCount }.
+//   inserted: true  → brand-new node at idx, canonical id = hash
+//   inserted: false → existing node; idx points at the canonical slot and
+//                     duplicateCount on its meta has been bumped by one.
+//
+// Backwards compat: legacy callers that only have an id+meta keep using
+// addBrain() above — this function is opt-in.
+export function addBrainWithFlat(flat, meta, fallbackId) {
+  if (!isReady()) return { idx: -1, canonicalId: null, inserted: false, duplicateCount: 0 };
+  if (!flat || typeof flat.buffer === 'undefined') {
+    return { idx: -1, canonicalId: null, inserted: false, duplicateCount: 0 };
+  }
+
+  const hash = hashBrain(flat);
+
+  // Side-effect: keep the dedup module's global counters in step so
+  // `stats()` at either layer agrees.
+  dedupMaybeInsert(flat, fallbackId != null ? String(fallbackId) : hash);
+
+  const existingIdx = _hashToIdx.get(hash);
+  if (existingIdx !== undefined) {
+    const m = _nodeMeta[existingIdx];
+    if (m) m.duplicateCount = (m.duplicateCount || 0) + 1;
+    return {
+      idx: existingIdx,
+      canonicalId: hash,
+      inserted: false,
+      duplicateCount: m ? m.duplicateCount : 0,
+    };
+  }
+
+  // Brand-new content: add it under the hash id. If a string id with the
+  // same value was already in use we fall back to the legacy addBrain path —
+  // which is the no-op-on-dup case — so we never double-create.
+  if (_idToIdx.has(hash)) {
+    const idx = _idToIdx.get(hash);
+    _hashToIdx.set(hash, idx);
+    return { idx, canonicalId: hash, inserted: false, duplicateCount: _nodeMeta[idx]?.duplicateCount || 0 };
+  }
+  const idx = addBrain(hash, meta);
+  if (idx >= 0) _hashToIdx.set(hash, idx);
+  return { idx, canonicalId: hash, inserted: true, duplicateCount: 0 };
+}
+
+// Expose dedup stats for the training panel. Combines the DAG-local view
+// ("how many nodes had at least one duplicate sighting") with the session-
+// wide counters from archive/dedup.js so the panel can show both the
+// structural and the traffic perspective.
+export function dedupeStats() {
+  let duplicateNodes = 0;
+  let totalDuplicateSightings = 0;
+  let totalNodes = 0;
+  for (let i = 0; i < _idxToId.length; i++) {
+    const m = _nodeMeta[i];
+    if (!m) continue;
+    totalNodes += 1;
+    if ((m.duplicateCount || 0) > 0) {
+      duplicateNodes += 1;
+      totalDuplicateSightings += m.duplicateCount;
+    }
+  }
+  const sessionStats = dedupStats();
+  return {
+    totalNodes,
+    duplicateNodes,
+    totalDuplicateSightings,
+    duplicateNodeRatio: totalNodes === 0 ? 0 : duplicateNodes / totalNodes,
+    session: sessionStats,
+  };
 }
 
 // Equivalence contract (see tests/lineage-dag-equivalence.html):
@@ -162,7 +246,7 @@ export function hydrateFromMirror(mirror) {
     const idx = _dag.add_node(0, fitness);
     _idToIdx.set(id, idx);
     _idxToId[idx] = id;
-    _nodeMeta[idx] = { fitness, generation, parentIds };
+    _nodeMeta[idx] = { fitness, generation, parentIds, duplicateCount: 0 };
     _childToParents.set(idx, []);
   }
 
@@ -221,6 +305,7 @@ export function getGraphSnapshot() {
       idx: i,
       fitness: meta.fitness,
       generation: meta.generation,
+      duplicateCount: meta.duplicateCount || 0,
     });
   }
   const edges = [];
@@ -252,7 +337,9 @@ export function _debugReset() {
   _idxToId = [];
   _nodeMeta = [];
   _childToParents = new Map();
+  _hashToIdx = new Map();
   _droppedEdges = 0;
+  dedupDebugReset();
   if (_dagMod) {
     try { if (_dag && typeof _dag.free === 'function') _dag.free(); } catch (_) { /* ignore */ }
     _dag = new _dagMod.WasmDag();

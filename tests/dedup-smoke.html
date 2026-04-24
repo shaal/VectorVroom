@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<!--
+  dedup-smoke.html
+  Phase 1D (F5) — content-addressed dedup smoke harness.
+
+  How to run:
+    python3 -m http.server 8767       # from repo root
+    open http://localhost:8767/tests/dedup-smoke.html
+
+  Asserts:
+    1. archive/dedup.maybeInsert on the same Float32Array twice returns
+       { inserted: true } then { inserted: false, firstSeenId: <fallback>}.
+    2. lineage/dag.dedupeStats() returns a sensible shape after two duplicate
+       addBrainWithFlat() calls on identical content.
+    3. Calling window.brainExport.importBrain(row) twice with the same row
+       does not grow the DAG (second call returns { skipped: true } and
+       the node count stays put).
+
+  PASS/FAIL lands in the DOM and on window.__dedupSmokeResult.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Dedup smoke (F5)</title>
+  <style>
+    body { font: 14px/1.5 system-ui, -apple-system, sans-serif; max-width: 780px; margin: 2em auto; padding: 0 1em; color: #222; }
+    h1 { font-size: 1.2rem; margin: 0 0 .4em; }
+    #summary { padding: .7em 1em; border-radius: 6px; margin: 1em 0; font-weight: 600; }
+    #summary.pass { background: #d3f9d8; color: #2b8a3e; }
+    #summary.fail { background: #ffe3e3; color: #c92a2a; }
+    #summary.pending { background: #fff3bf; color: #5c3c00; }
+    table { border-collapse: collapse; width: 100%; margin-top: .6em; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
+    th { background: #f4f4f4; }
+    tr.fail { background: #fff5f5; }
+    tr.pass td:first-child { color: #2b8a3e; }
+    pre { background: #f4f4f4; padding: .4em .6em; border-radius: 3px; overflow-x: auto; font-size: 11px; margin: .3em 0; }
+  </style>
+</head>
+<body>
+  <h1>Content-addressed dedup smoke (Phase 1D / F5)</h1>
+  <p>Exercises <code>archive/dedup.js</code>, <code>lineage/dag.js</code>'s
+    <code>addBrainWithFlat</code> + <code>dedupeStats</code>, and
+    <code>brainExport.importBrain</code> re-import.</p>
+  <div id="summary" class="pending">Running…</div>
+  <table id="results">
+    <thead><tr><th>#</th><th>check</th><th>verdict</th><th>detail</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+  <!-- brainExport.js is a classic script; load NeuralNetwork first so
+       reviveBrain/serializeBrain have something to lean on. -->
+  <script src="../AI-Car-Racer/network.js"></script>
+  <script>window.NeuralNetwork = NeuralNetwork; window.Level = Level;</script>
+
+  <script type="module">
+    import * as dedup from '../AI-Car-Racer/archive/dedup.js';
+    import * as hash from '../AI-Car-Racer/archive/hash.js';
+    import * as dag from '../AI-Car-Racer/lineage/dag.js';
+    import { flatten } from '../AI-Car-Racer/brainCodec.js';
+
+    // Bindings that brainExport.js (classic script) reads via window.*
+    window.__archiveDedup = dedup;
+    window.__archiveHash = hash;
+    window.__lineageDag = dag;
+    window.__flattenBrain = flatten;
+
+    // brainExport.js needs serializeBrain/reviveBrain in classic-global
+    // scope. The load order already set NeuralNetwork; now load brainExport.
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '../AI-Car-Racer/brainExport.js';
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('failed to load brainExport.js'));
+      document.head.appendChild(s);
+    });
+
+    const rows = document.getElementById('rows');
+    const summary = document.getElementById('summary');
+    const results = [];
+    function record(name, ok, detail){
+      results.push({ name, ok, detail });
+      const tr = document.createElement('tr');
+      tr.className = ok ? 'pass' : 'fail';
+      tr.innerHTML =
+        '<td>' + results.length + '</td>' +
+        '<td>' + name + '</td>' +
+        '<td>' + (ok ? 'PASS' : 'FAIL') + '</td>' +
+        '<td><pre>' + escapeHtml(typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)) + '</pre></td>';
+      rows.appendChild(tr);
+    }
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
+
+    try {
+      // ── Claim 1: maybeInsert idempotence ───────────────────────────────
+      dedup._debugReset();
+      const flatA = new Float32Array(244);
+      for (let i = 0; i < flatA.length; i++) flatA[i] = Math.sin(i * 0.17);
+      const r1 = dedup.maybeInsert(flatA, 'a');
+      const r2 = dedup.maybeInsert(flatA, 'b'); // different fallback id; canonical should still point to 'a'
+      const ok1 = r1.inserted === true
+                && r2.inserted === false
+                && r2.firstSeenId === 'a'
+                && r1.canonicalId === r2.canonicalId;
+      record('1. maybeInsert idempotent', ok1, { r1, r2 });
+
+      // ── Claim 2: dag.dedupeStats after two duplicate adds ──────────────
+      await dag.loadDag();
+      dag._debugReset();
+      if (!dag.isReady()){
+        record('2. dag.dedupeStats shape', false, 'DAG wasm failed to load — cannot exercise addBrainWithFlat');
+      } else {
+        const flatB = new Float32Array(244);
+        for (let i = 0; i < flatB.length; i++) flatB[i] = Math.cos(i * 0.11);
+        const a1 = dag.addBrainWithFlat(flatB, { fitness: 10, generation: 1 }, 'seed1');
+        const a2 = dag.addBrainWithFlat(flatB, { fitness: 10, generation: 1 }, 'seed2');
+        const a3 = dag.addBrainWithFlat(flatB, { fitness: 10, generation: 1 }, 'seed3');
+        const stats = dag.dedupeStats();
+        // Shape check: must expose at least totalNodes + duplicateNodes.
+        // Semantics: 1 physical node, 1 duplicateNode, 2 duplicate sightings.
+        const ok2 = a1.inserted === true
+                  && a2.inserted === false
+                  && a3.inserted === false
+                  && stats
+                  && stats.totalNodes === 1
+                  && stats.duplicateNodes === 1
+                  && stats.totalDuplicateSightings === 2;
+        record('2. dag.dedupeStats shape + counts', ok2, { a1, a2, a3, stats });
+      }
+
+      // ── Claim 3: re-importing via brainExport.importBrain is idempotent ─
+      dedup._debugReset();
+      dag._debugReset();
+      if (!dag.isReady()){
+        record('3. brainExport.importBrain re-import', false, 'DAG not ready; skipping');
+      } else if (!window.brainExport || typeof window.brainExport.importBrain !== 'function'){
+        record('3. brainExport.importBrain re-import', false, 'window.brainExport.importBrain missing');
+      } else {
+        // Build a concrete brain row through the same codec/serializer
+        // the production exporter uses.
+        const nn = new NeuralNetwork([10, 16, 4]);
+        const serialized = serializeBrain(nn);
+        const flatC = flatten(nn);
+        const expectedHash = hash.hashBrain(flatC);
+        const row = {
+          format: 'ai-car-racer/brain',
+          version: 1,
+          hash: expectedHash,
+          brain: serialized,
+          fitness: 5,
+          generation: 0,
+          parentIds: [],
+        };
+
+        const before = dag.info().nodeCount;
+        const imp1 = window.brainExport.importBrain(row);
+        const midNodeCount = dag.info().nodeCount;
+        const imp2 = window.brainExport.importBrain(row);
+        const afterNodeCount = dag.info().nodeCount;
+
+        const ok3 = imp1 && imp1.skipped === false
+                  && imp2 && imp2.skipped === true
+                  && imp2.canonicalId === expectedHash
+                  && afterNodeCount === midNodeCount
+                  && afterNodeCount === before + 1;
+        record('3. importBrain re-import does not grow DAG', ok3, {
+          imp1, imp2,
+          nodeCount: { before, afterFirst: midNodeCount, afterSecond: afterNodeCount },
+          expectedHash,
+        });
+      }
+
+      const allOk = results.length > 0 && results.every(r => r.ok);
+      summary.className = allOk ? 'pass' : 'fail';
+      summary.textContent = allOk
+        ? 'PASS — all ' + results.length + ' claim(s) hold.'
+        : 'FAIL — ' + results.filter(r => !r.ok).length + ' of ' + results.length + ' failed.';
+      window.__dedupSmokeResult = { ok: allOk, results };
+    } catch (e) {
+      summary.className = 'fail';
+      summary.textContent = 'FAIL — threw: ' + (e && e.message || e);
+      console.error(e);
+      window.__dedupSmokeResult = { ok: false, error: String(e && e.stack || e) };
+    }
+  </script>
+</body>
+</html>
