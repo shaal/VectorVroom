@@ -1,6 +1,6 @@
 # Enable HNSW in the ruvector WASM build
 
-**Status:** In progress — P0 done, P1 next
+**Status:** In progress — P0 + P1 done, P2 next
 **Owner:** Ofer (with Claude)
 **Created:** 2026-04-23
 **Scope:** `ruvector/` submodule + `AI-Car-Racer/ruvectorBridge.js` + `vendor/ruvector/ruvector_wasm/*`
@@ -55,18 +55,23 @@ still exact (P1–P3) or now drifts because HNSW is live (P5 — at which
 point byte-identity flips from a pass gate to a recall-comparison
 reference).
 
-### P1 — New `HnswWasmIndex` backend inside ruvector-core
+### P1 — New `HnswWasmIndex` backend inside ruvector-core — **DONE**
 
-Files touched:
-- `ruvector/crates/ruvector-core/Cargo.toml` — add feature `hnsw-wasm = ["ruvector-hyperbolic-hnsw"]`; add optional dep `ruvector-hyperbolic-hnsw = { path = "../ruvector-hyperbolic-hnsw", default-features = false, optional = true }`. Do **not** enable `parallel` or `simd` on the hyperbolic crate — those break wasm.
-- `ruvector/crates/ruvector-core/src/index.rs` — add `#[cfg(feature = "hnsw-wasm")] pub mod hnsw_wasm;`
-- `ruvector/crates/ruvector-core/src/index/hnsw_wasm.rs` (new, ~150 lines):
-  - `pub struct HnswWasmIndex { inner: HyperbolicHnsw, id_map: Vec<VectorId>, tombstones: BitVec }`
-  - `new(dimensions, distance_metric, hnsw_config)` — map core's `DistanceMetric::Cosine` / `Euclidean` to the hyperbolic crate's variants; `Manhattan` / `DotProduct` → error ("unsupported in wasm HNSW").
-  - `impl VectorIndex`: `add` appends to `id_map` and calls `.insert`; `search` calls `.search` then translates internal `usize` → `VectorId` via `id_map` and filters tombstoned entries; `remove` marks tombstone (returns true if was present).
-  - Unit tests: build→insert→search→remove cycle, round-trip with a known k=5 query, tombstone skip.
+Files added/edited (committed locally in the ruvector repo only, not pushed):
+- `crates/ruvector-core/Cargo.toml` — feature `hnsw-wasm = ["dep:ruvector-hyperbolic-hnsw"]`, optional path dep to the hyperbolic-hnsw crate with `default-features = false`.
+- `crates/ruvector-core/src/index.rs` — `#[cfg(feature = "hnsw-wasm")] pub mod hnsw_wasm;`.
+- `crates/ruvector-core/src/index/hnsw_wasm.rs` — ~170 lines. Tombstone-based removal as designed; `search` over-fetches by `tombstone_count` so top-K stays at `k` live hits. Rejects `DotProduct`/`Manhattan` metrics at construction.
+- `crates/ruvector-core/tests/hnsw_wasm_integration.rs` — integration test file rather than inline `#[cfg(test)]`, to sidestep unrelated pre-existing compile errors in other internal test modules under the `memory-only` combo.
 
-**Exit criteria:** `cargo test -p ruvector-core --no-default-features --features memory-only,uuid-support,hnsw-wasm --target wasm32-unknown-unknown` passes *(or, if wasm32 test runner is unavailable, the equivalent test under default target with all non-wasm features off)*.
+**Exit criteria met:**
+- `cargo check -p ruvector-core --no-default-features --features memory-only,uuid-support,hnsw-wasm` → clean.
+- `cargo check -p ruvector-core --features hnsw,hnsw-wasm` → clean (coexistence).
+- `cargo check -p ruvector-core` default features → unaffected.
+- `cargo test -p ruvector-core --no-default-features --features memory-only,uuid-support,hnsw-wasm --test hnsw_wasm_integration` → 9/9 passed.
+- Compile-time `Send + Sync` assertion against `HnswWasmIndex` and `dyn VectorIndex` — passes (catches a class of bugs that would otherwise only surface in P2's `Box<dyn VectorIndex>` dispatch).
+- **Bonus de-risking:** `cargo check -p ruvector-wasm --target wasm32-unknown-unknown` with `hnsw-wasm` temporarily enabled → clean. This proves the `getrandom 0.2` + `rand 0.8` transitive deps unify correctly via ruvector-wasm's existing `getrandom02` alias shim (`ruvector-wasm/Cargo.toml:24`). The temporary edit was reverted so the ruvector-wasm feature flip stays P3's work.
+
+**Pre-existing issue noted (not in scope to fix):** `storage_memory.rs:173` has a compile error under the memory-only feature combo (`json!({...})` passed where `HashMap<String, Value>` is expected). Integration tests route around it. Future cleanup opportunity.
 
 ### P2 — Wire into `vector_db.rs`
 
