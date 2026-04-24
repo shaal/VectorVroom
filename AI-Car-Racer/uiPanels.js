@@ -1430,4 +1430,122 @@
   }).catch((e) => {
     console.warn('[rv-panel] observability mount failed', e);
   });
+
+  // === Phase 3C share panel ===
+  // Rendered ONLY when `?snapshots=1` is present (same gate as the Phase
+  // 1A Export/Import row above). Three capabilities:
+  //   1. "📋 Copy shareable link" — prompts for a URL the user already
+  //      hosts the bundle at, copies `?snapshots=1&archive=<url>` to the
+  //      clipboard. We host nothing.
+  //   2. "📎 Import from URL" — fetches a .vvarchive from any URL and
+  //      pipes it through serialize.fromBlob + bridge.importSnapshot.
+  //   3. A community gallery list rendered by share/gallery.js. Ships
+  //      with one `about:blank` placeholder until real URLs are vetted
+  //      (see the external-scope note in gallery.js).
+  // The anchor comment above is load-bearing: future phases should mount
+  // above/below it, not replace it.
+  let _sharePanelGateOn = false;
+  try {
+    if (typeof URLSearchParams === 'function') {
+      _sharePanelGateOn = new URLSearchParams(window.location.search || '').get('snapshots') === '1';
+    }
+  } catch (_) { _sharePanelGateOn = false; }
+  if (_sharePanelGateOn) {
+    const shareRow = document.createElement('div');
+    shareRow.className = 'rv-share';
+    shareRow.setAttribute('data-rv', 'share');
+    shareRow.innerHTML = [
+      '<div class="rv-share-title">Share archive <span class="rv-share-hint">(URL-based)</span></div>',
+      '<div class="rv-share-buttons">',
+      '  <button type="button" class="controlButton" data-rv="share-copy" title="Paste a URL you host the bundle at, and get a shareable link copied to your clipboard">📋 Copy shareable link</button>',
+      '</div>',
+      '<div class="rv-share-import">',
+      '  <input type="url" class="rv-share-input" data-rv="share-url-input" placeholder="https://…/bundle.vvarchive.json.gz" />',
+      '  <button type="button" class="controlButton" data-rv="share-import" title="Fetch the URL and import the bundle into this browser">📎 Import from URL</button>',
+      '</div>',
+      '<div class="rv-share-status" data-rv="share-status"></div>',
+      '<div class="rv-share-gallery-mount" data-rv="share-gallery-mount"></div>',
+    ].join('');
+    root.appendChild(shareRow);
+
+    const btnCopy = shareRow.querySelector('[data-rv="share-copy"]');
+    const btnImport = shareRow.querySelector('[data-rv="share-import"]');
+    const urlInput = shareRow.querySelector('[data-rv="share-url-input"]');
+    const shareStatus = shareRow.querySelector('[data-rv="share-status"]');
+    const galleryMount = shareRow.querySelector('[data-rv="share-gallery-mount"]');
+    const setShareStatus = (msg, cls) => {
+      if (!shareStatus) return;
+      shareStatus.textContent = msg || '';
+      shareStatus.className = 'rv-share-status' + (cls ? ' rv-share-status-' + cls : '');
+    };
+
+    async function __shareImportFromUrl(url) {
+      const b = window.__rvBridge;
+      if (!b || typeof b.importSnapshot !== 'function') {
+        setShareStatus('bridge not ready — wait a moment and try again', 'error');
+        return;
+      }
+      if (!url) {
+        setShareStatus('no URL provided', 'error');
+        return;
+      }
+      try {
+        setShareStatus('fetching ' + url + ' …', 'pending');
+        const { fetchArchive } = await import('./share/url.js');
+        const { snapshot } = await fetchArchive(url);
+        const res = b.importSnapshot(snapshot);
+        const c = (res && res.counts) || { brains: 0, tracks: 0, dynamics: 0, observations: 0 };
+        setShareStatus('imported — brains ' + c.brains + ' · tracks ' + c.tracks +
+          ' · dynamics ' + c.dynamics + ' · obs ' + c.observations, 'ok');
+        console.log('[rv-share] url import counts', c);
+      } catch (e) {
+        console.warn('[rv-share] import failed', e);
+        setShareStatus('import failed: ' + (e.message || e), 'error');
+      }
+    }
+
+    btnCopy.addEventListener('click', async function () {
+      const hostedUrl = (window.prompt(
+        'Paste the URL where you uploaded your .vvarchive bundle ' +
+        '(Gist raw URL, S3, IPFS gateway, anywhere). We do NOT host.',
+        ''
+      ) || '').trim();
+      if (!hostedUrl) { setShareStatus('cancelled', ''); return; }
+      try {
+        const { buildShareUrl } = await import('./share/url.js');
+        const shareUrl = buildShareUrl(hostedUrl);
+        let copied = false;
+        try {
+          if (navigator && navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(shareUrl);
+            copied = true;
+          }
+        } catch (_) { copied = false; }
+        if (copied) {
+          setShareStatus('shareable link copied to clipboard', 'ok');
+        } else {
+          // Clipboard API can be unavailable on insecure contexts or old
+          // Safari; fall back to an alert so the user can copy manually.
+          try { window.alert('Copy this share link:\n\n' + shareUrl); } catch (_) {}
+          setShareStatus('clipboard unavailable — share link shown in alert', 'ok');
+        }
+      } catch (e) {
+        console.warn('[rv-share] copy link failed', e);
+        setShareStatus('copy failed: ' + (e.message || e), 'error');
+      }
+    });
+
+    btnImport.addEventListener('click', function () {
+      __shareImportFromUrl((urlInput.value || '').trim());
+    });
+
+    // Mount the community gallery. Each entry's button routes back
+    // through the same fetch+import flow as the "📎 Import from URL"
+    // button so the UX is consistent.
+    import('./share/gallery.js').then(({ mountGalleryPanel }) => {
+      mountGalleryPanel(galleryMount, (url) => __shareImportFromUrl(url));
+    }).catch((e) => {
+      console.warn('[rv-panel] share gallery mount failed', e);
+    });
+  }
 })();

@@ -439,6 +439,46 @@ if (typeof window !== 'undefined') {
     __applyUrlCrosstabFlag();
 }
 
+// Phase 3C — honour `?archive=<url>` at boot. Opt-in flag that auto-fetches
+// a remote .vvarchive bundle and runs it through bridge.importSnapshot. We
+// gate on BOTH `?snapshots=1` AND `?archive=<url>` so the default
+// experience is unchanged unless the user explicitly opts into Phase 1A
+// first. Errors are logged + non-fatal — the app still boots on a bad URL.
+async function __applyUrlArchiveFlag(){
+    let url = null;
+    try {
+        var usp = new URLSearchParams(window.location.search || '');
+        if (usp.get('snapshots') !== '1') return;
+        url = usp.get('archive');
+    } catch (_) { return; }
+    if (!url) return;
+    var b = null;
+    for (let i = 0; i < 20; i++) {
+        b = window.__rvBridge;
+        if (b && typeof b.ready === 'function' && typeof b.importSnapshot === 'function') break;
+        await new Promise(res => setTimeout(res, 100));
+    }
+    if (!b || typeof b.ready !== 'function' || typeof b.importSnapshot !== 'function') {
+        console.warn('[ruvector] URL flag ?archive — bridge never appeared');
+        return;
+    }
+    try {
+        await b.ready();
+        const { fetchArchive } = await import('./share/url.js');
+        const { snapshot } = await fetchArchive(url);
+        const res = b.importSnapshot(snapshot);
+        const c = (res && res.counts) || { brains: 0, tracks: 0, dynamics: 0, observations: 0 };
+        console.log('[ruvector] ?archive import ok — brains ' + c.brains +
+            ' · tracks ' + c.tracks + ' · dynamics ' + c.dynamics +
+            ' · obs ' + c.observations);
+    } catch (e) {
+        console.warn('[ruvector] ?archive import failed: ' + (e.message || e));
+    }
+}
+if (typeof window !== 'undefined') {
+    __applyUrlArchiveFlag();
+}
+
 // -----------------------------------------------------------------------------
 // Metrics HUD — per-generation survival %, median / p90 checkpoints, wall-bumps.
 // Also serves as the on-screen data source for __runBenchmark / __abTest CSVs.

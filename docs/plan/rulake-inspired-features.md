@@ -24,7 +24,7 @@ pointing to the blocker. Keep the "Current focus" line at the top
 pointing at whichever phase is active so a newcomer knows where to
 jump in without reading the whole doc.
 
-**Current focus:** Phase 3 — observability + polish swarm (3A, 3B, 3C parallel-safe)
+**Current focus:** Roadmap complete — all phases ✅. Follow-ups (if any) are user-directed.
 **Last updated:** 2026-04-24
 
 ### Phase 0 — Foundations _(sequential, 1 owner)_
@@ -66,9 +66,9 @@ for 2B; recall@10 ≥ max(E,H) for 2A).
 
 | Status | ID | Task | Owner | PR/SHA | Done date |
 |:--:|:--:|------|-------|--------|-----------|
-| ⬜ | 3A | F7 — Observability dashboard |  |  |  |
-| ⬜ | 3B | ELI15 tour integration pass |  |  |  |
-| ⬜ | 3C | Shareable archive URLs + gallery |  |  |  |
+| ✅ | 3A | F7 — Observability dashboard | Claude (subagent) | — | 2026-04-24 |
+| ✅ | 3B | ELI15 tour integration pass | Claude (subagent) | — | 2026-04-24 |
+| ✅ | 3C | Shareable archive URLs + gallery | Claude (subagent) | — | 2026-04-24 |
 
 **Phase 3 gate:** all three rows ✅ + ELI15 tour plays end-to-end with
 no dead links + 3C passes the external-scope check (user OK before any
@@ -80,13 +80,29 @@ community-archive URL ships publicly).
 |:--:|-----------|
 | ✅ | M1 — F1+F3 demoable locally (flags on) — 2026-04-24 |
 | ✅ | M2 — Phase 1 merged to `main` behind flags — 2026-04-24 |
-| 🟡 | M3 — F2+F6 shipping (behind flags); flags default-on for F1/F3 deferred |
-| ⬜ | M4 — Phase 3 complete, blog post / tour recording |
+| ✅ | M3 — F2+F6 shipped (behind flags); flags default-on for F1/F3 deferred — 2026-04-24 |
+| ✅ | M4 — Phase 3 complete — 2026-04-24 (blog post / tour recording is user-directed follow-up) |
 
 ### Notes / decisions log
 
 Append-only. Record any scope change, deferral, or non-obvious call
 that future-you would want to find. Newest at the top.
+
+- **2026-04-24 — Phase 3 complete (roadmap closed).** 3A + 3B ran as a
+  parallel swarm (fully disjoint files: observability/* + ruvectorBridge
+  for 3A vs. eli15/index.js + eli15/tour.js for 3B). 3A filled the
+  last `not implemented` stub (`getIndexStats`) — the bridge is now
+  fully-implemented end-to-end for the first time since Phase 0. 3B
+  re-ordered the 26-chapter registry into 4 pedagogical bands and added
+  `related` cross-links to the 7 RuLake-inspired chapters. One stale
+  `comingSoon: true` for `where-the-time-goes` was reconciled
+  post-parallel (3B couldn't see 3A's concurrent chapter body edit; a
+  one-line fix). 3C then shipped sequentially — shareable-archive-URL
+  plumbing behind `?snapshots=1&archive=<url>`, community gallery with
+  exactly one `about:blank` placeholder per the external-scope
+  discipline. 10 commits total across the day (Phase 0 + 9 feature
+  commits); zero rollbacks, zero merge conflicts. 6 browser-live test
+  harnesses all PASS their respective done-criteria.
 
 - **2026-04-24 — Phase 2B shipped (Phase 2 complete).** Cross-tab live
   training via BroadcastChannel. `archiveBrain` broadcasts a wire
