@@ -38,6 +38,17 @@
     <div id="fullDisplay">
         <div id="canvasDiv">
             <canvas id="myCanvas"></canvas>
+            <!-- P3.E A/B comparison canvas. Hidden by default; toggled on via
+                 the "Compare A/B" switch in the Vector Memory panel. When
+                 visible, canvasDiv switches to a vertical flex layout so A
+                 sits on top and B below, both maintaining the 16:9 aspect. -->
+            <canvas id="myCanvasB" hidden></canvas>
+            <!-- Mini HUD + delta indicator for the B side. Populated by
+                 main.js when A/B mode is active. -->
+            <div id="ab-hud" hidden>
+                <div id="ab-hud-b"></div>
+                <div id="ab-hud-delta"></div>
+            </div>
             <!-- Banner is overlaid on the canvas (pointer-events: none) so the
                  track claims the full grid area instead of surrendering a row. -->
             <div id="bottomText">

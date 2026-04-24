@@ -1092,6 +1092,10 @@ function animate(){
             perfEnabled = false;
         }
     }
+    // P3.E — A/B side render hook. Bulk render cost is gated behind an
+    // `abEnabled` check inside the hook; cost is a single property read per
+    // frame when A/B is off, so this line is safe to leave in unconditionally.
+    if (typeof window.__abRenderTick === 'function') window.__abRenderTick();
     requestAnimationFrame(animate);
 }
 
@@ -1353,3 +1357,361 @@ window.__downloadCSV = function(label, rows){
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
     console.log('[bench] downloaded CSV "' + a.download + '" (' + rows.length + ' rows)');
 };
+
+// =============================================================================
+// P3.E — A/B comparison mode
+// =============================================================================
+// Runs a second sim-worker in parallel with the primary. The B worker uses the
+// same code and same track/config but is deliberately starved of the three
+// things that make the primary special: (1) no ruvector seed-from-archive
+// (always cold random), (2) no localStorage bestBrain prior, (3) no
+// conservative-init bias. This makes B a clean "what would this look like
+// without the vector-memory layer?" baseline.
+//
+// Orchestration lives in main.js (not the worker) because rvDisabled is a
+// main-thread concept — the worker has no knowledge of ruvector. See
+// docs/plan/ruvector-proof/ab-mode/PROOF.md for architecture notes.
+(function () {
+    var canvasB = document.getElementById('myCanvasB');
+    var ctxB = null;
+    var abHud = document.getElementById('ab-hud');
+    var abHudB = document.getElementById('ab-hud-b');
+    var abHudDelta = document.getElementById('ab-hud-delta');
+
+    var abEnabled = false;
+    var simWorkerB = null;
+    var bState = null;
+    var _abLastForwardedPause = null;
+
+    function makeBState(){
+        return {
+            latestSnapshot: null,
+            frameCount: 0,
+            generation: 0,
+            metricsLog: [],
+            workerReady: false,
+            workerInited: false,
+            lastRow: null,
+            pendingBegin: null
+        };
+    }
+
+    function ensureCtxB(){
+        if (ctxB) return ctxB;
+        if (!canvasB) return null;
+        // Match primary's canvas bitmap size so road.draw() geometry lands
+        // at the same world coordinates (all spawn / checkpoint math is in
+        // 3200×1800 units; CSS shrinks the visible output).
+        canvasB.width = 3200;
+        canvasB.height = 1800;
+        ctxB = canvasB.getContext('2d');
+        return ctxB;
+    }
+
+    // Cold-random init for B, deliberately skipping the P2.C conservative-init
+    // bias that the primary's fillRandom uses. The baseline's whole point is
+    // "no help from the main-thread extras" — injecting the conservative bias
+    // would muddy the delta.
+    function buildBrainsBufferB(N){
+        var out = new Float32Array(N * FLAT_LENGTH);
+        for (var i = 0; i < N * FLAT_LENGTH; i++){
+            out[i] = Math.random() * 2 - 1;
+        }
+        return out;
+    }
+
+    function postBeginB(N){
+        if (!simWorkerB || !bState || !bState.workerReady) return;
+        if (!bState.workerInited){
+            var borders = road.borders.map(function(b){
+                return [{x:b[0].x, y:b[0].y}, {x:b[1].x, y:b[1].y}];
+            });
+            var cpList = (road.checkPointList || []).map(function(c){
+                return [{x:c[0].x, y:c[0].y}, {x:c[1].x, y:c[1].y}];
+            });
+            simWorkerB.postMessage({
+                type: 'init',
+                canvasW: canvas.width,
+                canvasH: canvas.height,
+                borders: borders,
+                checkPointList: cpList
+            });
+            bState.workerInited = true;
+        }
+        var brains = buildBrainsBufferB(N);
+        simWorkerB.postMessage({
+            type: 'begin',
+            N: N,
+            seconds: seconds,
+            maxSpeed: maxSpeed,
+            traction: traction,
+            startInfo: { x: startInfo.x, y: startInfo.y, heading: startInfo.heading || 0 },
+            poseJitter: Object.assign({ radiusPx: 0, angleDeg: 0, maxAttempts: 8 }, window.__poseJitter || {}),
+            brains: brains
+        }, [brains.buffer]);
+    }
+
+    function handleSnapshotB(m){
+        if (!bState) return;
+        bState.latestSnapshot = m;
+        bState.frameCount = m.frameCount;
+    }
+
+    // Inlined minimal version of metricsComputeRow — we only need the fields
+    // the dual-HUD + delta indicator actually read. Deliberately does NOT push
+    // to the primary __metricsLog (that would pollute benchmark captures).
+    function computeRowB(m){
+        var N = m.popN | 0;
+        if (!N || !m.popCheckpoints) return null;
+        var df = m.popDeathFrames;
+        var FPS = 60;
+        var aliveAt = function(frames){
+            var c = 0;
+            for (var i = 0; i < N; i++){
+                if (df[i] === -1 || df[i] > frames) c++;
+            }
+            return c / N;
+        };
+        var cpSorted = Int16Array.from(m.popCheckpoints).sort();
+        return {
+            gen: bState.generation,
+            popN: N,
+            maxCheckpoints: cpSorted[N - 1],
+            survival5s:  +aliveAt(5 * FPS).toFixed(4),
+            survival10s: +aliveAt(10 * FPS).toFixed(4),
+            survivalEnd: +((m.popStillAlive | 0) / N).toFixed(4),
+            bestFitness: m.fitness,
+            bestLaps: m.laps
+        };
+    }
+
+    function handleGenEndB(m){
+        if (!bState) return;
+        try {
+            var row = computeRowB(m);
+            if (row){
+                bState.metricsLog.push(row);
+                if (bState.metricsLog.length > 500) bState.metricsLog.shift();
+                bState.lastRow = row;
+                bState.generation += 1;
+                renderAbHud();
+            }
+        } catch (e) { console.warn('[ab] genEnd-B handler failed', e); }
+        // Immediately seed and begin the next B generation. No archive, no
+        // observe, no ruvector — that's the whole point of the baseline.
+        // Mirror A's pause state: if the primary is paused, don't start B
+        // spinning either (user might be frozen on a specific gen for
+        // comparison).
+        if (abEnabled && !pause && simWorkerB){
+            postBeginB(batchSize);
+        }
+    }
+
+    function renderAbHud(){
+        if (!abHudB || !abHudDelta) return;
+        var aRow = (typeof __metricsLog !== 'undefined' && __metricsLog.length)
+            ? __metricsLog[__metricsLog.length - 1] : null;
+        var bRow = bState ? bState.lastRow : null;
+        var pct = function(v){ return (v * 100).toFixed(0) + '%'; };
+        if (bRow){
+            abHudB.innerHTML =
+                '<div style="color:#fff;margin-bottom:3px;"><b>baseline (no ruvector)</b></div>' +
+                '<div style="opacity:.75;font-size:.9em;">gen ' + bRow.gen + ' · N=' + bRow.popN + '</div>' +
+                '<div>max cp <b>' + bRow.maxCheckpoints + '</b></div>' +
+                '<div>surv end <b>' + pct(bRow.survivalEnd) + '</b></div>';
+        } else {
+            abHudB.innerHTML = '<div style="opacity:.6;">(awaiting baseline gen 0)</div>';
+        }
+        if (aRow && bRow){
+            var dSurv = aRow.survivalEnd - bRow.survivalEnd;
+            var dMaxCp = (aRow.maxCheckpoints | 0) - (bRow.maxCheckpoints | 0);
+            var signPct = function(n){ return (n >= 0 ? '+' : '') + (n * 100).toFixed(0) + '%'; };
+            var sign = function(n){ return (n >= 0 ? '+' : '') + n; };
+            abHudDelta.innerHTML =
+                '<div><b>ruvector Δ (A − B)</b></div>' +
+                '<div style="margin-top:3px;">surv end ' + signPct(dSurv) +
+                ' · max cp ' + sign(dMaxCp) + '</div>';
+        } else {
+            abHudDelta.innerHTML = '<div style="opacity:.6;">(Δ ready after both sides post a gen)</div>';
+        }
+    }
+
+    function spawnB(){
+        if (simWorkerB) return;
+        simWorkerB = new Worker('sim-worker.js');
+        bState = makeBState();
+        simWorkerB.onmessage = function(ev){
+            var m = ev.data;
+            if (!m) return;
+            if (m.type === 'ready'){
+                if (!bState) return;
+                bState.workerReady = true;
+                if (bState.pendingBegin){
+                    var pb = bState.pendingBegin;
+                    bState.pendingBegin = null;
+                    postBeginB(pb.N);
+                }
+            } else if (m.type === 'snapshot'){
+                handleSnapshotB(m);
+            } else if (m.type === 'genEnd'){
+                handleGenEndB(m);
+            }
+        };
+        simWorkerB.onerror = function(err){
+            console.error('[sim-worker-B] error', err.message || err, err.filename, err.lineno);
+        };
+    }
+
+    function teardownB(){
+        // worker.terminate() synchronously kills the worker thread and drops
+        // all queued messages. This is the ONLY reliable way to stop B —
+        // setPause would leave it pinned to memory and counted against the
+        // browser's worker cap. Memory-leak-on-toggle-off is an explicit
+        // revert condition for this task; terminate + null + clear is the
+        // minimum.
+        if (simWorkerB){
+            try { simWorkerB.terminate(); } catch (_) {}
+            simWorkerB = null;
+        }
+        bState = null;
+        _abLastForwardedPause = null;
+        if (ctxB && canvasB){
+            ctxB.clearRect(0, 0, canvasB.width, canvasB.height);
+        }
+        if (abHudB) abHudB.innerHTML = '';
+        if (abHudDelta) abHudDelta.innerHTML = '';
+    }
+
+    function setEnabled(enabled){
+        if (!!enabled === abEnabled) return;
+        abEnabled = !!enabled;
+        var cDiv = document.getElementById('canvasDiv');
+        if (abEnabled){
+            ensureCtxB();
+            if (canvasB) canvasB.hidden = false;
+            if (abHud) abHud.hidden = false;
+            if (cDiv) cDiv.classList.add('ab-on');
+            spawnB();
+            // spawnB creates bState but workerReady lags the Worker's internal
+            // 'ready' message. Queue the first begin and let the onmessage
+            // handler dispatch it. If bState is somehow already ready (e.g. a
+            // future re-spawn path), fire immediately.
+            if (bState){
+                if (bState.workerReady) postBeginB(batchSize);
+                else bState.pendingBegin = { N: batchSize };
+            }
+        } else {
+            teardownB();
+            if (canvasB) canvasB.hidden = true;
+            if (abHud) abHud.hidden = true;
+            if (cDiv) cDiv.classList.remove('ab-on');
+        }
+    }
+
+    // Pause-mirror: whenever the primary's `pause` flag changes, forward to B.
+    // Polling via the render tick avoids touching buttonResponse.js setters.
+    // sim-worker's setPause handler is idempotent; duplicate sends are safe.
+    function broadcastPauseTick(){
+        if (!simWorkerB) return;
+        if (pause !== _abLastForwardedPause){
+            try { simWorkerB.postMessage({ type: 'setPause', pause: !!pause }); } catch (_) {}
+            _abLastForwardedPause = !!pause;
+        }
+    }
+
+    // Dual-ctx render. Deliberately lighter than primary's drawFromSnapshot:
+    // no top-K culling, no bestCar highlight, no sensor overlay. B is a
+    // population-level comparison view, not a debug panel. Slate palette
+    // distinguishes B visually from A's amber.
+    var _CAR_RAD_B = Math.hypot(30, 50) / 2;
+    var _CAR_ALPHA_B = Math.atan2(30, 50);
+    function drawCarQuadB(x, y, angle){
+        ctxB.beginPath();
+        ctxB.moveTo(x - Math.sin(angle - _CAR_ALPHA_B) * _CAR_RAD_B,
+                    y - Math.cos(angle - _CAR_ALPHA_B) * _CAR_RAD_B);
+        ctxB.lineTo(x - Math.sin(angle + _CAR_ALPHA_B) * _CAR_RAD_B,
+                    y - Math.cos(angle + _CAR_ALPHA_B) * _CAR_RAD_B);
+        ctxB.lineTo(x - Math.sin(Math.PI + angle + _CAR_ALPHA_B) * _CAR_RAD_B,
+                    y - Math.cos(Math.PI + angle + _CAR_ALPHA_B) * _CAR_RAD_B);
+        ctxB.lineTo(x - Math.sin(Math.PI + angle - _CAR_ALPHA_B) * _CAR_RAD_B,
+                    y - Math.cos(Math.PI + angle - _CAR_ALPHA_B) * _CAR_RAD_B);
+        ctxB.fill();
+    }
+    function drawSnapshotToCtxB(snap){
+        var N = snap.N;
+        var pos = snap.positions;
+        ctxB.globalAlpha = 0.55;
+        for (var i = 0; i < N; i++){
+            var base = i * 5;
+            // Damaged cars dim gray; live cars slate (distinct from primary amber).
+            ctxB.fillStyle = pos[base + 3] !== 0 ? '#3f434a' : '#8d97a6';
+            drawCarQuadB(pos[base], pos[base + 1], pos[base + 2]);
+        }
+        ctxB.globalAlpha = 1;
+    }
+
+    // road.draw(ctx) ignores its ctx argument — it delegates to
+    // roadEditor.redraw() which paints only the primary canvas. For ctxB we
+    // have to clear + repaint track geometry ourselves each frame. Matches
+    // the A-canvas look closely enough that the comparison reads as "same
+    // track, different population".
+    function drawTrackOnCtxB(){
+        // Solid background wipes last-frame cars — without this the canvas
+        // accumulates brush-stroke trails.
+        ctxB.fillStyle = '#15161a';
+        ctxB.fillRect(0, 0, canvasB.width, canvasB.height);
+        // Borders.
+        if (road.borders && road.borders.length){
+            ctxB.strokeStyle = '#ffffff';
+            ctxB.lineWidth = 5;
+            ctxB.beginPath();
+            for (var i = 0; i < road.borders.length; i++){
+                var b = road.borders[i];
+                ctxB.moveTo(b[0].x, b[0].y);
+                ctxB.lineTo(b[1].x, b[1].y);
+            }
+            ctxB.stroke();
+        }
+        // Checkpoints (green lines), same convention as the primary viz.
+        var cps = road.checkPointList || [];
+        if (cps.length){
+            ctxB.strokeStyle = 'rgba(120, 220, 120, 0.55)';
+            ctxB.lineWidth = 4;
+            ctxB.beginPath();
+            for (var j = 0; j < cps.length; j++){
+                var c = cps[j];
+                ctxB.moveTo(c[0].x, c[0].y);
+                ctxB.lineTo(c[1].x, c[1].y);
+            }
+            ctxB.stroke();
+        }
+    }
+
+    function renderTick(){
+        if (!abEnabled || !ctxB || phase !== 4) return;
+        try {
+            drawTrackOnCtxB();
+            if (bState && bState.latestSnapshot){
+                drawSnapshotToCtxB(bState.latestSnapshot);
+            }
+        } catch (e) {
+            console.warn('[ab] render tick failed', e);
+        }
+        broadcastPauseTick();
+    }
+
+    window.__abSetEnabled = setEnabled;
+    window.__abIsEnabled = function(){ return abEnabled; };
+    window.__abGetState = function(){
+        return bState ? {
+            enabled: abEnabled,
+            gen: bState.generation,
+            lastRow: bState.lastRow,
+            frameCount: bState.frameCount,
+            workerReady: bState.workerReady,
+            workerInited: bState.workerInited,
+            metricsLogLength: bState.metricsLog.length
+        } : { enabled: abEnabled };
+    };
+    window.__abRenderTick = renderTick;
+})();

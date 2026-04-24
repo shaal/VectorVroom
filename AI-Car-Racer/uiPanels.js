@@ -56,6 +56,13 @@
     '<div class="rv-seed-sources" data-rv="seed-sources" hidden>',
     '  <span class="rv-seed-sources-text" data-rv="seed-sources-text"></span>',
     '</div>',
+    // P3.E — Compare A/B toggle. Spins up a second sim-worker that runs the
+    // same track + tuning with ruvector disabled, rendered side-by-side.
+    // Makes the value-prop ("ruvector helps") visible without page reloads.
+    '<label class="rv-ab-toggle" title="Side-by-side: this population with ruvector vs a baseline with ruvector disabled">',
+    '  <input type="checkbox" data-rv="ab-toggle" />',
+    '  <span class="rv-ab-label">Compare A/B — baseline without ruvector</span>',
+    '</label>',
     // The reranker line, when visible, gets a badge pointing at the EMA chapter.
     // The badge is a sibling of reranker text in the same line.
     '<div class="rv-reranker" data-rv="reranker" hidden>',
@@ -224,6 +231,7 @@
     masterToggleLabel: root.querySelector('[data-rv="master-toggle-label"]'),
     seedSources: root.querySelector('[data-rv="seed-sources"]'),
     seedSourcesText: root.querySelector('[data-rv="seed-sources-text"]'),
+    abToggle: root.querySelector('[data-rv="ab-toggle"]'),
   };
 
   // Master toggle: mutating window.rvDisabled is enough — every bridgeReady()
@@ -245,6 +253,25 @@
       }
       // Repaint now rather than waiting on the next 500ms tick.
       try { tick(); } catch (e) { console.warn('[rv-panel] tick after toggle failed', e); }
+    });
+  }
+
+  // P3.E Compare A/B toggle. The work of spinning up / tearing down the
+  // second sim-worker lives in main.js (window.__abSetEnabled) because the
+  // worker lifecycle touches globals the panel can't reach. We just flip
+  // the bit and let main.js do the heavy lifting.
+  if (el.abToggle) {
+    el.abToggle.addEventListener('change', function () {
+      const enabled = !!el.abToggle.checked;
+      try {
+        if (typeof window.__abSetEnabled === 'function') {
+          window.__abSetEnabled(enabled);
+        }
+      } catch (e) {
+        console.warn('[rv-panel] ab toggle failed', e);
+        // Roll back the UI state so it matches reality.
+        el.abToggle.checked = !enabled;
+      }
     });
   }
 
