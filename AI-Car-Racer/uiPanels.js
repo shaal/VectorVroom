@@ -186,6 +186,21 @@
     '  </div>',
     '  <div class="rv-consistency-ticks" data-rv="consistency-ticks" aria-hidden="true"></div>',
     '</div>',
+    // Phase 2A (F2) — federation toggle. When checked, recommendSeeds fans
+    // out to BOTH the Euclidean and Hyperbolic brain indexes, unions the
+    // candidates, and lets the GNN reranker pick the final top-k. Default
+    // off so the default experience is unchanged; the mount point below
+    // holds the split-screen viewer that renders per-shard top-k + final
+    // unioned result when the toggle is on.
+    '<div class="rv-federation" data-rv="federation">',
+    '  <label class="rv-federation-label">',
+    '    <input type="checkbox" data-rv="federation-toggle" />',
+    '    🌐 Federation:',
+    '    <span class="rv-federation-status" data-rv="federation-status">off</span>',
+    '  </label>',
+    '  <span data-eli15="federation" role="button" tabindex="0" aria-label="Learn: federated Euclidean + Hyperbolic search"></span>',
+    '  <div class="rv-federation-viewer" data-rv="federation-viewer" hidden></div>',
+    '</div>',
     // Dynamics trajectory toggle (P1.C). Off by default — the plan keeps
     // this opt-in because it changes retrieval ordering. The count next to
     // the label shows how many archived brains have a dynamics vector
@@ -351,6 +366,11 @@
     consistency: root.querySelector('[data-rv="consistency"]'),
     consistencyRadios: root.querySelectorAll('[data-rv="consistency-radios"] input[type="radio"]'),
     consistencyTicks: root.querySelector('[data-rv="consistency-ticks"]'),
+    // Phase 2A (F2) — federation toggle + viewer mount.
+    federation: root.querySelector('[data-rv="federation"]'),
+    federationToggle: root.querySelector('[data-rv="federation-toggle"]'),
+    federationStatus: root.querySelector('[data-rv="federation-status"]'),
+    federationViewer: root.querySelector('[data-rv="federation-viewer"]'),
   };
 
   // 1C — F4. Build the tick strip: 30 tiny <span> dots that pulse via a
@@ -432,6 +452,58 @@
         // intentionally doesn't drive the strip.
       } catch (_) { /* ignore */ }
     }
+  }
+
+  // Phase 2A (F2) — federation toggle. Mount a viewer container lazily on
+  // first flip so the initial panel paint stays cheap. The toggle wires
+  // into bridge.setFederationEnabled; the viewer subscribes to a capturer
+  // that the bridge populates on every federated recommendSeeds() call.
+  let _federationCapturer = null;
+  let _federationViewerMounted = false;
+  async function ensureFederationViewer() {
+    if (_federationViewerMounted) return;
+    if (!el.federationViewer) return;
+    try {
+      const viewerMod = await import('./federation/viewer.js');
+      _federationCapturer = viewerMod.createCapturer();
+      viewerMod.mountViewer(el.federationViewer, _federationCapturer);
+      const b = window.__rvBridge;
+      if (b && typeof b.setFederationCapturer === 'function') {
+        b.setFederationCapturer(_federationCapturer);
+      }
+      _federationViewerMounted = true;
+    } catch (e) {
+      console.warn('[rv-panel] federation viewer mount failed', e);
+    }
+  }
+  if (el.federationToggle) {
+    el.federationToggle.addEventListener('change', async function () {
+      const b = window.__rvBridge;
+      if (!b || typeof b.setFederationEnabled !== 'function') return;
+      const on = !!el.federationToggle.checked;
+      try { b.setFederationEnabled(on); }
+      catch (e) { console.warn('[rv-panel] setFederationEnabled failed', e); return; }
+      if (el.federationStatus) el.federationStatus.textContent = on ? 'on' : 'off';
+      if (el.federationViewer) el.federationViewer.hidden = !on;
+      if (on) await ensureFederationViewer();
+    });
+  }
+  function renderFederation() {
+    const b = window.__rvBridge;
+    if (!b || typeof b.isFederationEnabled !== 'function') return;
+    let on = false;
+    try { on = b.isFederationEnabled(); } catch (_) { return; }
+    if (el.federationToggle && el.federationToggle.checked !== on) {
+      el.federationToggle.checked = on;
+    }
+    if (el.federationStatus) {
+      const stats = (typeof b.getFederationStats === 'function') ? b.getFederationStats() : null;
+      const shardCount = stats ? stats.shards : 0;
+      const suffix = on && shardCount ? ' (' + shardCount + ' shard' + (shardCount === 1 ? '' : 's') + ')' : '';
+      el.federationStatus.textContent = (on ? 'on' : 'off') + suffix;
+    }
+    if (el.federationViewer) el.federationViewer.hidden = !on;
+    if (on && !_federationViewerMounted) ensureFederationViewer();
   }
 
   // Master toggle: mutating window.rvDisabled is enough — every bridgeReady()
@@ -1159,6 +1231,7 @@
     // Radio-group reflection is idempotent; the cost is ~3 DOM reads
     // at 2Hz.
     renderConsistency();
+    renderFederation();
 
     // Fast-path: nothing changed → no DOM writes, no recommendSeeds call.
     if (

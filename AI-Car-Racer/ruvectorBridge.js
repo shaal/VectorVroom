@@ -25,6 +25,14 @@ import {
   isHyperbolicReady,
   HyperbolicVectorDB,
 } from './hyperbolicAdapter.js';
+// Phase 2A — F2 federated search. When _federationEnabled is on, recommendSeeds
+// fans out to BOTH _brainDB (Euclidean) and _brainDB_hyperbolic in parallel,
+// unions via F5 hash dedup, and reranks the union with the same GNN scorer the
+// single-index path uses. The modules are plain JS — no wasm — so we import
+// them eagerly.
+import { fanOut, fanOutSync, kPrime as _kPrime } from './federation/fanout.js';
+import { unionByHash, selectTopK } from './federation/rerank.js';
+import { hashBrain } from './archive/hash.js';
 // P3.B — lineage DAG. Replaces the hand-walked parentIds traversal in
 // getLineage() with a cycle-safe DAG structure (ruvector_dag_wasm) shadowed
 // by a JS-side adjacency list for O(depth) queries. Same fallback discipline
@@ -172,9 +180,37 @@ export function setBypassLora(on) { _bypassLora = !!on; }
 
 let _ready = null;
 let _brainDB = null;
+// Phase 2A — F2. When the hyperbolic wasm loads we ALSO keep a Hyperbolic
+// instance of the brain index populated in parallel with the Euclidean one,
+// so federated search can fan out to both without a rebuild stall. This is
+// decoupled from `_indexKind`: `_brainDB` stays the "primary" single-index
+// view (which setIndexKind swaps between), while `_brainDB_hyperbolic` is a
+// strictly additive shadow — populated only when isHyperbolicReady() and
+// only used when _federationEnabled flips true. The memory cost is a second
+// HNSW over brains (~same size as the Euclidean one); bounded by archive.
+let _brainDB_hyperbolic = null;
 let _trackDB = null;
 let _dynamicsDB = null;
 let _cnn = null;
+
+// Phase 2A — F2. Off by default → recommendSeeds is byte-identical to the
+// pre-2A single-index path. Flipped via setFederationEnabled({on}).
+let _federationEnabled = false;
+// Diagnostic counters surfaced via getFederationStats() — updated on every
+// federated recommendSeeds() call. `shards` is the shard count that was
+// actually fanned out to (degrades to 1 when hyperbolic didn't load).
+const _federationStats = {
+  enabled: false,
+  shards: 0,
+  lastKPrime: 0,
+  lastUnionSize: 0,
+  lastDedupeHits: 0,
+};
+// Viewer capturer (federation/viewer.js). UI mounts may subscribe; the bridge
+// pushes a snapshot after each federated query. Stays null until assigned via
+// setFederationCapturer so that headless smoke tests don't pay for the render
+// hook. Plain object with an `onSnapshot(snap)` method.
+let _federationCapturer = null;
 
 // P3.A — index geometry. `_indexKind` is the *active* backend ('euclidean' or
 // 'hyperbolic'), flipped at ready() time based on the `?hhnsw=1` URL flag OR
@@ -209,6 +245,15 @@ function rebuildIndicesFromMirror() {
   _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
   _trackDB = new IndexClass(TRACK_DIM, 'cosine');
   _dynamicsDB = new IndexClass(DYNAMICS_DIM, 'cosine');
+  // Phase 2A — rebuild the shadow hyperbolic brain index too when
+  // available. We don't shadow the track / dynamics DBs — federation only
+  // fans out over the brain index (track / dynamics are joins, not
+  // retrieval shards). When hyperbolic wasn't loaded this stays null.
+  if (isHyperbolicReady()) {
+    _brainDB_hyperbolic = new HyperbolicVectorDB(FLAT_LENGTH, 'cosine');
+  } else {
+    _brainDB_hyperbolic = null;
+  }
   for (const [id, { vector, meta }] of _trackMirror) {
     _trackDB.insert(vector, id, meta || {});
   }
@@ -225,6 +270,10 @@ function rebuildIndicesFromMirror() {
     const entry = _brainMirror.get(id);
     if (!entry) continue;
     _brainDB.insert(entry.vector, id, entry.meta || {});
+    if (_brainDB_hyperbolic) {
+      try { _brainDB_hyperbolic.insert(entry.vector, id, entry.meta || {}); }
+      catch (e) { console.warn('[federation] hyperbolic shadow insert failed', e); }
+    }
   }
 }
 
@@ -326,6 +375,14 @@ export function ready() {
     _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
     _trackDB = new IndexClass(TRACK_DIM, 'cosine');
     _dynamicsDB = new IndexClass(DYNAMICS_DIM, 'cosine');
+    // Phase 2A — F2. Stand up the hyperbolic shadow brain index so federated
+    // search has something to fan out to, regardless of whether _indexKind is
+    // currently hyperbolic. When the wasm didn't load this stays null and
+    // federation gracefully degrades to Euclidean-only (see recommendSeeds).
+    if (isHyperbolicReady()) {
+      try { _brainDB_hyperbolic = new HyperbolicVectorDB(FLAT_LENGTH, 'cosine'); }
+      catch (e) { console.warn('[federation] hyperbolic shadow init failed', e); _brainDB_hyperbolic = null; }
+    }
     _cnn = new CnnEmbedder(); // default 224×224, 512-dim, L2-normalized
     // Kick off GNN + LoRA loads in parallel with hydrate(). Best-effort: if
     // either resolves to null, the corresponding code path silently falls back
@@ -424,6 +481,15 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   if (dynamicsId !== null) meta.dynamicsId = dynamicsId;
   const id = _brainDB.insert(vec, null, meta);
   _brainMirror.set(id, { vector: vec, meta });
+  // Phase 2A — F2 shadow insert. The shadow uses its own id space internally
+  // but we pass the Euclidean id through so both indexes return the SAME
+  // id on search (which is what unionByHash relies on to collapse the two
+  // hits into a single candidate). Failure here is non-fatal — the shadow
+  // just diverges from the primary by one brain, which federation tolerates.
+  if (_brainDB_hyperbolic) {
+    try { _brainDB_hyperbolic.insert(vec, id, meta); }
+    catch (e) { console.warn('[federation] hyperbolic shadow insert failed', e); }
+  }
   // F3 — remember the insertion order so exportSnapshot can replay it.
   _insertionOrder.push(id);
   // P3.B — incremental DAG add. Safe no-op when the dag wasm didn't load.
@@ -515,20 +581,51 @@ export function recommendSeeds(trackVec, k = 5) {
     ? _getFrozenBrainIdSet()
     : null;
 
-  const candidates = new Map(); // brainId -> trackSim (best across matched tracks)
+  // Build a track-hit map once. Used by both the single-index path (inline
+  // below) and the federation branch (as the source of representative brain
+  // + trackSim per union candidate). Keyed by trackId → similarity.
+  let trackSimByTrackId = null;
   if (queryVec && !_trackDB.isEmpty()) {
+    trackSimByTrackId = new Map();
     const trackHits = _trackDB.search(queryVec, Math.min(5, Number(_trackDB.len())));
-    for (const th of trackHits) {
-      const sim = 1 - th.score;
-      for (const [bid, entry] of _brainMirror) {
-        // 1C frozen-mode filter: skip brains inserted after the freeze
-        // point. `frozenIds === null` in fresh/eventual modes so this
-        // branch degenerates to the existing check.
-        if (frozenIds && !frozenIds.has(bid)) continue;
-        if (entry.meta && entry.meta.trackId === th.id) {
-          const prev = candidates.get(bid);
-          if (prev === undefined || prev < sim) candidates.set(bid, sim);
-        }
+    for (const th of trackHits) trackSimByTrackId.set(th.id, 1 - th.score);
+  }
+
+  // Phase 2A — F2 federation branch. Fans out to Euclidean + Hyperbolic
+  // shadow brain indexes in parallel using a representative brain vector
+  // derived from the best track-matching brain (or the highest-fitness
+  // brain when there's no track hit). Unions candidates by content hash
+  // (1D/F5), applies the 1C frozenIds filter to the union (NOT per-shard),
+  // then lets the GNN rerank the union. The final top-k obeys the same
+  // shape the single-index path returns. On graceful degrade (hyperbolic
+  // wasm missing), we fall out to Euclidean-only — which still flows
+  // through the fanout path so the code stays uniform.
+  if (_federationEnabled && queryVec) {
+    const fedOut = _recommendSeedsFederated({
+      queryVec,
+      trackVec,
+      k,
+      frozenIds,
+      trackSimByTrackId,
+    });
+    if (consistencyMode === 'eventual' && cacheKey) {
+      _consistencyRecordQuery(cacheKey, fedOut);
+    }
+    return fedOut;
+  }
+
+  const candidates = new Map(); // brainId -> trackSim (best across matched tracks)
+  if (trackSimByTrackId) {
+    for (const [bid, entry] of _brainMirror) {
+      // 1C frozen-mode filter: skip brains inserted after the freeze
+      // point. `frozenIds === null` in fresh/eventual modes so this
+      // branch degenerates to the existing check.
+      if (frozenIds && !frozenIds.has(bid)) continue;
+      const tid = entry.meta && entry.meta.trackId;
+      if (tid != null && trackSimByTrackId.has(tid)) {
+        const sim = trackSimByTrackId.get(tid);
+        const prev = candidates.get(bid);
+        if (prev === undefined || prev < sim) candidates.set(bid, sim);
       }
     }
   }
@@ -633,6 +730,246 @@ export function recommendSeeds(trackVec, k = 5) {
     _consistencyRecordQuery(cacheKey, out);
   }
   return out;
+}
+
+// Phase 2A — F2. Federated retrieval path. Fans out to all active brain
+// shards in parallel, unions by content hash (F5), applies the 1C
+// frozen-ids filter to the UNIONED set, reranks the union via the same
+// GNN scorer the single-index path uses, and returns the top-k in the
+// usual { id, vector, meta, score, trackSim, dynamicsSim } shape.
+//
+// Representative brain vector: we need a brain-dim query (FLAT_LENGTH),
+// but the caller only has a track-dim vector (TRACK_DIM). We derive a
+// representative by picking the best-fit brain whose track matches the
+// query — "closest existing brain to this track" — and using its
+// flattened weights as the brain-index query. When no track matches we
+// fall back to the globally best-fit brain so federation still produces
+// something on cold / novel tracks. This is a pragmatic bridge between
+// the track-keyed query API recommendSeeds has historically accepted and
+// the brain-keyed search the HNSW indexes speak natively.
+function _pickRepresentativeBrain({ trackSimByTrackId, frozenIds }) {
+  let bestId = null;
+  let bestScore = -Infinity;
+  if (trackSimByTrackId && trackSimByTrackId.size > 0) {
+    for (const [bid, entry] of _brainMirror) {
+      if (frozenIds && !frozenIds.has(bid)) continue;
+      const tid = entry.meta && entry.meta.trackId;
+      if (tid == null || !trackSimByTrackId.has(tid)) continue;
+      const tsim = trackSimByTrackId.get(tid);
+      const fit = (entry.meta && entry.meta.fitness) || 0;
+      // Rank by trackSim * (1 + normalised fitness) so a closer track
+      // wins ties against a marginally-fitter brain on a weaker track.
+      const s = tsim * (1 + Math.tanh(fit / 100));
+      if (s > bestScore) { bestScore = s; bestId = bid; }
+    }
+  }
+  if (bestId == null) {
+    // Cold-fallback — pick the globally highest-fitness brain among the
+    // non-frozen-filtered set.
+    for (const [bid, entry] of _brainMirror) {
+      if (frozenIds && !frozenIds.has(bid)) continue;
+      const fit = (entry.meta && entry.meta.fitness) || 0;
+      if (fit > bestScore) { bestScore = fit; bestId = bid; }
+    }
+  }
+  return bestId;
+}
+
+function _recommendSeedsFederated({ queryVec, trackVec, k, frozenIds, trackSimByTrackId }) {
+  const kk = Math.max(1, k | 0);
+  // Build the shard list. Hyperbolic shard is only included when the
+  // shadow index is populated (wasm loaded + archive hydrated through
+  // the shadow path). Missing → federation gracefully degrades to
+  // Euclidean-only and we note it in the stats.
+  const shards = [{ name: 'euclidean', db: _brainDB, metric: 'cosine' }];
+  if (_brainDB_hyperbolic && !_brainDB_hyperbolic.isEmpty()) {
+    shards.push({ name: 'hyperbolic', db: _brainDB_hyperbolic, metric: 'poincare' });
+  } else if (_federationEnabled && !_brainDB_hyperbolic) {
+    // Only warn once per session — keep the hot path silent.
+    if (!_federationStats._degradeWarned) {
+      console.warn('[federation] hyperbolic shadow unavailable — degrading to Euclidean-only');
+      _federationStats._degradeWarned = true;
+    }
+  }
+
+  const repId = _pickRepresentativeBrain({ trackSimByTrackId, frozenIds });
+  if (!repId || !_brainMirror.has(repId)) {
+    // Nothing to query with — empty archive or every brain filtered out.
+    _federationStats.enabled = true;
+    _federationStats.shards = shards.length;
+    _federationStats.lastKPrime = _kPrime(kk, shards.length);
+    _federationStats.lastUnionSize = 0;
+    _federationStats.lastDedupeHits = 0;
+    _pushFederationSnapshot({ k: kk, shards: [], unionSize: 0, dedupeHits: 0, final: [] });
+    return [];
+  }
+  const repVec = _brainMirror.get(repId).vector;
+  const shardResults = fanOutSync(repVec, kk, shards);
+  const kp = shardResults[0] ? shardResults[0].kPrime : _kPrime(kk, shards.length);
+
+  // Hash lookup: every candidate id is a brain id in _brainMirror, so
+  // we can compute the xxHash32 of its flat vector on demand. This is
+  // the "F5 dedup via has()" point of contact — ids that collide on
+  // hash (same content, different ids) collapse into one union entry.
+  const hashLookup = (id) => {
+    const entry = _brainMirror.get(id);
+    if (!entry || !(entry.vector instanceof Float32Array)) return null;
+    try { return hashBrain(entry.vector); } catch (_) { return null; }
+  };
+  const { candidates: unionPre, dedupeHits } = unionByHash(shardResults, hashLookup);
+
+  // Apply the 1C frozen-ids filter to the UNION (not per-shard). A brain
+  // archived after freeze can legitimately surface from either shard
+  // (both get populated on archiveBrain), so the filter has to run here.
+  const union = frozenIds
+    ? unionPre.filter((c) => frozenIds.has(c.id))
+    : unionPre;
+
+  // Build a trackSim map for every union candidate so GNN + final
+  // composite score can use the existing formula shape.
+  const candidatesMap = new Map();
+  for (const c of union) {
+    const entry = _brainMirror.get(c.id);
+    if (!entry) continue;
+    const tid = entry.meta && entry.meta.trackId;
+    const tsim = (trackSimByTrackId && tid != null && trackSimByTrackId.has(tid))
+      ? trackSimByTrackId.get(tid) : 0;
+    candidatesMap.set(c.id, tsim);
+  }
+
+  // GNN rerank over the unioned candidate set. Uses the exact same
+  // gnnScore call the single-index path does (just a larger set).
+  // Respects the P4.A reranker policy: 'none' → skip, 'ema' / 'auto' →
+  // fall through to EMA/obs weighting, 'gnn' → force GNN when loaded.
+  let useGnn = false;
+  let skipRerank = false;
+  if (_forceEma) useGnn = false;
+  else if (_rerankerPolicy === 'none') skipRerank = true;
+  else if (_rerankerPolicy === 'ema') useGnn = false;
+  else if (_rerankerPolicy === 'gnn') useGnn = gnnIsReady();
+  else useGnn = gnnIsReady() && _brainMirror.size >= GNN_MIN_ARCHIVE;
+  const gnnMap = (useGnn && candidatesMap.size > 0) ? gnnScore(_brainMirror, candidatesMap) : null;
+  if (skipRerank) _rerankerMode = 'none';
+  else if (useGnn && gnnMap) _rerankerMode = 'gnn';
+  else _rerankerMode = candidatesMap.size > 0 ? 'ema' : 'none';
+
+  // Composite score per candidate, mirroring the single-index path's
+  // trackTerm * fitTerm * rerankTerm * dynamicsTerm product so federated
+  // results sit in the same band as non-federated ones (downstream
+  // consumers — the rv-panel rendering, main.js seed selection — don't
+  // need to special-case federation).
+  const dynamicsSimMap = new Map();
+  const dynamicsActive = _useDynamics && _queryDynamicsVec && !_dynamicsDB.isEmpty();
+  if (dynamicsActive) {
+    const dHits = _dynamicsDB.search(_queryDynamicsVec, Math.min(_dynamicsMirror.size, 25));
+    const hitMap = new Map();
+    for (const h of dHits) hitMap.set(h.id, 1 - h.score);
+    for (const c of union) {
+      const entry = _brainMirror.get(c.id);
+      const did = entry && entry.meta && entry.meta.dynamicsId;
+      if (did != null && hitMap.has(did)) dynamicsSimMap.set(c.id, hitMap.get(did));
+    }
+  }
+
+  const scoreMap = new Map();
+  for (const c of union) {
+    const entry = _brainMirror.get(c.id);
+    if (!entry) continue;
+    const trackSim = candidatesMap.get(c.id) || 0;
+    const normFit = Math.tanh(((entry.meta && entry.meta.fitness) || 0) / 100);
+    const trackTerm = 0.5 + 0.5 * trackSim;
+    const fitTerm = 0.5 + 0.5 * normFit;
+    let rerankTerm;
+    if (skipRerank) rerankTerm = 1;
+    else if (gnnMap && gnnMap.has(c.id)) rerankTerm = gnnMap.get(c.id);
+    else {
+      const obs = _observations.get(c.id);
+      rerankTerm = 1 + 0.3 * (obs ? obs.weight : 0);
+    }
+    const dynamicsSim = dynamicsSimMap.has(c.id) ? dynamicsSimMap.get(c.id) : 0;
+    const dynamicsTerm = dynamicsActive ? (1 + DYNAMICS_TERM_WEIGHT * dynamicsSim) : 1;
+    scoreMap.set(c.id, trackTerm * fitTerm * rerankTerm * dynamicsTerm);
+  }
+  const top = selectTopK(union, scoreMap, kk);
+
+  // Re-hydrate to the canonical recommendSeeds return shape.
+  const out = top.map((t) => {
+    const entry = _brainMirror.get(t.id);
+    const trackSim = candidatesMap.get(t.id) || 0;
+    const dynamicsSim = dynamicsSimMap.has(t.id) ? dynamicsSimMap.get(t.id) : 0;
+    return {
+      id: t.id,
+      vector: entry ? entry.vector : null,
+      meta: entry ? entry.meta : null,
+      score: t.score,
+      trackSim,
+      dynamicsSim,
+      // Federation-only: which shard(s) surfaced this id. Keeps the
+      // viewer's provenance column honest without bloating the single-
+      // index return path (federated-disabled callers never see it).
+      shards: t.shards,
+    };
+  });
+
+  _federationStats.enabled = true;
+  _federationStats.shards = shards.length;
+  _federationStats.lastKPrime = kp;
+  _federationStats.lastUnionSize = union.length;
+  _federationStats.lastDedupeHits = dedupeHits;
+
+  // Push a snapshot to the viewer for diagnostic rendering. No-op when
+  // no capturer is registered (headless tests).
+  _pushFederationSnapshot({
+    k: kk,
+    kPrime: kp,
+    shards: shardResults,
+    unionSize: union.length,
+    dedupeHits,
+    final: out.map((o) => ({ id: o.id, score: o.score, shards: o.shards, hash: null })),
+  });
+  return out;
+}
+
+function _pushFederationSnapshot(snap) {
+  if (!_federationCapturer || typeof _federationCapturer.onSnapshot !== 'function') return;
+  try { _federationCapturer.onSnapshot(snap); } catch (e) { console.warn('[federation] capturer push failed', e); }
+}
+
+// Phase 2A — F2. Public federation controls.
+//
+// setFederationEnabled(on) flips the runtime switch. When ON, recommendSeeds
+// takes the fan-out + union + rerank path; when OFF, behaviour is byte-
+// identical to the pre-2A single-index path. This composes with 1C
+// consistency modes — the cache + frozen-filter logic wraps the federated
+// branch just like the single-index branch.
+//
+// isFederationEnabled() is a cheap read for UI gating.
+//
+// getFederationStats() returns the last-query diagnostic snapshot. Intended
+// for the rv-panel viewer and tests; this is NOT the 3A index-stats stub.
+export function setFederationEnabled(on) {
+  _federationEnabled = !!on;
+  if (_federationEnabled && !_brainDB_hyperbolic) {
+    console.warn('[federation] enabled but hyperbolic shadow missing — only Euclidean shard will be queried');
+  }
+  return _federationEnabled;
+}
+export function isFederationEnabled() { return !!_federationEnabled; }
+export function getFederationStats() {
+  return {
+    enabled: !!_federationEnabled,
+    shards: _federationStats.shards,
+    lastKPrime: _federationStats.lastKPrime,
+    lastUnionSize: _federationStats.lastUnionSize,
+    lastDedupeHits: _federationStats.lastDedupeHits,
+    // Snapshot of which shards the bridge *would* fan out to right now,
+    // so UI can show "1 shard (degraded)" vs "2 shards" without calling
+    // recommendSeeds. Not part of the plan's required shape but cheap.
+    availableShards: _brainDB_hyperbolic ? ['euclidean', 'hyperbolic'] : ['euclidean'],
+  };
+}
+export function setFederationCapturer(capturer) {
+  _federationCapturer = capturer && typeof capturer.onSnapshot === 'function' ? capturer : null;
 }
 
 // Pull the frozen brain-id set out of the consistency module's opaque
@@ -956,6 +1293,14 @@ export async function hydrate() {
       _brainDB.insert(vec, row.id, row.meta || {});
       _brainMirror.set(row.id, { vector: vec, meta: row.meta || {} });
       _insertionOrder.push(row.id);
+      // Phase 2A — F2 shadow hydrate. Keep the hyperbolic brain index in
+      // lock-step with the Euclidean one so federation can fan out over a
+      // hydrated archive the moment it's flipped on. Same id so union
+      // collapses cross-shard duplicates of the same brain.
+      if (_brainDB_hyperbolic) {
+        try { _brainDB_hyperbolic.insert(vec, row.id, row.meta || {}); }
+        catch (e) { console.warn('[federation] hyperbolic shadow hydrate failed', e); }
+      }
     }
     _tEnd('3d_insert_brains', _tBrains);
     const _tObs = _tStart();
@@ -1094,6 +1439,15 @@ export function hydrateFromFixture(fixture) {
   _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
   _trackDB = new IndexClass(TRACK_DIM, 'cosine');
   _dynamicsDB = new IndexClass(DYNAMICS_DIM, 'cosine');
+  // Phase 2A — F2 fixture rehydrate for the shadow hyperbolic index. Same
+  // rule as the IDB hydrate path: when the wasm loaded we re-create the
+  // shadow from scratch and insert every brain below.
+  if (isHyperbolicReady()) {
+    try { _brainDB_hyperbolic = new HyperbolicVectorDB(FLAT_LENGTH, 'cosine'); }
+    catch (e) { console.warn('[federation] hyperbolic shadow rebuild failed', e); _brainDB_hyperbolic = null; }
+  } else {
+    _brainDB_hyperbolic = null;
+  }
   const toF32 = (v) => (v instanceof Float32Array) ? v : new Float32Array(v);
   for (const row of (fixture.tracks || [])) {
     const vec = toF32(row.vec);
@@ -1107,6 +1461,11 @@ export function hydrateFromFixture(fixture) {
     _brainDB.insert(vec, row.id, row.meta || {});
     _brainMirror.set(row.id, { vector: vec, meta: row.meta || {} });
     _insertionOrder.push(row.id);
+    // Phase 2A — F2 shadow fixture rehydrate.
+    if (_brainDB_hyperbolic) {
+      try { _brainDB_hyperbolic.insert(vec, row.id, row.meta || {}); }
+      catch (e) { console.warn('[federation] hyperbolic shadow fixture insert failed', e); }
+    }
   }
   for (const row of (fixture.observations || [])) {
     _observations.set(row.id, { weight: row.weight || 0, count: row.count | 0 });
@@ -1203,6 +1562,25 @@ export function importSnapshot(s) {
     dynamicsMirror: _dynamicsMirror,
     observations: _observations,
   });
+  // Phase 2A — F2. After applySnapshot we rebuild the hyperbolic shadow
+  // from the refreshed mirror in one pass so federation stays correct on
+  // any subsequent recommendSeeds(). applySnapshot itself doesn't know
+  // about the shadow — it's a 2A addition that composes with 1A's
+  // snapshot pipeline rather than being owned by it.
+  if (isHyperbolicReady()) {
+    try {
+      _brainDB_hyperbolic = new HyperbolicVectorDB(FLAT_LENGTH, 'cosine');
+      for (const [id, { vector, meta }] of _brainMirror) {
+        try { _brainDB_hyperbolic.insert(vector, id, meta || {}); }
+        catch (e) { console.warn('[federation] shadow snapshot insert failed', e); }
+      }
+    } catch (e) {
+      console.warn('[federation] shadow snapshot rebuild failed', e);
+      _brainDB_hyperbolic = null;
+    }
+  } else {
+    _brainDB_hyperbolic = null;
+  }
   // Refresh our own insertion-order tracker to match what the importer
   // actually replayed. Further archiveBrain calls append to this same array.
   _insertionOrder = (s.hnsw && Array.isArray(s.hnsw.insertionOrder))
@@ -1287,6 +1665,16 @@ export async function _debugReset() {
   _observations.clear();
   _insertionOrder = [];
   _queryDynamicsVec = null;
+  // Phase 2A — reset federation diagnostic counters. The shadow index is
+  // rebuilt by the next hydrate / hydrateFromFixture call, so we don't
+  // touch _brainDB_hyperbolic here (matching the pre-2A policy that
+  // _debugReset leaves the live _brainDB alone — hydrateFromFixture
+  // rebuilds it, same goes for the shadow).
+  _federationStats.enabled = false;
+  _federationStats.shards = 0;
+  _federationStats.lastKPrime = 0;
+  _federationStats.lastUnionSize = 0;
+  _federationStats.lastDedupeHits = 0;
   sonaEngineDebugReset();
   try { dagDebugReset(); } catch (_) { /* safe to ignore */ }
   if (typeof indexedDB !== 'undefined') {
