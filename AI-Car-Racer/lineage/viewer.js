@@ -209,7 +209,13 @@
       const y = TOP_PAD + ((n.generation - genMin) / genRange) * innerH;
       const t = (n.fitness - fitMin) / fitRange; // 0..1
       const r = MIN_NODE_R + t * (MAX_NODE_R - MIN_NODE_R);
-      placed.push({ id: n.id, x, y, r, fitness: n.fitness, generation: n.generation, t });
+      placed.push({
+        id: n.id, x, y, r,
+        fitness: n.fitness,
+        generation: n.generation,
+        t,
+        duplicateCount: n.duplicateCount || 0,
+      });
     }
     return { nodes: placed, edges: edges, fitMin, fitMax, genMin, genMax };
   }
@@ -256,6 +262,29 @@
       ctx.strokeStyle = 'rgba(0,0,0,0.35)';
       ctx.lineWidth = 0.8;
       ctx.stroke();
+    }
+
+    // F5: duplicate badge. For any node that has absorbed ≥1 content-
+    // identical sighting we draw a small "×N" label above-right of the dot.
+    // N is total sightings (1 + duplicateCount) so the reader sees "×3"
+    // when a brain has been seen three times, which matches intuition better
+    // than "×2 extra".
+    ctx.font = '9px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    for (const n of l.nodes) {
+      if (!n.duplicateCount) continue;
+      const total = 1 + n.duplicateCount;
+      const label = '×' + total;
+      const bx = n.x + n.r + 2;
+      const by = n.y - n.r - 1;
+      const pad = 2;
+      const w = ctx.measureText(label).width + pad * 2;
+      const h = 11;
+      ctx.fillStyle = 'rgba(211,139,75,0.9)'; // warm — same palette as hi-fit colour
+      ctx.fillRect(bx, by - h / 2, w, h);
+      ctx.fillStyle = '#fff';
+      ctx.fillText(label, bx + pad, by);
     }
 
     // Axis label — a small "gen 0" / "gen N" hint so the reader knows which
@@ -315,9 +344,13 @@
     const hit = hitTest(ev);
     if (!hit || !tooltipEl) { hideTooltip(); return; }
     tooltipEl.hidden = false;
+    const dupSuffix = hit.duplicateCount
+      ? ' · ×' + (1 + hit.duplicateCount) + ' seen'
+      : '';
     tooltipEl.textContent =
       hit.id + ' · gen ' + hit.generation +
-      ' · fit ' + (Number.isFinite(hit.fitness) ? hit.fitness.toFixed(1) : '—');
+      ' · fit ' + (Number.isFinite(hit.fitness) ? hit.fitness.toFixed(1) : '—') +
+      dupSuffix;
     const rect = canvas.getBoundingClientRect();
     // Position above the cursor; clamp to canvas bounds.
     const tx = Math.max(0, Math.min(rect.width - 140, hit.x - 70));

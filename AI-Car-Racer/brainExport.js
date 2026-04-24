@@ -9,8 +9,39 @@
 //                   (vendor/ruvector/rvf_wasm/*, published as @ruvector/rvf-
 //                   wasm) is not yet vendored in this app. See block comment
 //                   on exportBrainPackRvf() below for the concrete wiring.
+//
+// Phase 1D (F5): every exported row now carries a content-hash so re-imports
+// can short-circuit at the dedup layer — same file imported twice never
+// grows the lineage DAG.
 
 // ---------- Tier 1: JSON brain export/import --------------------------------
+
+// Bind lazily from the ES-module dedup/hash helpers so this classic script
+// can still run before the modules finish loading. Falls back to inline
+// behaviour when the bindings aren't ready yet (e.g. unit tests that stub
+// them on window.__archiveDedup / window.__archiveHash directly).
+function _dedupModule(){ return (typeof window !== 'undefined' && window.__archiveDedup) || null; }
+function _hashModule(){ return (typeof window !== 'undefined' && window.__archiveHash) || null; }
+
+// Produce a content hash for a serialized brain row. Revives the nested
+// network, flattens it with brainCodec, then delegates to archive/hash.js.
+// Returns null if we can't hash (missing modules / bad topology).
+function _hashSerializedBrain(serialized){
+    try {
+        const hashMod = _hashModule();
+        if (!hashMod || typeof hashMod.hashBrain !== 'function') return null;
+        // brainCodec exports `flatten` as an ES module symbol — it's bridged
+        // to window by ruvectorBridge's boot on classic-script pages.
+        const flat = (typeof window !== 'undefined' && typeof window.__flattenBrain === 'function')
+            ? window.__flattenBrain(typeof reviveBrain === 'function' ? reviveBrain(serialized) : serialized)
+            : null;
+        if (!flat) return null;
+        return hashMod.hashBrain(flat);
+    } catch (e) {
+        console.warn('[brainExport] hash failed; export will omit hash field', e);
+        return null;
+    }
+}
 
 function _currentBestBrainSerialized(){
     // Prefer the live-best (what the user just watched win this gen). Fall
@@ -40,11 +71,13 @@ function exportBrainJson(){
         alert('No brain to export yet — train a generation first, or import one.');
         return;
     }
+    const hash = _hashSerializedBrain(brain);
     const payload = {
         format: 'ai-car-racer/brain',
         version: 1,
         exportedAt: new Date().toISOString(),
         fastLap: (typeof fastLap !== 'undefined') ? fastLap : null,
+        hash: hash,   // F5: content fingerprint; re-imports dedup against this
         brain: brain
     };
     const json = JSON.stringify(payload, null, 2);
@@ -89,25 +122,59 @@ function importBrainJson(){
     input.click();
 }
 
-function _applyImportedBrainText(text){
-    const parsed = JSON.parse(text);
-    // Accept both the wrapped export format and a bare serialized brain (so
-    // users can paste a raw localStorage.bestBrain value too).
-    const brain = (parsed && parsed.brain && parsed.brain.levels) ? parsed.brain
-                 : (parsed && parsed.levels) ? parsed
-                 : null;
+// Programmatic import. Accepts an already-parsed row (the wrapped export
+// payload, a bare serialized brain, or `{ brain, hash }`). Returns
+// { skipped, reason?, canonicalId?, hash? } so callers (smoke tests,
+// future "import archive bundle" flows) can count dedup hits.
+//
+// F5: if the row's content hash is already known to the lineage DAG we
+// short-circuit — no localStorage mutation, no restartBatch, and the
+// duplicate counter on the canonical node gets bumped exactly the way a
+// live archive hit would.
+function importBrain(row){
+    // Accept a few input shapes. Canonical is { brain: {levels}, hash }.
+    const brain = (row && row.brain && row.brain.levels) ? row.brain
+                : (row && row.levels) ? row
+                : null;
     if (!brain) throw new Error('File is not a recognised brain JSON.');
 
-    // Topology sanity: the app's NN is [10,16,4] as of Phase P5. Revive
-    // tolerates the legacy nested shape, but an imported brain with a
-    // different input width would silently mismatch runtime inputs — reject
-    // loudly instead.
+    // Topology sanity.
     const topo = brain.levels.map(L => L.inputCount).concat(
         [brain.levels[brain.levels.length - 1].outputCount]
     );
     const expected = [10, 16, 4];
     if (topo.length !== expected.length || topo.some((n, i) => n !== expected[i])){
         throw new Error('Topology mismatch. Expected [10,16,4], got [' + topo.join(',') + '].');
+    }
+
+    // Compute or trust the row's hash. A row without a hash (pre-F5 export
+    // or bare brain paste) gets hashed on the fly so dedup still applies.
+    let hash = (row && typeof row.hash === 'string') ? row.hash : null;
+    if (!hash) hash = _hashSerializedBrain(brain);
+
+    // F5 dedup: ask the lineage DAG whether it already holds this brain.
+    // Using addBrainWithFlat even for skip-detection keeps the duplicate
+    // counter ticking so re-imports are visible in dedupeStats without
+    // growing the node count.
+    const dagDedup = (typeof window !== 'undefined' && window.__lineageDag) || null;
+    if (dagDedup && typeof dagDedup.addBrainWithFlat === 'function' && typeof window.__flattenBrain === 'function'){
+        try {
+            const live = (typeof reviveBrain === 'function') ? reviveBrain(brain) : brain;
+            const flat = window.__flattenBrain(live);
+            if (flat) {
+                const res = dagDedup.addBrainWithFlat(flat, {
+                    fitness: (row && row.fitness) || 0,
+                    generation: (row && row.generation) || 0,
+                    parentIds: Array.isArray(row && row.parentIds) ? row.parentIds : [],
+                }, hash);
+                if (res && res.inserted === false && res.canonicalId){
+                    console.log('[brainExport] import skipped — brain already in archive', res.canonicalId);
+                    return { skipped: true, reason: 'duplicate', canonicalId: res.canonicalId, hash };
+                }
+            }
+        } catch (e) {
+            console.warn('[brainExport] dedup check failed, proceeding with import', e);
+        }
     }
 
     // Stash the old best so "Restore Old Brain" can roll back, then install.
@@ -119,6 +186,26 @@ function _applyImportedBrainText(text){
         restartBatch();
     }
     console.log('[brainExport] imported brain — topology ok, restart seeded from new bestBrain');
+    return { skipped: false, canonicalId: hash, hash };
+}
+
+function _applyImportedBrainText(text){
+    const parsed = JSON.parse(text);
+    const result = importBrain(parsed);
+    if (result && result.skipped){
+        // User-visible signal without blocking the flow: we deliberately
+        // don't alert() here so batch imports stay quiet.
+        console.log('[brainExport] duplicate import absorbed', result.canonicalId);
+    }
+    return result;
+}
+
+// Expose importBrain for programmatic use (smoke tests + future archive-
+// bundle importer). Keep other entry points on window untouched — they're
+// wired via onclick handlers in index.html.
+if (typeof window !== 'undefined'){
+    window.brainExport = window.brainExport || {};
+    window.brainExport.importBrain = importBrain;
 }
 
 // ---------- Tier 2: RVF brain-pack (stub) -----------------------------------
