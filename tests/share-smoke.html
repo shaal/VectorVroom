@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<!--
+  share-smoke.html
+  Phase 3C — standalone harness for share/url.js + share/gallery.js.
+
+  How to run:
+    python3 -m http.server 8765       # from repo root
+    open http://localhost:8765/tests/share-smoke.html
+
+  Asserts:
+    1. fetchArchive against a mocked fetch returns { blob, snapshot } with
+       validateSnapshot(snapshot).ok === true.
+    2. buildShareUrl('https://example.com/x.vvarchive.json.gz') contains
+       '?snapshots=1&archive=https%3A%2F%2Fexample.com%2Fx.vvarchive.json.gz'
+       (URL-encoded).
+    3. mountGalleryPanel renders one placeholder entry. Clicking it invokes
+       onImport with 'about:blank' (the placeholder URL).
+    4. GALLERY exports exactly one entry whose url === 'about:blank'
+       (external-scope safety net — nothing real ships by default).
+
+  PASS/FAIL lands in the DOM and on window.__shareSmokeResult.
+-->
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Share smoke (Phase 3C)</title>
+  <style>
+    body { font: 14px/1.5 system-ui, -apple-system, sans-serif; max-width: 820px; margin: 2em auto; padding: 0 1em; color: #222; }
+    h1 { font-size: 1.2rem; margin: 0 0 .4em; }
+    #summary { padding: .7em 1em; border-radius: 6px; margin: 1em 0; font-weight: 600; }
+    #summary.pass { background: #d3f9d8; color: #2b8a3e; }
+    #summary.fail { background: #ffe3e3; color: #c92a2a; }
+    #summary.pending { background: #fff3bf; color: #5c3c00; }
+    table { border-collapse: collapse; width: 100%; margin-top: .6em; font-size: 13px; }
+    th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
+    th { background: #f4f4f4; }
+    tr.fail { background: #fff5f5; }
+    tr.pass td:first-child { color: #2b8a3e; }
+    pre { background: #f4f4f4; padding: .4em .6em; border-radius: 3px; overflow-x: auto; font-size: 11px; margin: .3em 0; white-space: pre-wrap; }
+    #gallery-host { border: 1px dashed #ccc; padding: .5em; margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h1>Share smoke (Phase 3C)</h1>
+  <p>Mocks <code>window.fetch</code>, pipes an in-memory
+     <code>buildSnapshot</code> bundle through <code>toBlob</code>, then
+     exercises <code>share/url.js</code> and <code>share/gallery.js</code>.</p>
+  <div id="summary" class="pending">Running…</div>
+  <table id="results">
+    <thead><tr><th>#</th><th>claim</th><th>verdict</th><th>detail</th></tr></thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <div id="gallery-host"><!-- mountGalleryPanel target --></div>
+
+  <script type="module">
+    import { buildSnapshot } from '../AI-Car-Racer/archive/exporter.js';
+    import { toBlob } from '../AI-Car-Racer/archive/serialize.js';
+    import { validateSnapshot } from '../AI-Car-Racer/archive/snapshot.js';
+    import { fetchArchive, buildShareUrl } from '../AI-Car-Racer/share/url.js';
+    import { GALLERY, mountGalleryPanel } from '../AI-Car-Racer/share/gallery.js';
+
+    const rowsEl = document.getElementById('rows');
+    const summaryEl = document.getElementById('summary');
+    const results = [];
+    function record(name, pass, detail){
+      results.push({ name, pass, detail });
+      const tr = document.createElement('tr');
+      tr.className = pass ? 'pass' : 'fail';
+      tr.innerHTML = '<td>' + results.length + '</td>' +
+        '<td>' + name + '</td>' +
+        '<td>' + (pass ? 'PASS' : 'FAIL') + '</td>' +
+        '<td><pre>' + (detail == null ? '' : String(detail)) + '</pre></td>';
+      rowsEl.appendChild(tr);
+    }
+    function finish(){
+      const allPass = results.every(r => r.pass);
+      summaryEl.className = allPass ? 'pass' : 'fail';
+      summaryEl.textContent = allPass
+        ? ('PASS — ' + results.length + '/' + results.length + ' claims hold')
+        : ('FAIL — ' + results.filter(r => r.pass).length + '/' + results.length + ' claims hold');
+      window.__shareSmokeResult = { pass: allPass, results };
+    }
+
+    // ── Fixture snapshot ────────────────────────────────────────────────
+    // Build the smallest valid snapshot that passes validateSnapshot: one
+    // brain, no tracks / dynamics / observations, replay-mode HNSW.
+    function buildFixtureSnapshot() {
+      const brainMirror = new Map();
+      const flat = new Float32Array(8);
+      for (let i = 0; i < flat.length; i++) flat[i] = i * 0.125;
+      brainMirror.set('brain-0', { vector: flat, meta: { fitness: 1, trackId: 'rect' } });
+      return buildSnapshot({
+        brainMirror,
+        trackMirror: new Map(),
+        dynamicsMirror: new Map(),
+        observations: new Map(),
+        indexKind: 'euclidean',
+        insertionOrder: ['brain-0'],
+        consistency: 'fresh',
+        dim: 8,
+      });
+    }
+
+    // ── Claim 1: fetchArchive via mocked fetch ──────────────────────────
+    const origFetch = window.fetch;
+    try {
+      const snap = buildFixtureSnapshot();
+      const blob = await toBlob(snap);
+      window.fetch = async function mockFetch(url){
+        if (url !== 'https://mock.invalid/archive.vvarchive.json.gz') {
+          throw new Error('mockFetch: unexpected url ' + url);
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          blob: async () => blob,
+        };
+      };
+      const got = await fetchArchive('https://mock.invalid/archive.vvarchive.json.gz');
+      const ok = got && got.blob && got.snapshot
+        && validateSnapshot(got.snapshot).ok === true
+        && got.snapshot.brains.length === 1
+        && got.snapshot.brains[0].id === 'brain-0';
+      record('fetchArchive returns { blob, snapshot } with valid snapshot',
+        ok,
+        'brains=' + (got && got.snapshot && got.snapshot.brains.length) +
+        ' validate=' + JSON.stringify(validateSnapshot(got.snapshot)));
+    } catch (e) {
+      record('fetchArchive returns { blob, snapshot } with valid snapshot', false, e.message || e);
+    } finally {
+      window.fetch = origFetch;
+    }
+
+    // ── Claim 2: buildShareUrl URL-encodes the archive param ────────────
+    try {
+      const share = buildShareUrl('https://example.com/x.vvarchive.json.gz');
+      const expectedFragment = 'snapshots=1&archive=https%3A%2F%2Fexample.com%2Fx.vvarchive.json.gz';
+      const ok = share.includes(expectedFragment);
+      record('buildShareUrl contains ?snapshots=1&archive=<encoded>',
+        ok,
+        'got=' + share + '\nexpected-fragment=' + expectedFragment);
+    } catch (e) {
+      record('buildShareUrl contains ?snapshots=1&archive=<encoded>', false, e.message || e);
+    }
+
+    // ── Claim 3: mountGalleryPanel click invokes onImport ───────────────
+    try {
+      const host = document.getElementById('gallery-host');
+      let clickedWith = null;
+      mountGalleryPanel(host, (url) => { clickedWith = url; });
+      const btn = host.querySelector('[data-rv="share-gallery-item"] button');
+      if (!btn) throw new Error('gallery button not rendered');
+      btn.click();
+      const ok = clickedWith === 'about:blank';
+      record('mountGalleryPanel click → onImport("about:blank")',
+        ok,
+        'clickedWith=' + JSON.stringify(clickedWith));
+    } catch (e) {
+      record('mountGalleryPanel click → onImport("about:blank")', false, e.message || e);
+    }
+
+    // ── Claim 4: GALLERY ships exactly one placeholder ──────────────────
+    try {
+      const ok = Array.isArray(GALLERY)
+        && GALLERY.length === 1
+        && GALLERY[0].url === 'about:blank';
+      record('GALLERY has exactly one placeholder entry (about:blank)',
+        ok,
+        'len=' + (GALLERY && GALLERY.length) +
+        ' url=' + (GALLERY && GALLERY[0] && GALLERY[0].url));
+    } catch (e) {
+      record('GALLERY has exactly one placeholder entry (about:blank)', false, e.message || e);
+    }
+
+    finish();
+  </script>
+</body>
+</html>
