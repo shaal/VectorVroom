@@ -1,6 +1,6 @@
 # Enable HNSW in the ruvector WASM build
 
-**Status:** In progress — P0 + P1 + P2 + P3 done, P4 next
+**Status:** In progress — P0 + P1 + P2 + P3 + P4 done, P5 next
 **Owner:** Ofer (with Claude)
 **Created:** 2026-04-23
 **Scope:** `ruvector/` submodule + `AI-Car-Racer/ruvectorBridge.js` + `vendor/ruvector/ruvector_wasm/*`
@@ -120,20 +120,40 @@ measurement awaits P4. P4 retains the 100 KB halt-threshold; if exceeded
 the fallback is to vendor-in just `hnsw.rs` + required helpers from
 `ruvector-hyperbolic-hnsw` to shed `nalgebra`/`ndarray`.
 
-### P4 — Rebuild + re-vendor the wasm artifact
+### P4 — Rebuild + re-vendor the wasm artifact — **DONE**
 
-This is the awkward part (user's memory note on "ruvector upstream patches" flagged this pipeline).
+Ran `wasm-pack build --target web --release` from
+`ruvector/crates/ruvector-wasm/` (17.3s). Copied `pkg/*` into
+`vendor/ruvector/ruvector_wasm/` (6 files: js, wasm, d.ts ×2, package.json, README).
 
-Steps:
-1. `cd ruvector/crates/ruvector-wasm && wasm-pack build --target web --release` (produces `pkg/`).
-2. Record old size: `du -sh vendor/ruvector/ruvector_wasm/` and `wc -c vendor/ruvector/ruvector_wasm/ruvector_wasm_bg.wasm`.
-3. Copy `pkg/*` → `vendor/ruvector/ruvector_wasm/`, preserving the ESM entry point name used by the bridge (`ruvector_wasm.js`).
-4. Record new size; expect growth on the order of tens of KB (hyperbolic HNSW module isn't free).
-5. Commit vendor delta separately from the Rust changes for clean review.
+**Size gate PASS**
+| Artifact | Old | New | Delta |
+|----------|-----|-----|-------|
+| `ruvector_wasm_bg.wasm` uncompressed | 237 KB | 286 KB | **+49.6 KB** (threshold was 100 KB) |
+| same gzipped (actual on-the-wire delta) | 87.5 KB | 104.5 KB | **+17 KB** |
 
-**Exit criteria:** `npm run dev` boots the app; console shows no "HNSW not available" warning; the three bridge DBs construct without error.
+Much better than the worst-case 200–400 KB range projected from raw
+cargo build output — `wasm-opt -O3 --enable-simd` aggressively DCE'd
+the `nalgebra`/`ndarray` surface that the Cosine/Euclidean metric
+branches never reach. The vendored-hnsw.rs fallback is not needed.
 
-**Risk:** If bundle size balloons (>100 KB added), reconsider — user may prefer a slimmer backend or to revert. Halt and report size delta before proceeding to P5.
+**Exit criteria met (browser smoke test via `agent-browser`):**
+- App at `http://localhost:8787/AI-Car-Racer/index.html` loads cleanly.
+- Console: 0 HNSW warnings, 0 errors, bridge reports
+  `[ruvector] ready — brains=0 tracks=0 obs=0`.
+- Clicked **Start Training**, waited 8 s: 4 generations completed with
+  N=10 cars, death-cause breakdown populates normally (side 5, slide 2,
+  stalled 0, alive 3), survival 30% at 5 s / 10 s / end, 120 FPS,
+  0 hitches. Hundreds of HNSW insert + search calls through the new
+  backend without a single console log.
+- `tests/hnsw-wasm-baseline/verify.mjs` correctly **FAILs** with
+  ULP-level score drift and matching top-2 IDs on query 0 — the
+  baseline semantically flipped from "pass gate" (the FlatIndex
+  reference pin) to "recall reference" (the ground truth P5 measures
+  against).
+
+Screenshots: `/tmp/p4-smoke.png`, `/tmp/p4-after-train.png` (local only,
+not committed).
 
 ### P5 — Recall & correctness validation
 

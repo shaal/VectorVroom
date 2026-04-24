@@ -42,13 +42,25 @@ node tests/hnsw-wasm-baseline/verify.mjs
 Both scripts print three `WARN ... HNSW requested but not available`
 lines — that is the behavior being pinned.
 
+## Current status (post-P4)
+
+The `hnsw-wasm` backend is now live in `vendor/ruvector/ruvector_wasm/`,
+so `verify.mjs` is **expected to fail** with ULP-level score drift
+(matching top-K IDs for small-N queries). That is the correct new
+behavior: the baseline is now a **recall reference** used by the P5
+validation script, not a pass gate.
+
 ## When this baseline should change
 
-- **Expected to change**: the wasm artifact is rebuilt with a different
-  backend enabled (e.g. P3 flips the `hnsw-wasm` feature on in
-  `ruvector-wasm/Cargo.toml`). After that swap, this baseline is no
-  longer the ground truth — it becomes the *reference* for recall
-  comparison (plan P5 requires recall@5 ≥ 0.95 vs this fixture).
-- **Unexpected to change**: any edit outside the ruvector submodule, or
-  a re-vendor of the same wasm artifact. A drift in those cases means
-  something determinism-breaking snuck in.
+- **Expected to change**: never again under normal development. This
+  file is a historical snapshot of FlatIndex top-K behavior, pinned so
+  the HNSW → flat swap could be measured. If you regenerate it, you
+  are resetting the recall reference; do that only if the underlying
+  corpus fixture intentionally changes (`N_PER_DB`, `N_QUERIES`,
+  seeds).
+- **Unexpected to change**: the generator (`generate.mjs`) drifts.
+  Since the current wasm is HNSW-backed, a fresh generator run is
+  already non-identical to this file — that's fine. What would be
+  surprising is if two back-to-back `build.mjs` runs diverged from
+  each other (that would indicate non-determinism in the HNSW
+  construction, which uses `rand::random()` for level selection).
