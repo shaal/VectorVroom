@@ -1,6 +1,6 @@
 # Enable HNSW in the ruvector WASM build
 
-**Status:** In progress — P0 + P1 done, P2 next
+**Status:** In progress — P0 + P1 + P2 done, P3 next
 **Owner:** Ofer (with Claude)
 **Created:** 2026-04-23
 **Scope:** `ruvector/` submodule + `AI-Car-Racer/ruvectorBridge.js` + `vendor/ruvector/ruvector_wasm/*`
@@ -73,31 +73,33 @@ Files added/edited (committed locally in the ruvector repo only, not pushed):
 
 **Pre-existing issue noted (not in scope to fix):** `storage_memory.rs:173` has a compile error under the memory-only feature combo (`json!({...})` passed where `HashMap<String, Value>` is expected). Integration tests route around it. Future cleanup opportunity.
 
-### P2 — Wire into `vector_db.rs`
+### P2 — Wire into `vector_db.rs` — **DONE**
 
-Change `ruvector/crates/ruvector-core/src/vector_db.rs:82-99`:
+Committed locally in the ruvector repo on `feat/hnsw-wasm-backend`
+(NOT pushed). Three-arm cfg dispatch at
+`crates/ruvector-core/src/vector_db.rs:84-118`; an explicit priority
+comment documents `hnsw > hnsw-wasm > flat fallback` — the native
+backend wins when both features are on, because `hnsw_rs` is more
+mature and integrates with the persistent-storage rebuild path.
 
-```rust
-let mut index: Box<dyn VectorIndex> = if let Some(hnsw_config) = &options.hnsw_config {
-    #[cfg(feature = "hnsw")]
-    { Box::new(HnswIndex::new(...)?) }
+**Exit criteria met** — four feature permutations all compile clean:
+- `cargo check -p ruvector-core` (default, native hnsw) ✓
+- `cargo check -p ruvector-core --no-default-features --features memory-only,uuid-support,hnsw-wasm` ✓
+- `cargo check -p ruvector-core --features hnsw-wasm` (both on) ✓
+- `cargo check -p ruvector-core --no-default-features --features memory-only,uuid-support` (bonus — exercises the no-backend warning arm; no unused-variable warnings) ✓
 
-    #[cfg(all(not(feature = "hnsw"), feature = "hnsw-wasm"))]
-    { Box::new(HnswWasmIndex::new(
-        options.dimensions, options.distance_metric, hnsw_config.clone(),
-    )?) }
+Also verified: 9/9 P1 integration tests still pass, and an end-to-end
+`cargo check -p ruvector-wasm --target wasm32-unknown-unknown` with the
+feature temporarily flipped on in ruvector-wasm succeeds — so P3
+should be a one-line edit with zero surprises.
 
-    #[cfg(all(not(feature = "hnsw"), not(feature = "hnsw-wasm")))]
-    {
-        tracing::warn!("HNSW requested but no backend available, using flat");
-        Box::new(FlatIndex::new(options.dimensions, options.distance_metric))
-    }
-} else {
-    Box::new(FlatIndex::new(...))
-};
-```
-
-**Exit criteria:** `cargo check -p ruvector-core` with each feature permutation compiles.
+**Warning-string change:** the old log line `"HNSW requested but not
+available (WASM build), using flat index"` is replaced by `"HNSW
+requested but no backend compiled in (enable \`hnsw\` or
+\`hnsw-wasm\`); using flat index"`. A repo-wide grep confirmed nothing
+scrapes the old string (only this plan doc quoted it in the P0 section,
+where it correctly describes historical behaviour). After P3 fires,
+this warning will stop appearing in the car-learning bridge at all.
 
 ### P3 — Flip the feature on in `ruvector-wasm`
 
