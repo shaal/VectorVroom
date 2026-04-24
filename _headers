@@ -21,4 +21,8 @@
   Cache-Control: public, max-age=3600, no-transform
 
 /AI-Car-Racer/*
-  Cache-Control: public, max-age=300
+  # `no-transform` for the same reason the vendor tree has it:
+  # CF Pages was rewriting `ruvectorBridge.js` in-transit
+  # (static-import query strings were being stripped), which defeated
+  # the cache-bust used to route around the vendor stale-cache issue.
+  Cache-Control: public, max-age=300, no-transform
