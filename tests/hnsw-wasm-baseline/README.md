@@ -44,6 +44,12 @@ node tests/hnsw-wasm-baseline/verify.mjs
 # non-zero if any DB is below 0.95. See
 # docs/plan/ruvector-proof/hnsw-wasm-recall.md for P5's result.
 node tests/hnsw-wasm-baseline/recall.mjs
+
+# Within-build A/B of HNSW vs FlatIndex search latency at N=300, k=5,
+# 1000 queries per combination. Overwrites the committed markdown on
+# each run. See docs/plan/ruvector-proof/hnsw-wasm-latency.md for P6's
+# result and a frame-budget interpretation.
+node tests/hnsw-wasm-baseline/latency.mjs
 ```
 
 Both scripts print three `WARN ... HNSW requested but not available`

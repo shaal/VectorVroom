@@ -1,6 +1,6 @@
 # Enable HNSW in the ruvector WASM build
 
-**Status:** Shipped — P0–P5 done. P6 (optional perf A/B) remains.
+**Status:** Shipped — P0–P6 done.
 **Owner:** Ofer (with Claude)
 **Created:** 2026-04-23
 **Scope:** `ruvector/` submodule + `AI-Car-Racer/ruvectorBridge.js` + `vendor/ruvector/ruvector_wasm/*`
@@ -174,9 +174,32 @@ New tool: `node tests/hnsw-wasm-baseline/recall.mjs` — complement to
 `verify.mjs`. `verify.mjs` was a byte-identity gate (flipped to
 recall reference at P4); `recall.mjs` is the real recall-at-K gate.
 
-### P6 — Perf A/B (optional, only if curious)
+### P6 — Perf A/B — **DONE**
 
-Benchmark search latency before/after for k=5, N=300, across 1000 queries in the browser. Expected outcome: **HNSW slightly slower at this N** due to traversal overhead vs cache-friendly linear scan. That's fine — the point is capability, and this result is worth documenting so nobody "re-optimizes" later. Save to `docs/plan/ruvector-proof/hnsw-wasm-latency.md`.
+Full results: `docs/plan/ruvector-proof/hnsw-wasm-latency.md`.
+Harness: `node tests/hnsw-wasm-baseline/latency.mjs`.
+
+HNSW vs FlatIndex p50 search latency at N=300, k=5:
+
+| DB | dim | HNSW | Flat | ratio |
+|----|----:|-----:|-----:|------:|
+| brain | 244 | 167 µs | 97 µs | **1.73×** |
+| track | 512 | 251 µs | 179 µs | **1.40×** |
+| dynamics | 64 | 101 µs | 37 µs | **2.70×** |
+
+Outcome matches the plan's prediction: HNSW is slower than FlatIndex
+at this N. This is expected — the HNSW crossover is typically
+N ≈ 10⁴–10⁵, and this project's corpora are N ≈ 300. Capability was
+the goal (P5: recall@5 = 1.0000), not performance. The worst p99
+(track HNSW 500 µs) is ~3% of a 60 FPS frame budget; in the P5 sim
+the app ran at 120 FPS with 0 hitches.
+
+Methodology note: measured in Node rather than the browser. Same wasm
+bytecode, less UI-thread jitter. Same wasm build used for both
+backends — `use_hnsw=true` routes via the `hnsw-wasm` branch,
+`use_hnsw=false` routes to `FlatIndex` in the same binary — so this
+is a within-subject A/B, not across builds. Two back-to-back runs
+gave ratios within 5%.
 
 ## Risks & how we'll handle them
 
