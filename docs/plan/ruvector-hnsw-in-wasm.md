@@ -1,6 +1,6 @@
 # Enable HNSW in the ruvector WASM build
 
-**Status:** In progress — P0 + P1 + P2 done, P3 next
+**Status:** In progress — P0 + P1 + P2 + P3 done, P4 next
 **Owner:** Ofer (with Claude)
 **Created:** 2026-04-23
 **Scope:** `ruvector/` submodule + `AI-Car-Racer/ruvectorBridge.js` + `vendor/ruvector/ruvector_wasm/*`
@@ -101,15 +101,24 @@ scrapes the old string (only this plan doc quoted it in the P0 section,
 where it correctly describes historical behaviour). After P3 fires,
 this warning will stop appearing in the car-learning bridge at all.
 
-### P3 — Flip the feature on in `ruvector-wasm`
+### P3 — Flip the feature on in `ruvector-wasm` — **DONE**
 
-`ruvector/crates/ruvector-wasm/Cargo.toml:16` — change:
-```toml
-ruvector-core = { path = "../ruvector-core", default-features = false, features = ["memory-only", "uuid-support"] }
-```
-to add `"hnsw-wasm"` to the features list.
+One-line change to `crates/ruvector-wasm/Cargo.toml:16`, committed
+locally in the ruvector repo on `feat/hnsw-wasm-backend` (NOT pushed).
 
-**Exit criteria:** `cargo build -p ruvector-wasm --target wasm32-unknown-unknown --release` succeeds.
+**Exit criteria met:** `cargo build -p ruvector-wasm --target wasm32-unknown-unknown --release` → `Finished release profile [optimized] target(s) in 18.00s`, clean (5 pre-existing ruvector-wasm warnings unrelated to this change).
+
+**Size telemetry (raw cargo build, pre-wasm-pack pipeline):**
+- New raw `.wasm`: 799 KB.
+- Current vendored artifact (post-wasm-pack + wasm-opt -O3 + simd): 237 KB.
+
+These numbers are **not directly comparable**; P4's size gate measures
+the post-wasm-pack output because that is what ships. The 799 KB → 237 KB
+ratio on the current build (~3.4×) suggests the new artifact will land
+somewhere in the ~200–400 KB range after P4's full pipeline, but real
+measurement awaits P4. P4 retains the 100 KB halt-threshold; if exceeded
+the fallback is to vendor-in just `hnsw.rs` + required helpers from
+`ruvector-hyperbolic-hnsw` to shed `nalgebra`/`ndarray`.
 
 ### P4 — Rebuild + re-vendor the wasm artifact
 
