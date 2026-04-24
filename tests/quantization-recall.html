@@ -1,0 +1,148 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Quantization recall@10 — Phase 1B harness</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; background: #111; color: #ddd; padding: 20px; max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 18px; }
+    .result { font: 600 20px sans-serif; color: #e8b739; margin: 8px 0; }
+    .pass { color: #6a9; }
+    .fail { color: #c33; }
+    pre { background: #000; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    .line { margin: 4px 0; }
+    .muted { color: #888; }
+  </style>
+</head>
+<body>
+  <h1>Phase 1B (F1) — 1-bit quantizer recall@10</h1>
+  <p class="muted">Standalone sanity check. Generates 100 synthetic 244-dim brain-like vectors,
+  computes top-10 neighbours by true cosine and by Hamming on the quantized codes, and prints
+  recall@10. The done criteria is recall@10 ≥ 0.9.</p>
+
+  <div id="out"></div>
+
+  <script type="module">
+    import {
+      quantize, hammingDistance, estimatedCosine, memoryFootprint,
+    } from '../AI-Car-Racer/quantization/index.js';
+
+    const FLAT_LENGTH = 244;  // mirrors brainCodec.js
+    const N = 100;
+    const K = 10;
+
+    const out = document.getElementById('out');
+    const line = (html, cls='') => {
+      const d = document.createElement('div');
+      d.className = 'line ' + cls;
+      d.innerHTML = html;
+      out.appendChild(d);
+    };
+
+    // Deterministic-ish RNG so re-running the page gives stable numbers for
+    // the "open it and read the number" check. Mulberry32.
+    function rng(seed) {
+      let s = seed >>> 0;
+      return function() {
+        s = (s + 0x6D2B79F5) | 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+
+    function genBrainLike() {
+      // 10 parent seeds, 10 mutated children each — models how a real GA
+      // archive grows: children are small perturbations of successful parents.
+      // This workload is where quantization actually has to do work (random
+      // uniform noise has no real top-10 structure to recover).
+      const r = rng(1234);
+      const seeds = [];
+      for (let s = 0; s < 10; s++) {
+        const v = new Float32Array(FLAT_LENGTH);
+        for (let i = 0; i < FLAT_LENGTH; i++) v[i] = r() * 2 - 1;
+        seeds.push(v);
+      }
+      const vecs = [];
+      for (let s = 0; s < 10; s++) {
+        for (let m = 0; m < 10; m++) {
+          const v = new Float32Array(FLAT_LENGTH);
+          for (let i = 0; i < FLAT_LENGTH; i++) v[i] = seeds[s][i] + (r() - 0.5) * 0.2;
+          vecs.push(v);
+        }
+      }
+      return vecs;
+    }
+
+    function cosine(a, b) {
+      let dot = 0, na = 0, nb = 0;
+      for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+      }
+      return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-12);
+    }
+
+    // 1. Determinism check
+    const probe = new Float32Array(FLAT_LENGTH);
+    for (let i = 0; i < FLAT_LENGTH; i++) probe[i] = Math.sin(i * 0.37) + 0.01 * i;
+    const a = quantize(probe).packed;
+    const b = quantize(probe).packed;
+    let det = a.length === b.length;
+    for (let i = 0; det && i < a.length; i++) if (a[i] !== b[i]) det = false;
+    line(`Determinism (same input → byte-identical packed): <strong class="${det?'pass':'fail'}">${det ? 'PASS' : 'FAIL'}</strong>`);
+
+    // 2. Identical inputs → Hamming 0
+    const self = hammingDistance(a, b);
+    line(`Hamming(v, v) == 0: <strong class="${self===0?'pass':'fail'}">${self === 0 ? 'PASS' : 'FAIL'}</strong>`);
+
+    // 3. Recall@10 on brain-like synthetic data
+    const vecs = genBrainLike();
+    const codes = vecs.map(v => quantize(v).packed);
+    const rotatedDim = quantize(vecs[0]).rotatedDim;
+
+    let totalRecall = 0;
+    for (let q = 0; q < N; q++) {
+      const tr = [], qu = [];
+      for (let j = 0; j < N; j++) {
+        if (j === q) continue;
+        tr.push({ j, s: cosine(vecs[q], vecs[j]) });
+        qu.push({ j, s: -hammingDistance(codes[q], codes[j]) });
+      }
+      tr.sort((x, y) => y.s - x.s);
+      qu.sort((x, y) => y.s - x.s);
+      const trueSet = new Set(tr.slice(0, K).map(x => x.j));
+      let hit = 0;
+      for (const x of qu.slice(0, K)) if (trueSet.has(x.j)) hit++;
+      totalRecall += hit / K;
+    }
+    const recall = totalRecall / N;
+    const pass = recall >= 0.9;
+    const cls = pass ? 'pass' : 'fail';
+    line(`<div class="result ${cls}">recall@10 = ${recall.toFixed(4)} ${pass ? '(PASS ≥ 0.9)' : '(FAIL < 0.9)'}</div>`);
+    line(`Rotated dimension: ${rotatedDim} bits. Workload: 10 parent seeds × 10 children (σ=0.1).`);
+
+    // 4. Correlation sample — pick 5 random pairs and show (cos, est).
+    line('<h3 style="margin-top:18px;">True cos vs. estimated cos (5 random pairs)</h3>');
+    const rows = ['<pre>  true cos   estimated   |Δ|'];
+    for (let s = 0; s < 5; s++) {
+      const i = Math.floor(Math.random() * N), j = Math.floor(Math.random() * N);
+      if (i === j) continue;
+      const tc = cosine(vecs[i], vecs[j]);
+      const ec = estimatedCosine(codes[i], codes[j], rotatedDim);
+      rows.push(`  ${tc.toFixed(4).padStart(8)}  ${ec.toFixed(4).padStart(10)}  ${Math.abs(tc-ec).toFixed(4).padStart(6)}`);
+    }
+    rows.push('</pre>');
+    line(rows.join('\n'));
+
+    // 5. Memory
+    const fp = memoryFootprint(FLAT_LENGTH);
+    line(`<h3 style="margin-top:18px;">Memory footprint per brain</h3>`);
+    line(`<pre>  float baseline:  ${fp.floatBaselineBytes} B
+  packed 1-bit:    ${fp.packedBytes} B   (${fp.bitOnlyRatio.toFixed(1)}× smaller)
+  + residual (${fp.residualBytes} B): ${fp.totalBytes} B   (${fp.compressionRatio.toFixed(1)}× smaller total)</pre>`);
+  </script>
+</body>
+</html>

@@ -24,7 +24,7 @@ pointing to the blocker. Keep the "Current focus" line at the top
 pointing at whichever phase is active so a newcomer knows where to
 jump in without reading the whole doc.
 
-**Current focus:** Phase 1 — parallel feature implementations (ready to swarm)
+**Current focus:** Phase 1 wave 2 — 1A + 1C (sequential, both touch ruvectorBridge.js)
 **Last updated:** 2026-04-24
 
 ### Phase 0 — Foundations _(sequential, 1 owner)_
@@ -44,9 +44,9 @@ jump in without reading the whole doc.
 | Status | ID | Task | Owner | PR/SHA | Done date |
 |:--:|:--:|------|-------|--------|-----------|
 | ⬜ | 1A | F3 — Warm-restart bundles + shareable snapshots |  |  |  |
-| ⬜ | 1B | F1 — 1-bit quantized archive (RaBitQ + Hadamard) |  |  |  |
+| ✅ | 1B | F1 — 1-bit quantized archive (RaBitQ + Hadamard) | Claude (subagent) | — | 2026-04-24 |
 | ⬜ | 1C | F4 — Consistency modes (Fresh/Eventual/Frozen) |  |  |  |
-| ⬜ | 1D | F5 — Content-addressed dedup + hash-keyed lineage |  |  |  |
+| ✅ | 1D | F5 — Content-addressed dedup + hash-keyed lineage | Claude (subagent) | — | 2026-04-24 |
 
 **Phase 1 gate:** all four rows ✅ + each passes its own `/ship-task`
 confidence gate + cross-track-variance memory applied for recall/speed
@@ -87,6 +87,15 @@ community-archive URL ships publicly).
 
 Append-only. Record any scope change, deferral, or non-obvious call
 that future-you would want to find. Newest at the top.
+
+- **2026-04-24 — Phase 1 wave 1 closed (1B + 1D).** Dispatched as two
+  parallel general-purpose subagents in a single message; zero file
+  overlap thanks to Phase 0's pre-partition. Live browser validation:
+  `tests/quantization-recall.html` prints recall@10 = 0.9060 (≥ 0.9 gate);
+  `tests/dedup-smoke.html` prints 3/3 PASS. Main app boots cleanly after
+  edits to lineage/dag.js, lineage/viewer.js, brainExport.js. 1A + 1C
+  deferred to wave 2 because both edit ruvectorBridge.js stubs and would
+  race.
 
 - **2026-04-24 — Phase 0 closed.** 0.4 shipped 7 stubs (not 6 as the
   tracker originally said) — the plan body referenced 7 distinct chapter
