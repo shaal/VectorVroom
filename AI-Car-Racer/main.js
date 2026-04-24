@@ -370,6 +370,40 @@ if (typeof window !== 'undefined') {
     __applyUrlConsistencyFlag();
 }
 
+// Phase 2A (F2) — honour `?federation=1` at boot. Opt-in flag that
+// flips the bridge to the fan-out + union + GNN-rerank retrieval path.
+// Default off → recommendSeeds is byte-identical to the pre-2A single-
+// index behaviour. Mirrors the `?consistency=` / `?hhnsw=1` poll-until-
+// ready pattern so we don't race the sidecar loader on slow first loads.
+async function __applyUrlFederationFlag(){
+    let on = false;
+    try {
+        var usp = new URLSearchParams(window.location.search || '');
+        on = usp.get('federation') === '1';
+    } catch (_) { return; }
+    if (!on) return;
+    var b = null;
+    for (let i = 0; i < 20; i++) {
+        b = window.__rvBridge;
+        if (b && typeof b.ready === 'function' && typeof b.setFederationEnabled === 'function') break;
+        await new Promise(res => setTimeout(res, 100));
+    }
+    if (!b || typeof b.ready !== 'function' || typeof b.setFederationEnabled !== 'function') {
+        console.warn('[ruvector] URL flag ?federation=1 — bridge never appeared');
+        return;
+    }
+    try {
+        await b.ready();
+        b.setFederationEnabled(true);
+        console.log('[ruvector] federation mode enabled via URL flag');
+    } catch (e) {
+        console.warn('[ruvector] setFederationEnabled from URL flag failed', e);
+    }
+}
+if (typeof window !== 'undefined') {
+    __applyUrlFederationFlag();
+}
+
 // -----------------------------------------------------------------------------
 // Metrics HUD — per-generation survival %, median / p90 checkpoints, wall-bumps.
 // Also serves as the on-screen data source for __runBenchmark / __abTest CSVs.
