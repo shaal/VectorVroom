@@ -1038,6 +1038,58 @@ export function hydrateFromFixture(fixture) {
   } catch (e) { console.warn('[lineage-dag] fixture rehydrate failed', e); }
 }
 
+// ─── Phase 0 extension points (RuLake-inspired features) ─────────────────
+// Each stub is a Phase 1 / Phase 2 ownership slot, pre-declared here so the
+// swarm can implement in parallel without fighting over this file. Do NOT
+// remove the stubs when implementing — replace the body. The signature is
+// the contract between features; extending args is fine, renaming is not.
+//
+//   exportSnapshot()      — owned by 1A (F3 warm-restart bundles)
+//   importSnapshot(s)     — owned by 1A (F3 warm-restart bundles)
+//   setConsistencyMode(m) — owned by 1C (F4 consistency modes)
+//   getIndexStats()       — owned by 3A (F7 observability dashboard)
+//
+// See docs/plan/rulake-inspired-features.md for the full plan.
+
+import { validateSnapshot, CONSISTENCY_MODES } from './archive/snapshot.js';
+
+// Phase 0: stored but unread; 1C will wire this into the query path.
+let _consistencyMode = 'fresh';
+
+// 1A fills this in. Returns an ArchiveSnapshot (see archive/snapshot.js).
+export function exportSnapshot() {
+  throw new Error('not implemented: exportSnapshot (Phase 1A / F3)');
+}
+
+// 1A fills this in. Takes an ArchiveSnapshot, reconstructs the in-memory
+// indexes + mirrors, returns { ok: true } or throws on validation failure.
+export function importSnapshot(s) {
+  // Validate at the boundary even in the stub, so callers can test the
+  // wiring without waiting for 1A. Throws on bad input; the real importer
+  // will keep this check and add its reconstruction work afterwards.
+  const v = validateSnapshot(s);
+  if (!v.ok) throw new Error(`importSnapshot: invalid snapshot (${v.reason})`);
+  throw new Error('not implemented: importSnapshot (Phase 1A / F3)');
+}
+
+// 1C fills this in. Accepts 'fresh' | 'eventual' | 'frozen'.
+export function setConsistencyMode(m) {
+  if (!CONSISTENCY_MODES.includes(m)) {
+    throw new Error(`setConsistencyMode: invalid mode ${m}`);
+  }
+  _consistencyMode = m;
+  // 1C will add: persist mode, pin snapshot on 'frozen', TTL reset on 'eventual'.
+  throw new Error('not implemented: setConsistencyMode (Phase 1C / F4)');
+}
+
+export function getConsistencyMode() { return _consistencyMode; }
+
+// 3A fills this in. Returns { hnsw: {...}, rerank: {...}, adapter: {...} }
+// with per-stage timings and counters for the "where the time goes" chapter.
+export function getIndexStats() {
+  throw new Error('not implemented: getIndexStats (Phase 3A / F7)');
+}
+
 // Danger-knob: purge everything. Exposed for the verifier + dev console; the
 // game never calls this.
 export async function _debugReset() {
