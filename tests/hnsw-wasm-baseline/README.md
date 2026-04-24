@@ -33,10 +33,17 @@ The committed JSON lives at
 # generator — corpus size, query count, etc.)
 node tests/hnsw-wasm-baseline/build.mjs
 
-# Verify the current wasm build still produces byte-identical output.
-# Exits non-zero on drift, and prints a small window around the first
-# differing byte.
+# Verify the current wasm build produces byte-identical output. Now
+# expected to FAIL since the hnsw-wasm backend shipped — kept because
+# it was the original pass gate and still useful if someone reverts
+# the backend.
 node tests/hnsw-wasm-baseline/verify.mjs
+
+# Measure recall@K of the current wasm HNSW against the pinned
+# FlatIndex baseline. This is the live correctness gate. Exits
+# non-zero if any DB is below 0.95. See
+# docs/plan/ruvector-proof/hnsw-wasm-recall.md for P5's result.
+node tests/hnsw-wasm-baseline/recall.mjs
 ```
 
 Both scripts print three `WARN ... HNSW requested but not available`

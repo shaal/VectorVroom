@@ -1,6 +1,6 @@
 # Enable HNSW in the ruvector WASM build
 
-**Status:** In progress — P0 + P1 + P2 + P3 + P4 done, P5 next
+**Status:** Shipped — P0–P5 done. P6 (optional perf A/B) remains.
 **Owner:** Ofer (with Claude)
 **Created:** 2026-04-23
 **Scope:** `ruvector/` submodule + `AI-Car-Racer/ruvectorBridge.js` + `vendor/ruvector/ruvector_wasm/*`
@@ -155,14 +155,24 @@ branches never reach. The vendored-hnsw.rs fallback is not needed.
 Screenshots: `/tmp/p4-smoke.png`, `/tmp/p4-after-train.png` (local only,
 not committed).
 
-### P5 — Recall & correctness validation
+### P5 — Recall & correctness validation — **DONE**
 
-Run the baseline harness from P0 against the new HNSW-backed build:
-1. Compare top-K sets — expect **recall@5 ≥ 0.95** with `ef_search = 50` (default). If below, raise `ef_search`.
-2. Compare top-1 distances — should differ only at floating-point noise level for exact-match queries; allow up to 1% relative delta for near-ties.
-3. Smoke-test the sim: run 10 generations in RL-shape-transfer on Rect and Tri (per user's memory on triangle asymmetry), verify best-car selection behaves sanely.
+Full results and methodology: `docs/plan/ruvector-proof/hnsw-wasm-recall.md`.
 
-**Exit criteria:** Recall @ 5 ≥ 0.95 for all three DBs; sim training curve on Rect + Tri within the known session-to-session variance band (user memory: n=6+ before strong claims — here we're only sanity-checking, not claiming improvement).
+**Headline:** **recall@5 = 1.0000** across all three DBs (60/60 queries
+perfect). Top-1 score drift is ULP-level (median 1.2e-6–3.6e-6), pure
+float-accumulation noise, not reordering. No `ef_search` tuning
+needed.
+
+Sim smoke ran 29 gens on the default rect-style track and 56 gens on
+the Triangle preset, both clean, both with zero HNSW / warn / error
+console messages. Tri run demonstrated warm-start correctly carrying
+55 brains from the prior archive via `_trackDB.search + _brainDB.search` —
+an indirect but strong signal that the production query path works.
+
+New tool: `node tests/hnsw-wasm-baseline/recall.mjs` — complement to
+`verify.mjs`. `verify.mjs` was a byte-identity gate (flipped to
+recall reference at P4); `recall.mjs` is the real recall-at-K gate.
 
 ### P6 — Perf A/B (optional, only if curious)
 
