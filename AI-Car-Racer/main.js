@@ -881,11 +881,20 @@ function performBegin(N){
         poseJitter: Object.assign({ radiusPx: 0, angleDeg: 0, maxAttempts: 8 }, window.__poseJitter || {}),
         brains
     }, [brains.buffer]);
+    // Co-start the A/B baseline worker so both canvases begin each generation
+    // on the same wall-clock tick. Without this, B auto-restarts on its own
+    // genEnd (no archive/observe/seed delay) and drifts ahead of A.
+    if (typeof window.__abOnPerformBegin === 'function') window.__abOnPerformBegin(N);
 }
 
 // Invalidate cached worker state when the track changes (phase 1→4 cycle
-// reuses road.borders but with different geometry).
-function invalidateWorkerInit(){ workerInited = false; }
+// reuses road.borders but with different geometry). Also forwards to the
+// A/B baseline worker when it's running — without this, B stays pinned to
+// whatever track it first saw and its cars "drive through" the new walls.
+function invalidateWorkerInit(){
+    workerInited = false;
+    if (typeof window.__abInvalidateInit === 'function') window.__abInvalidateInit();
+}
 
 // In-memory track switch for benchmarking — preserves SONA patterns and other
 // window-level state that page reload would wipe. Caller is responsible for
@@ -1382,6 +1391,7 @@ window.__downloadCSV = function(label, rows){
     var simWorkerB = null;
     var bState = null;
     var _abLastForwardedPause = null;
+    var _abLastForwardedSimSpeed = null;
 
     function makeBState(){
         return {
@@ -1497,14 +1507,11 @@ window.__downloadCSV = function(label, rows){
                 renderAbHud();
             }
         } catch (e) { console.warn('[ab] genEnd-B handler failed', e); }
-        // Immediately seed and begin the next B generation. No archive, no
-        // observe, no ruvector — that's the whole point of the baseline.
-        // Mirror A's pause state: if the primary is paused, don't start B
-        // spinning either (user might be frozen on a specific gen for
-        // comparison).
-        if (abEnabled && !pause && simWorkerB){
-            postBeginB(batchSize);
-        }
+        // No auto-restart. B's next gen is kicked by window.__abOnPerformBegin
+        // (called from the primary's performBegin) so the two canvases stay
+        // phase-locked. If B finishes before A, B idles until A begins;
+        // if B is still running when A begins, posting `begin` safely
+        // clobbers B's cars array — A's pace is authoritative.
     }
 
     function renderAbHud(){
@@ -1575,6 +1582,7 @@ window.__downloadCSV = function(label, rows){
         }
         bState = null;
         _abLastForwardedPause = null;
+        _abLastForwardedSimSpeed = null;
         if (ctxB && canvasB){
             ctxB.clearRect(0, 0, canvasB.width, canvasB.height);
         }
@@ -1616,6 +1624,19 @@ window.__downloadCSV = function(label, rows){
         if (pause !== _abLastForwardedPause){
             try { simWorkerB.postMessage({ type: 'setPause', pause: !!pause }); } catch (_) {}
             _abLastForwardedPause = !!pause;
+        }
+    }
+
+    // Sim-speed mirror: setSimSpeed lives in buttonResponse.js and only knows
+    // about the primary simWorker. Poll simSpeed here and forward edges to B
+    // so both halves of the A/B view advance at the same rate. Without this,
+    // B defaults to its module-scoped simSpeed=1 and visibly lags whenever
+    // the user cranks the primary above 1×.
+    function broadcastSimSpeedTick(){
+        if (!simWorkerB) return;
+        if (simSpeed !== _abLastForwardedSimSpeed){
+            try { simWorkerB.postMessage({ type: 'setSimSpeed', v: simSpeed }); } catch (_) {}
+            _abLastForwardedSimSpeed = simSpeed;
         }
     }
 
@@ -1698,10 +1719,31 @@ window.__downloadCSV = function(label, rows){
             console.warn('[ab] render tick failed', e);
         }
         broadcastPauseTick();
+        broadcastSimSpeedTick();
     }
 
     window.__abSetEnabled = setEnabled;
     window.__abIsEnabled = function(){ return abEnabled; };
+    // Called by invalidateWorkerInit() in main.js whenever the primary's
+    // cached track geometry is thrown away (preset switch, in-memory track
+    // reload, etc). Mirrors the effect on B so the next postBeginB will
+    // re-post the 'init' message with fresh borders + checkpoints.
+    window.__abInvalidateInit = function(){
+        if (bState) bState.workerInited = false;
+    };
+    // Called from primary performBegin so every A-start triggers a matching
+    // B-start. Guarded so it's a no-op when A/B mode is off, and queues the
+    // begin if B's worker hasn't posted its 'ready' yet (covers the race
+    // where the user toggles A/B on and the primary kicks off a gen before
+    // B's worker thread has finished booting).
+    window.__abOnPerformBegin = function(N){
+        if (!abEnabled || !simWorkerB || !bState) return;
+        if (!bState.workerReady){
+            bState.pendingBegin = { N: N };
+            return;
+        }
+        postBeginB(N);
+    };
     window.__abGetState = function(){
         return bState ? {
             enabled: abEnabled,
