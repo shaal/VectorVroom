@@ -211,7 +211,7 @@
       (async () => {
         // Must match the `?v=...` suffix in ruvectorBridge.js to probe
         // the same edge-cache key the real import will fetch.
-        const VENDOR_PROBE = '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js?v=hnsw-wasm-20260424';
+        const VENDOR_PROBE = '../vendor/ruvector/ruvector_wasm/ruvector_wasm.js?v=hnsw-wasm-20260424b';
         const probeUrl = new URL(VENDOR_PROBE, document.baseURI).href;
         let reachable = false;
         try {
