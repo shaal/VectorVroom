@@ -1464,6 +1464,67 @@ label {
 }
 
 /* =============================================================
+   1C — F4 Consistency-mode selector + tick strip
+   A radio row (Fresh / Eventual / Frozen) and a horizontal strip
+   of 30 tiny dots beneath. Each dot pulses via a brief CSS
+   animation each time recommendSeeds runs a fresh query. On
+   cache-hit (eventual mode inside TTL) no pulse fires, so the
+   strip visibly slows; on frozen the dots still pulse (the query
+   runs, just against a pinned archive), which matches the
+   "frozen ≠ skip" pedagogy.
+   ============================================================= */
+.rv-consistency {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 6px 0 4px 0;
+    font-size: 11px;
+    color: #a8c8ff;
+}
+.rv-consistency-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.rv-consistency-label { font-weight: 600; color: #cbd8ff; }
+.rv-consistency-radios {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+.rv-consistency-radios label {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    cursor: pointer;
+    user-select: none;
+}
+.rv-consistency-radios input[type="radio"] { margin: 0; cursor: pointer; }
+.rv-consistency-ticks {
+    display: flex;
+    gap: 2px;
+    padding: 2px 0;
+    min-height: 8px;
+}
+.rv-consistency-tick {
+    display: inline-block;
+    width: 4px;
+    height: 6px;
+    border-radius: 1px;
+    background: rgba(168, 200, 255, 0.18);
+    transition: background-color 200ms ease-out;
+}
+.rv-consistency-tick-pulse {
+    background: #62f0b8;
+    animation: rv-consistency-tick-fade 800ms ease-out forwards;
+}
+@keyframes rv-consistency-tick-fade {
+    0%   { background: #62f0b8; transform: scaleY(1.35); }
+    100% { background: rgba(168, 200, 255, 0.18); transform: scaleY(1); }
+}
+
+/* =============================================================
    Guided-tour overlay (eli15)
    ============================================================= */
 /* Tour launcher — stacks directly below the #eli15-fab (drawer) pill at

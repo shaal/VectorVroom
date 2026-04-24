@@ -494,12 +494,37 @@ export function recommendSeeds(trackVec, k = 5) {
   // amplify whatever direction B currently points in).
   const queryVec = trackVec ? (_bypassLora ? trackVec : loraAdapt(trackVec)) : null;
 
+  // 1C — F4. Consult the consistency mode BEFORE running the search. In
+  // 'fresh' mode we fall through unchanged. In 'eventual' we try the
+  // TTL cache first and short-circuit on hit, else we compute the
+  // result then record it. In 'frozen' we compute as usual but filter
+  // results to brains that existed at freeze-entry time. The `mode`
+  // flag below drives all three behaviours in a single code path.
+  const consistencyMode = _consistencyGetMode();
+  const cacheKey = (consistencyMode === 'eventual' && trackVec)
+    ? _consistencyTrackVecKey(trackVec) + ':k' + (k | 0)
+    : null;
+  if (consistencyMode === 'eventual') {
+    const cached = _consistencyGetCachedResult(cacheKey);
+    if (cached.hit) return cached.value;
+  }
+  const frozenSnap = (consistencyMode === 'frozen') ? _consistencyStats() : null;
+  // Pull the frozen brain-id set once per call rather than on every
+  // candidate lookup. `null` means "no filter" — fresh/eventual paths.
+  const frozenIds = (frozenSnap && frozenSnap.frozen)
+    ? _getFrozenBrainIdSet()
+    : null;
+
   const candidates = new Map(); // brainId -> trackSim (best across matched tracks)
   if (queryVec && !_trackDB.isEmpty()) {
     const trackHits = _trackDB.search(queryVec, Math.min(5, Number(_trackDB.len())));
     for (const th of trackHits) {
       const sim = 1 - th.score;
       for (const [bid, entry] of _brainMirror) {
+        // 1C frozen-mode filter: skip brains inserted after the freeze
+        // point. `frozenIds === null` in fresh/eventual modes so this
+        // branch degenerates to the existing check.
+        if (frozenIds && !frozenIds.has(bid)) continue;
         if (entry.meta && entry.meta.trackId === th.id) {
           const prev = candidates.get(bid);
           if (prev === undefined || prev < sim) candidates.set(bid, sim);
@@ -511,7 +536,10 @@ export function recommendSeeds(trackVec, k = 5) {
   // Cold-fallback: no track match → use the whole archive with trackSim=0.
   // This keeps retrieval meaningful on first-ever run or on a totally novel track.
   if (candidates.size === 0) {
-    for (const bid of _brainMirror.keys()) candidates.set(bid, 0);
+    for (const bid of _brainMirror.keys()) {
+      if (frozenIds && !frozenIds.has(bid)) continue;
+      candidates.set(bid, 0);
+    }
   }
 
   // Decide reranker. The toggle policy (P4.A) takes precedence over
@@ -595,7 +623,43 @@ export function recommendSeeds(trackVec, k = 5) {
     });
   }
   scored.sort((a, b) => b.score - a.score);
-  return scored.slice(0, Math.max(1, k | 0));
+  const out = scored.slice(0, Math.max(1, k | 0));
+  // 1C — F4. In eventual mode, stash the result so the next TTL calls
+  // under the same trackVec key short-circuit at the top of this fn.
+  // The stored reference IS the returned array — callers MUST treat
+  // recommendSeeds output as read-only (it always has been by
+  // convention). No-op in fresh/frozen modes.
+  if (consistencyMode === 'eventual' && cacheKey) {
+    _consistencyRecordQuery(cacheKey, out);
+  }
+  return out;
+}
+
+// Pull the frozen brain-id set out of the consistency module's opaque
+// snapshot reference. Centralising the unwrap here keeps the
+// "cap-by-insertionOrder" shortcut an implementation detail of the
+// bridge — the module holds whatever we stashed on freezeArchive and
+// doesn't care about the shape.
+function _getFrozenBrainIdSet() {
+  const stats = _consistencyStats();
+  if (!stats || !stats.frozen) return null;
+  // The snapshot reference isn't exported directly from the module;
+  // re-import it here. Short-circuit when the bridge's shortcut shape
+  // isn't present (e.g. an ArchiveSnapshot was stored instead) so
+  // recommendSeeds degrades to "no filter" rather than crashing.
+  // eslint-disable-next-line no-use-before-define
+  const ref = _frozenSnapshotRef();
+  if (!ref || !(ref.frozenBrainIds instanceof Set)) return null;
+  return ref.frozenBrainIds;
+}
+// Tiny indirection: import-bound getter that re-reads the frozen ref
+// lazily. Separated from _getFrozenBrainIdSet for readability — keeps
+// the "what shape are we dealing with?" logic in one place.
+function _frozenSnapshotRef() {
+  // Avoid top-level name clash by calling the module's getter through
+  // the already-imported stats path. The module exports
+  // getFrozenSnapshot() directly — wire it in here.
+  return _consistencyGetFrozenSnapshot();
 }
 
 // ─── embedding + observation ─────────────────────────────────────────────────
@@ -1074,6 +1138,23 @@ export function hydrateFromFixture(fixture) {
 import { validateSnapshot, CONSISTENCY_MODES } from './archive/snapshot.js';
 import { buildSnapshot } from './archive/exporter.js';
 import { applySnapshot } from './archive/importer.js';
+// 1C — F4. Consistency-mode state machine + eventual-mode TTL cache live
+// in consistency/mode.js. We consult it on every recommendSeeds() call
+// (see the `consistency` branch below) and transition via
+// setConsistencyMode. The module is independent of the bridge so tests
+// can exercise it without booting wasm.
+import {
+  getMode as _consistencyGetMode,
+  setMode as _consistencySetMode,
+  recordQuery as _consistencyRecordQuery,
+  getCachedResult as _consistencyGetCachedResult,
+  freezeArchive as _consistencyFreezeArchive,
+  thawArchive as _consistencyThawArchive,
+  clearCache as _consistencyClearCache,
+  trackVecKey as _consistencyTrackVecKey,
+  stats as _consistencyStats,
+  getFrozenSnapshot as _consistencyGetFrozenSnapshot,
+} from './consistency/mode.js';
 
 // Phase 0: stored but unread; 1C will wire this into the query path.
 let _consistencyMode = 'fresh';
@@ -1139,17 +1220,57 @@ export function importSnapshot(s) {
   return res;
 }
 
-// 1C fills this in. Accepts 'fresh' | 'eventual' | 'frozen'.
+// 1C — F4. Accepts 'fresh' | 'eventual' | 'frozen'.
+//
+// Freeze/thaw mechanism: we use the cap-by-insertionOrder shortcut from
+// the plan. On transition to 'frozen' we snapshot the current
+// _insertionOrder length and the set of brain ids present *right now*.
+// During a frozen query, recommendSeeds ignores any brain whose id is
+// NOT in that snapshot set — new archiveBrain() calls still insert into
+// the live _brainDB (we don't want to break archive growth), but their
+// ids don't appear in the pinned set so they won't appear in query
+// results. On transition away from 'frozen' we drop the reference and
+// the live archive is queryable again.
 export function setConsistencyMode(m) {
   if (!CONSISTENCY_MODES.includes(m)) {
     throw new Error(`setConsistencyMode: invalid mode ${m}`);
   }
+  const prev = _consistencyGetMode();
+  if (prev === m) {
+    _consistencyMode = m;
+    return;
+  }
+  // On any mode change, clear the eventual cache so a previous mode's
+  // cached answer doesn't accidentally replay under a different
+  // consistency contract.
+  _consistencyClearCache();
+  // Leaving frozen → thaw the snapshot reference so live queries can
+  // see every brain again.
+  if (prev === 'frozen' && m !== 'frozen') {
+    _consistencyThawArchive();
+  }
+  // Entering frozen → pin the current archive state.
+  if (m === 'frozen') {
+    const frozenBrainIds = new Set(_brainMirror.keys());
+    _consistencyFreezeArchive({
+      frozenBrainCount: frozenBrainIds.size,
+      frozenBrainIds,
+      frozenAt: Date.now(),
+    });
+  }
   _consistencyMode = m;
-  // 1C will add: persist mode, pin snapshot on 'frozen', TTL reset on 'eventual'.
-  throw new Error('not implemented: setConsistencyMode (Phase 1C / F4)');
+  _consistencySetMode(m);
 }
 
-export function getConsistencyMode() { return _consistencyMode; }
+// Backwards-compat getter. Returns the simple string so existing
+// callers (uiPanels, tests) stay happy; callers that want more detail
+// can import consistency/mode.stats() directly.
+export function getConsistencyMode() { return _consistencyGetMode(); }
+
+// Re-export the stats snapshot for callers (uiPanels tick, test
+// harnesses). Not part of the 1A/1B/1D contract surface; kept as a
+// named export so consumers can discover it via tree-shaking / IDE.
+export function getConsistencyStats() { return _consistencyStats(); }
 
 // 3A fills this in. Returns { hnsw: {...}, rerank: {...}, adapter: {...} }
 // with per-stage timings and counters for the "where the time goes" chapter.

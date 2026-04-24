@@ -79,8 +79,35 @@ self.onmessage = (ev) => {
         case 'setPause':    handlePause(m.pause); break;
         case 'setTraction': self.traction = m.v;  break;
         case 'setMaxSpeed': self.maxSpeed = m.v;  break;
+        // Phase 1C (F4) — minimal A/B-baseline freeze-sync hook. When
+        // the primary pins its archive in `frozen` mode, it can post
+        // `{type:'freeze', snapshot}` so this worker starts from the
+        // identical archive view. We gate on the functions existing
+        // (this worker has no bridge today — the hook is a no-op
+        // until the A/B postMessage wiring lands; see
+        // consistency/worker-sync.js for the producer helper).
+        // Existing A/B setups that never post this message continue
+        // to work unchanged.
+        case 'freeze':      handleFreeze(m);      break;
     }
 };
+
+function handleFreeze(m) {
+    if (!m || !m.snapshot) return;
+    try {
+        if (typeof self.importSnapshot === 'function') {
+            self.importSnapshot(m.snapshot);
+        }
+        if (typeof self.setConsistencyMode === 'function') {
+            self.setConsistencyMode('frozen');
+        }
+    } catch (e) {
+        // Never throw out of onmessage — the worker would die silently.
+        // Log through postMessage so main.js sees the failure.
+        try { self.postMessage({ type: 'debug', event: 'freezeSyncFailed', error: String(e && e.message || e) }); }
+        catch (_) { /* drop */ }
+    }
+}
 
 function handleInit(m) {
     // Build a bare `road` object compatible with sensor/car's global reads.
