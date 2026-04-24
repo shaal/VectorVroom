@@ -215,8 +215,16 @@ function rebuildIndicesFromMirror() {
   for (const [id, { vector, meta }] of _dynamicsMirror) {
     _dynamicsDB.insert(vector, id, meta || {});
   }
-  for (const [id, { vector, meta }] of _brainMirror) {
-    _brainDB.insert(vector, id, meta || {});
+  // F3 — rebuild preserves the original insertion order from _insertionOrder
+  // when available; falls back to mirror iteration order otherwise. We do
+  // NOT reset _insertionOrder here since the mirror contents are unchanged.
+  const rebuildOrder = (_insertionOrder.length > 0
+    ? _insertionOrder.filter((id) => _brainMirror.has(id))
+    : Array.from(_brainMirror.keys()));
+  for (const id of rebuildOrder) {
+    const entry = _brainMirror.get(id);
+    if (!entry) continue;
+    _brainDB.insert(entry.vector, id, entry.meta || {});
   }
 }
 
@@ -234,6 +242,13 @@ const _brainMirror = new Map(); // id -> { vector: Float32Array, meta }
 const _trackMirror = new Map(); // id -> { vector: Float32Array, meta }
 const _dynamicsMirror = new Map(); // id -> { vector: Float32Array, meta }
 const _observations = new Map(); // brainId -> { weight, count }
+// Phase 1A (F3). Replay-mode warm-restart needs the same insertion order
+// on import that we used on export; VectorDB doesn't expose this after the
+// fact, so we track it ourselves. Append-only — any id appearing here that
+// isn't in _brainMirror at export time (e.g. after a _debugReset wiped the
+// mirror but left this array alone — which _debugReset also clears below)
+// gets filtered out in archive/exporter.js.
+let _insertionOrder = [];
 
 let _persistTimer = null;
 let _persistInFlight = null;
@@ -409,6 +424,8 @@ export function archiveBrain(brain, fitness, trackVec, generation = 0, parentIds
   if (dynamicsId !== null) meta.dynamicsId = dynamicsId;
   const id = _brainDB.insert(vec, null, meta);
   _brainMirror.set(id, { vector: vec, meta });
+  // F3 — remember the insertion order so exportSnapshot can replay it.
+  _insertionOrder.push(id);
   // P3.B — incremental DAG add. Safe no-op when the dag wasm didn't load.
   // The DAG uses meta.parentIds to wire edges; unknown parents (not yet in
   // the mirror) are silently skipped — same relaxed contract as the legacy
@@ -874,6 +891,7 @@ export async function hydrate() {
       if (vec.length !== FLAT_LENGTH) continue;
       _brainDB.insert(vec, row.id, row.meta || {});
       _brainMirror.set(row.id, { vector: vec, meta: row.meta || {} });
+      _insertionOrder.push(row.id);
     }
     _tEnd('3d_insert_brains', _tBrains);
     const _tObs = _tStart();
@@ -1004,6 +1022,7 @@ export function hydrateFromFixture(fixture) {
   _trackMirror.clear();
   _dynamicsMirror.clear();
   _observations.clear();
+  _insertionOrder = [];
   // P3.A — respect the current index kind when rebuilding from a fixture.
   // bench-hnsw.html calls setIndexKind('hyperbolic') before hydrateFromFixture
   // to exercise the hyperbolic path against the same archive.
@@ -1023,6 +1042,7 @@ export function hydrateFromFixture(fixture) {
     if (vec.length !== FLAT_LENGTH) continue;
     _brainDB.insert(vec, row.id, row.meta || {});
     _brainMirror.set(row.id, { vector: vec, meta: row.meta || {} });
+    _insertionOrder.push(row.id);
   }
   for (const row of (fixture.observations || [])) {
     _observations.set(row.id, { weight: row.weight || 0, count: row.count | 0 });
@@ -1052,24 +1072,71 @@ export function hydrateFromFixture(fixture) {
 // See docs/plan/rulake-inspired-features.md for the full plan.
 
 import { validateSnapshot, CONSISTENCY_MODES } from './archive/snapshot.js';
+import { buildSnapshot } from './archive/exporter.js';
+import { applySnapshot } from './archive/importer.js';
 
 // Phase 0: stored but unread; 1C will wire this into the query path.
 let _consistencyMode = 'fresh';
 
-// 1A fills this in. Returns an ArchiveSnapshot (see archive/snapshot.js).
+// 1A — F3. Build a whole-archive snapshot (replay mode). Synchronous; the
+// witness is computed via xxHash32 (tagged "x32:") so this can be called
+// from click handlers without awaiting. Callers that want a sha-256 witness
+// can route through archive/exporter.buildSnapshotAsync directly.
 export function exportSnapshot() {
-  throw new Error('not implemented: exportSnapshot (Phase 1A / F3)');
+  requireReady();
+  return buildSnapshot({
+    brainMirror: _brainMirror,
+    trackMirror: _trackMirror,
+    dynamicsMirror: _dynamicsMirror,
+    observations: _observations,
+    indexKind: _indexKind,
+    insertionOrder: _insertionOrder,
+    consistency: _consistencyMode,
+    dim: FLAT_LENGTH,
+  });
 }
 
-// 1A fills this in. Takes an ArchiveSnapshot, reconstructs the in-memory
-// indexes + mirrors, returns { ok: true } or throws on validation failure.
+// 1A — F3. Replay an ArchiveSnapshot into the live indexes + mirrors. We
+// rebuild the VectorDB instances from scratch (same pattern as
+// rebuildIndicesFromMirror) to guarantee the imported graph has no stale
+// nodes from the pre-import session. Schedules a persist so the next page
+// load inherits the imported archive.
 export function importSnapshot(s) {
-  // Validate at the boundary even in the stub, so callers can test the
-  // wiring without waiting for 1A. Throws on bad input; the real importer
-  // will keep this check and add its reconstruction work afterwards.
+  requireReady();
   const v = validateSnapshot(s);
   if (!v.ok) throw new Error(`importSnapshot: invalid snapshot (${v.reason})`);
-  throw new Error('not implemented: importSnapshot (Phase 1A / F3)');
+  // Rebuild empty indexes under the current geometry; applySnapshot will
+  // re-insert every brain in the snapshot's insertionOrder.
+  const IndexClass = pickIndexClass(_indexKind);
+  _brainDB = new IndexClass(FLAT_LENGTH, 'cosine');
+  _trackDB = new IndexClass(TRACK_DIM, 'cosine');
+  _dynamicsDB = new IndexClass(DYNAMICS_DIM, 'cosine');
+  _queryDynamicsVec = null;
+  _rerankerMode = 'none';
+  const res = applySnapshot(s, {
+    brainDB: _brainDB,
+    trackDB: _trackDB,
+    dynamicsDB: _dynamicsDB,
+    brainMirror: _brainMirror,
+    trackMirror: _trackMirror,
+    dynamicsMirror: _dynamicsMirror,
+    observations: _observations,
+  });
+  // Refresh our own insertion-order tracker to match what the importer
+  // actually replayed. Further archiveBrain calls append to this same array.
+  _insertionOrder = (s.hnsw && Array.isArray(s.hnsw.insertionOrder))
+    ? s.hnsw.insertionOrder.filter((id) => _brainMirror.has(id))
+    : Array.from(_brainMirror.keys());
+  // Rebuild DAG from the new mirror so lineage queries match the imported
+  // archive. Safe no-op when the wasm side didn't load.
+  try {
+    if (dagIsReady()) {
+      dagDebugReset();
+      dagHydrateFromMirror(_brainMirror);
+    }
+  } catch (e) { console.warn('[lineage-dag] import rehydrate failed', e); }
+  schedulePersist();
+  return res;
 }
 
 // 1C fills this in. Accepts 'fresh' | 'eventual' | 'frozen'.
@@ -1097,6 +1164,7 @@ export async function _debugReset() {
   _trackMirror.clear();
   _dynamicsMirror.clear();
   _observations.clear();
+  _insertionOrder = [];
   _queryDynamicsVec = null;
   sonaEngineDebugReset();
   try { dagDebugReset(); } catch (_) { /* safe to ignore */ }

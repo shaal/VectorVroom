@@ -294,6 +294,40 @@ function bridgeReady(){
     return !!(b && b.info && b.info().ready && window.__rvUnflatten);
 }
 
+// Phase 1A (F3) — staged warm-restart import. The UI file picker in
+// uiPanels.js runs its own import directly, but we also support a "load on
+// boot" path: if `?snapshots=1` is present AND `window.__pendingSnapshotImport`
+// is set (by a tour step, a test harness, or an earlier UI click that
+// deferred the import), we replay that snapshot before the sim starts. Any
+// errors are logged + non-fatal — the app still boots.
+async function __runStagedSnapshotImport(){
+    try {
+        var usp = new URLSearchParams(window.location.search || '');
+        if (usp.get('snapshots') !== '1') return;
+    } catch (_) { return; }
+    var staged = window.__pendingSnapshotImport;
+    if (!staged) return;
+    var b = window.__rvBridge;
+    if (!b || typeof b.ready !== 'function' || typeof b.importSnapshot !== 'function') return;
+    try {
+        await b.ready();
+        var res = b.importSnapshot(staged);
+        var c = (res && res.counts) || null;
+        console.log('[ruvector] staged snapshot import complete', c);
+    } catch (e) {
+        console.warn('[ruvector] staged snapshot import failed', e);
+    } finally {
+        try { delete window.__pendingSnapshotImport; } catch (_) { window.__pendingSnapshotImport = null; }
+    }
+}
+// Fire-and-forget: the import runs in parallel with the normal boot. Sim
+// start doesn't depend on this promise — workers seed from the archive
+// lazily, so even if import lands after begin() the next generation will
+// still pick up the imported brains.
+if (typeof window !== 'undefined') {
+    __runStagedSnapshotImport();
+}
+
 // -----------------------------------------------------------------------------
 // Metrics HUD — per-generation survival %, median / p90 checkpoints, wall-bumps.
 // Also serves as the on-screen data source for __runBenchmark / __abTest CSVs.

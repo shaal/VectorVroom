@@ -197,6 +197,102 @@
     '</div>',
   ].join('');
 
+  // Phase 1A (F3). Warm-restart archive Export/Import row — rendered ONLY
+  // when the URL has ?snapshots=1 so the default experience is unchanged
+  // while the feature is baking. The row is a plain DOM append (not baked
+  // into the innerHTML above) so the gate lives in one readable place.
+  let _snapshotsFlagOn = false;
+  try {
+    if (typeof URLSearchParams === 'function') {
+      _snapshotsFlagOn = new URLSearchParams(window.location.search || '').get('snapshots') === '1';
+    }
+  } catch (_) { _snapshotsFlagOn = false; }
+  if (_snapshotsFlagOn) {
+    const row = document.createElement('div');
+    row.className = 'rv-snapshots';
+    row.setAttribute('data-rv', 'snapshots');
+    row.innerHTML = [
+      '<div class="rv-snapshots-title">Archive bundle <span class="rv-snapshots-hint">(warm-restart)</span>',
+      '  <span data-eli15="warm-restart" role="button" tabindex="0" aria-label="Learn: warm-restart bundles"></span>',
+      '</div>',
+      '<div class="rv-snapshots-buttons">',
+      '  <button type="button" class="controlButton" data-rv="snapshot-export" title="Download the whole archive as a .vvarchive.json.gz file">📦 Export archive</button>',
+      '  <button type="button" class="controlButton" data-rv="snapshot-import" title="Load a .vvarchive.json(.gz) bundle and replace the in-memory archive">📥 Import archive</button>',
+      '  <input type="file" data-rv="snapshot-file" accept=".gz,.json,.vvarchive,application/gzip,application/json,application/x-vvarchive" hidden />',
+      '</div>',
+      '<div class="rv-snapshots-status" data-rv="snapshots-status"></div>',
+    ].join('');
+    root.appendChild(row);
+
+    const btnExport = row.querySelector('[data-rv="snapshot-export"]');
+    const btnImport = row.querySelector('[data-rv="snapshot-import"]');
+    const fileInput = row.querySelector('[data-rv="snapshot-file"]');
+    const status = row.querySelector('[data-rv="snapshots-status"]');
+    const setStatus = (msg, cls) => {
+      if (!status) return;
+      status.textContent = msg || '';
+      status.className = 'rv-snapshots-status' + (cls ? ' rv-snapshots-status-' + cls : '');
+    };
+
+    btnExport.addEventListener('click', async function () {
+      const b = window.__rvBridge;
+      if (!b || typeof b.exportSnapshot !== 'function') {
+        setStatus('bridge not ready — wait a moment and try again', 'error');
+        return;
+      }
+      try {
+        setStatus('building snapshot…', 'pending');
+        const snap = b.exportSnapshot();
+        const { toBlob, VVARCHIVE_EXTENSION_GZ, VVARCHIVE_EXTENSION_JSON, gzipAvailable } =
+          await import('./archive/serialize.js');
+        const blob = await toBlob(snap);
+        const ext = gzipAvailable() ? VVARCHIVE_EXTENSION_GZ : VVARCHIVE_EXTENSION_JSON;
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').replace(/Z$/, '');
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'vvarchive-' + ts + ext;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        const counts = (snap.brains && snap.brains.length) | 0;
+        setStatus('exported ' + counts + ' brain' + (counts === 1 ? '' : 's') +
+          ' (' + (gzipAvailable() ? 'gzip' : 'plain-json') + ')', 'ok');
+      } catch (e) {
+        console.warn('[rv-panel] snapshot export failed', e);
+        setStatus('export failed: ' + (e.message || e), 'error');
+      }
+    });
+
+    btnImport.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', async function () {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      const b = window.__rvBridge;
+      if (!b || typeof b.importSnapshot !== 'function') {
+        setStatus('bridge not ready — wait a moment and try again', 'error');
+        fileInput.value = '';
+        return;
+      }
+      try {
+        setStatus('reading bundle…', 'pending');
+        const { fromBlob } = await import('./archive/serialize.js');
+        const snap = await fromBlob(file);
+        const res = b.importSnapshot(snap);
+        const c = (res && res.counts) || { brains: 0, tracks: 0, dynamics: 0, observations: 0 };
+        setStatus('imported — brains ' + c.brains + ' · tracks ' + c.tracks +
+          ' · dynamics ' + c.dynamics + ' · obs ' + c.observations, 'ok');
+        console.log('[rv-panel] snapshot import counts', c);
+      } catch (e) {
+        console.warn('[rv-panel] snapshot import failed', e);
+        setStatus('import failed: ' + (e.message || e), 'error');
+      } finally {
+        fileInput.value = '';
+      }
+    });
+  }
+
   const el = {
     info: root.querySelector('[data-rv="info"]'),
     rerankerMode: root.querySelector('[data-rv="reranker-mode"]'),
