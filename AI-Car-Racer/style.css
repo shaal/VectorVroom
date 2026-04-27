@@ -2117,3 +2117,103 @@ label {
     0%   { background: #62f0b8; box-shadow: 0 0 10px rgba(98, 240, 184, 0.65); }
     100% { background: rgba(98, 240, 184, 0.14); box-shadow: 0 0 0 rgba(0, 0, 0, 0); }
 }
+
+/* === Phase A — Experiments disclosure panel === */
+/* Consolidates RuLake-inspired feature toggles. Native <details> +
+ * <summary> for the disclosure — no JS animation, no custom widget. */
+.rv-experiments {
+    margin-top: 14px;
+    padding: 8px 10px;
+    background: rgba(20, 28, 48, 0.55);
+    border: 1px solid rgba(120, 140, 200, 0.18);
+    border-radius: 6px;
+}
+.rv-experiments[open] {
+    background: rgba(20, 28, 48, 0.75);
+}
+.rv-experiments-summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #cbd8ff;
+    user-select: none;
+    list-style: none;
+    padding: 2px 0;
+}
+.rv-experiments-summary::-webkit-details-marker { display: none; }
+.rv-experiments-summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 120ms ease-out;
+}
+.rv-experiments[open] .rv-experiments-summary::before {
+    transform: rotate(90deg);
+}
+.rv-experiments-hint {
+    font-weight: 400;
+    color: #8a98be;
+    font-size: 0.85em;
+    margin-left: 6px;
+}
+.rv-experiments-body {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.rv-experiments-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    padding: 4px 6px;
+    border-radius: 4px;
+}
+.rv-experiments-row + .rv-experiments-row {
+    border-top: 1px solid rgba(120, 140, 200, 0.08);
+    padding-top: 8px;
+}
+.rv-experiments-row > [data-rv]:not(input):not(label) {
+    /* migrated rows (consistency, federation, crosstab) keep their own
+     * layouts — strip the row's wrap so they read clean inside */
+    flex: 1 1 100%;
+}
+.rv-experiments-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    color: #e6ebfa;
+}
+.rv-experiments-toggle input[type="checkbox"] { cursor: pointer; }
+.rv-experiments-emoji { font-size: 1.05em; }
+.rv-experiments-label { font-weight: 500; }
+.rv-experiments-hint-inline {
+    color: #8a98be;
+    font-size: 0.85em;
+    font-style: italic;
+}
+.rv-experiments-subbody {
+    flex: 1 1 100%;
+    margin-top: 4px;
+    padding: 6px 8px;
+    background: rgba(10, 16, 32, 0.45);
+    border-radius: 4px;
+}
+.rv-experiments-subbody[hidden] { display: none; }
+
+/* Disabled (library-only) row styling */
+.rv-experiments-row-disabled { opacity: 0.55; }
+.rv-experiments-toggle-disabled { cursor: not-allowed; }
+.rv-experiments-toggle-disabled input { cursor: not-allowed; }
+.rv-experiments-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border-radius: 3px;
+    background: rgba(180, 140, 90, 0.22);
+    color: #d8c39a;
+    font-size: 0.75em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
