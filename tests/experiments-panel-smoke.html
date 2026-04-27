@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Experiments panel smoke (Phase A)</title>
+  <style>
+    body { font: 14px ui-monospace, monospace; background: #0e1422; color: #e6ebfa; padding: 18px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    p  { color: #8a98be; margin: 4px 0 14px; }
+    .ok   { color: #62f0b8; }
+    .fail { color: #f08080; font-weight: 700; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { padding: 4px 8px; border-bottom: 1px solid rgba(120,140,200,0.18); vertical-align: top; }
+    pre { white-space: pre-wrap; color: #cbd8ff; font-size: 12px; margin: 2px 0 0; }
+    iframe { display: none; }
+  </style>
+</head>
+<body>
+  <h1>Experiments panel smoke (Phase A)</h1>
+  <p>
+    Loads <code>../AI-Car-Racer/index.html</code> in a hidden iframe and
+    asserts UI claims. The plain URL load tests default state; a second
+    iframe loads with <code>?snapshots=1</code> to verify the URL flag
+    presets the corresponding toggle.
+  </p>
+
+  <div id="verdict">running…</div>
+
+  <h2 style="margin-top: 18px; font-size: 14px;">Claims</h2>
+  <table id="claims">
+    <thead><tr><th>#</th><th>claim</th><th>verdict</th><th>detail</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <iframe id="ifr-default" src="../AI-Car-Racer/index.html"></iframe>
+  <iframe id="ifr-flag" src="../AI-Car-Racer/index.html?snapshots=1"></iframe>
+
+  <script type="module">
+    const claims = [];
+
+    const tbody = document.querySelector('#claims tbody');
+    const verdictEl = document.querySelector('#verdict');
+
+    function record(label, ok, detail) {
+      claims.push({ label, ok, detail });
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${claims.length}</td><td>${label}</td><td class="${ok ? 'ok' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</td><td><pre>${typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)}</pre></td>`;
+      tbody.appendChild(tr);
+    }
+
+    async function waitForIframe(ifr, ms = 6000) {
+      const start = Date.now();
+      while (Date.now() - start < ms) {
+        try {
+          const w = ifr.contentWindow;
+          const d = ifr.contentDocument;
+          if (w && d && d.querySelector('[data-rv="experiments"]')) return { w, d };
+        } catch (_) {}
+        await new Promise(r => setTimeout(r, 100));
+      }
+      throw new Error('iframe did not load experiments panel within ' + ms + 'ms');
+    }
+
+    function summarize() {
+      const passed = claims.filter(c => c.ok).length;
+      const total = claims.length;
+      verdictEl.className = passed === total ? 'ok' : 'fail';
+      verdictEl.textContent = passed === total
+        ? `PASS — ${passed}/${total} claims hold.`
+        : `FAIL — ${passed}/${total} claims hold.`;
+    }
+
+    try {
+      // === Default URL: no flags ===
+      const ifrDefault = document.getElementById('ifr-default');
+      const { d: dDef, w: wDef } = await waitForIframe(ifrDefault);
+
+      // C1 — disclosure exists, defaults closed
+      const details = dDef.querySelector('[data-rv="experiments"]');
+      record('1. Experiments disclosure exists, defaults closed', !!details && !details.open, {
+        present: !!details,
+        open: details ? details.open : null,
+      });
+
+      // C2 — opening reveals 6 rows (5 + 1 disabled)
+      details.open = true;
+      await new Promise(r => setTimeout(r, 50));
+      const rows = details.querySelectorAll('.rv-experiments-row');
+      record('2. 6 rows visible after expand (incl. disabled quantization)', rows.length === 6, {
+        rowCount: rows.length,
+        ids: Array.from(rows).map(r => r.getAttribute('data-rv')),
+      });
+
+      // C3 — quantization row is disabled
+      const quantInput = details.querySelector('[data-rv="exp-quantization-row"] input');
+      record('3. Quantization row is disabled (library-only)', quantInput && quantInput.disabled, {
+        disabled: quantInput ? quantInput.disabled : null,
+      });
+
+      // C4 — Learn badges present on each new row
+      const learnIds = ['where-the-time-goes', 'warm-restart', 'cross-tab-federation', 'quantization'];
+      const learnPresent = learnIds.every(id => !!details.querySelector(`[data-eli15="${id}"]`));
+      record('4. [Learn] eli15 badges wired on new rows', learnPresent, { learnIds });
+
+      // C5 — snapshots subbody hidden by default; toggling checkbox reveals it
+      const snapshotsCb = details.querySelector('[data-rv="exp-snapshots"]');
+      const snapshotsSub = details.querySelector('[data-rv="exp-snapshots-subbody"]');
+      const beforeHidden = snapshotsSub.hidden;
+      snapshotsCb.checked = true;
+      snapshotsCb.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 50));
+      const afterHidden = snapshotsSub.hidden;
+      record('5. Snapshots toggle gates the inner controls', beforeHidden === true && afterHidden === false, {
+        beforeHidden, afterHidden,
+        snapshotsRowChild: !!snapshotsSub.querySelector('[data-rv="snapshots"]'),
+        shareRowChild:    !!snapshotsSub.querySelector('[data-rv="share"]'),
+      });
+
+      // C6 — crosstab toggle drives the bridge state
+      const crosstabCb = details.querySelector('[data-rv="exp-crosstab"]');
+      const bridge = wDef.__rvBridge;
+      const beforeEnabled = bridge && bridge.isCrosstabEnabled ? bridge.isCrosstabEnabled() : null;
+      crosstabCb.checked = true;
+      crosstabCb.dispatchEvent(new Event('change'));
+      await new Promise(r => setTimeout(r, 100));
+      const afterEnabled = bridge && bridge.isCrosstabEnabled ? bridge.isCrosstabEnabled() : null;
+      record('6. Crosstab toggle drives bridge.setCrosstabEnabled', beforeEnabled === false && afterEnabled === true, {
+        beforeEnabled, afterEnabled,
+      });
+
+      // === ?snapshots=1 URL flag ===
+      const ifrFlag = document.getElementById('ifr-flag');
+      const { d: dFlag } = await waitForIframe(ifrFlag);
+      const detailsFlag = dFlag.querySelector('[data-rv="experiments"]');
+      const snapshotsCbFlag = detailsFlag.querySelector('[data-rv="exp-snapshots"]');
+      const snapshotsSubFlag = detailsFlag.querySelector('[data-rv="exp-snapshots-subbody"]');
+      record('7. ?snapshots=1 presets the toggle ON at boot + reveals controls', snapshotsCbFlag.checked === true && snapshotsSubFlag.hidden === false, {
+        flagToggleChecked: snapshotsCbFlag.checked,
+        flagSubbodyHidden: snapshotsSubFlag.hidden,
+        flagDetailsOpen:   detailsFlag.open,
+      });
+
+    } catch (e) {
+      record('harness setup', false, String(e && e.stack || e));
+    } finally {
+      summarize();
+    }
+  </script>
+</body>
+</html>

@@ -13,21 +13,28 @@ edits to `main.js` and `style.css`.
 
 **Legend:** ⬜ todo · 🟡 in progress · ✅ done · 🚫 blocked · ⏸ deferred
 
-**Current focus:** Not started — waiting on user approval of this plan.
+**Current focus:** Implementation complete; pending PR #2 review/merge.
 **Last updated:** 2026-04-24
 
 | Status | ID | Task | Owner | PR/SHA | Done date |
 |:--:|:--:|------|-------|--------|-----------|
-| ⬜ | A.1 | Add `🧪 Experiments` disclosure panel scaffold |  |  |  |
-| ⬜ | A.2 | Migrate Federation checkbox into the panel |  |  |  |
-| ⬜ | A.3 | Migrate Consistency modes radio row into the panel |  |  |  |
-| ⬜ | A.4 | Migrate Observability panel toggle into the panel |  |  |  |
-| ⬜ | A.5 | Un-gate Snapshot / share row (remove `?snapshots=1` requirement for UI render) |  |  |  |
-| ⬜ | A.6 | Un-gate Cross-tab row (remove `?crosstab=1` requirement for UI render) |  |  |  |
-| ⬜ | A.7 | Add disabled Quantization row with tooltip |  |  |  |
-| ⬜ | A.8 | Add `confirm()` on destructive Import action |  |  |  |
-| ⬜ | A.9 | `[Learn]` links next to each row → open matching ELI15 chapter |  |  |  |
-| ⬜ | A.10 | Smoke-test via agent-browser + commit |  |  |  |
+| ✅ | A.1 | Add `🧪 Experiments` disclosure panel scaffold | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.2 | Migrate Federation checkbox into the panel | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.3 | Migrate Consistency modes radio row into the panel | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.4 | Migrate Observability panel toggle into the panel | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.5 | Un-gate Snapshot / share row (remove `?snapshots=1` requirement for UI render) | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.6 | Un-gate Cross-tab row (remove `?crosstab=1` requirement for UI render) | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.7 | Add disabled Quantization row with tooltip | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.8 | Add `confirm()` on destructive Import action | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.9 | `[Learn]` links next to each row → open matching ELI15 chapter | Claude | PR #2 | 2026-04-24 |
+| ✅ | A.10 | Smoke-test via agent-browser + commit | Claude | PR #2 | 2026-04-24 |
+
+**Implementation notes:**
+- Refactor strategy was **wrap-don't-rebuild**: the existing consistency, federation, and crosstab DOM nodes are appended into the disclosure body via `appendChild`, which preserves every event listener and `el.X` reference established earlier in the file. No event re-binding required.
+- Disclosure auto-opens whenever ANY URL flag is set (`?snapshots=1`, `?crosstab=1`, `?federation=1`, `?consistency=*`, `?archive=*`) so a user opening a share link immediately sees what's enabled.
+- Crosstab listeners are now wired unconditionally (previously gated by `?crosstab=1`); the experiments toggle drives `setCrosstabEnabled` rather than render-time gating.
+- Smoke harness uses two hidden iframes — one no-flag, one `?snapshots=1` — to test default state AND preset behaviour in a single page.
+- 7/7 harness PASS including the cross-feature claim that toggling the crosstab checkbox flips the bridge's `isCrosstabEnabled()` from false to true (proves UI-to-bridge coupling, not just visual).
 
 **Exit gate:** all rows ✅ + agent-browser smoke:
 - default URL: Experiments panel visible (collapsed), no behaviour change vs pre-pass;

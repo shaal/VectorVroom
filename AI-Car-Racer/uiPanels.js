@@ -241,17 +241,24 @@
     '</div>',
   ].join('');
 
-  // Phase 1A (F3). Warm-restart archive Export/Import row — rendered ONLY
-  // when the URL has ?snapshots=1 so the default experience is unchanged
-  // while the feature is baking. The row is a plain DOM append (not baked
-  // into the innerHTML above) so the gate lives in one readable place.
-  let _snapshotsFlagOn = false;
-  try {
-    if (typeof URLSearchParams === 'function') {
-      _snapshotsFlagOn = new URLSearchParams(window.location.search || '').get('snapshots') === '1';
-    }
-  } catch (_) { _snapshotsFlagOn = false; }
-  if (_snapshotsFlagOn) {
+  // Phase 1A (F3). Warm-restart archive Export/Import row.
+  //
+  // Phase A (UI discoverability pass): the row is now ALWAYS created. The
+  // ?snapshots=1 URL flag is preserved, but it presets the "Save & share
+  // archives" toggle inside the 🧪 Experiments disclosure rather than gating
+  // whether this DOM ever exists. The Experiments wrapper at the bottom of
+  // this file moves this row into the disclosure body and hides it until the
+  // user (or the URL flag) opts in.
+  const _snapshotsFlagOn = (function () {
+    try {
+      if (typeof URLSearchParams === 'function') {
+        return new URLSearchParams(window.location.search || '').get('snapshots') === '1';
+      }
+    } catch (_) {}
+    return false;
+  })();
+  let __rvSnapshotsRow = null;
+  {
     const row = document.createElement('div');
     row.className = 'rv-snapshots';
     row.setAttribute('data-rv', 'snapshots');
@@ -309,7 +316,23 @@
       }
     });
 
-    btnImport.addEventListener('click', function () { fileInput.click(); });
+    btnImport.addEventListener('click', function () {
+      // Phase A guardrail — Import REPLACES the live archive. With the
+      // ?snapshots=1 URL flag retired as a friction layer, the confirm()
+      // is what stops an accidental click from wiping a long training run.
+      const b = window.__rvBridge;
+      const liveCount = (function () {
+        try { return (b && b.info && b.info().brains) | 0; } catch (_) { return 0; }
+      })();
+      const ok = window.confirm(
+        'Import archive bundle?\n\n' +
+        'This will REPLACE your current archive (' + liveCount + ' brain' +
+        (liveCount === 1 ? '' : 's') + ') with the contents of the imported file.\n\n' +
+        'Proceed?'
+      );
+      if (!ok) return;
+      fileInput.click();
+    });
     fileInput.addEventListener('change', async function () {
       const file = fileInput.files && fileInput.files[0];
       if (!file) return;
@@ -335,6 +358,7 @@
         fileInput.value = '';
       }
     });
+    __rvSnapshotsRow = row;
   }
 
   const el = {
@@ -503,19 +527,14 @@
       if (on) await ensureFederationViewer();
     });
   }
-  // Phase 2B (F6) — cross-tab pill. Visible only when ?crosstab=1 URL flag is
-  // present (feature is baking behind a flag). Subscribes to the bridge's
-  // setCrosstabListeners so we get a callback on every received remote brain
-  // (for the green pulse) and on peer-count changes (for the "N peer(s)"
-  // readout). The subscription attempt is best-effort and retries a few
-  // times because the bridge sidecar can land slightly after the panel.
-  let _crosstabFlagOn = false;
-  try {
-    if (typeof URLSearchParams === 'function') {
-      _crosstabFlagOn = new URLSearchParams(window.location.search || '').get('crosstab') === '1';
-    }
-  } catch (_) { _crosstabFlagOn = false; }
-  if (el.crosstab && _crosstabFlagOn) el.crosstab.hidden = false;
+  // Phase 2B (F6) — cross-tab pill. Phase A (UI discoverability pass):
+  // visibility now belongs to the Experiments disclosure's "Cross-tab live
+  // training" toggle, which also flips bridge.setCrosstabEnabled. The pill
+  // element itself (`el.crosstab`) is moved into the disclosure subbody
+  // later in this file; we always wire listeners here so the pulse + peer
+  // count work the moment the user flips the checkbox.
+  // The legacy `?crosstab=1` URL flag is preserved as a preset (it pre-
+  // checks the experiments toggle); see buildExperimentsPanel().
   function renderCrosstabPeers(n) {
     if (!el.crosstabPeers) return;
     const count = Math.max(0, n | 0);
@@ -555,7 +574,9 @@
       }
     }
   }
-  if (_crosstabFlagOn) ensureCrosstabWiring();
+  // Always wire listeners; the experiments toggle gates whether the bridge
+  // actually broadcasts/receives. The pill stays accurate either way.
+  ensureCrosstabWiring();
 
   function renderFederation() {
     const b = window.__rvBridge;
@@ -1432,8 +1453,10 @@
   });
 
   // === Phase 3C share panel ===
-  // Rendered ONLY when `?snapshots=1` is present (same gate as the Phase
-  // 1A Export/Import row above). Three capabilities:
+  // Phase A (UI discoverability pass): always created; visibility is
+  // controlled by the "Save & share archives" toggle inside the Experiments
+  // disclosure. The ?snapshots=1 URL flag is preserved as a preset for that
+  // toggle. Three capabilities (unchanged):
   //   1. "📋 Copy shareable link" — prompts for a URL the user already
   //      hosts the bundle at, copies `?snapshots=1&archive=<url>` to the
   //      clipboard. We host nothing.
@@ -1444,13 +1467,8 @@
   //      (see the external-scope note in gallery.js).
   // The anchor comment above is load-bearing: future phases should mount
   // above/below it, not replace it.
-  let _sharePanelGateOn = false;
-  try {
-    if (typeof URLSearchParams === 'function') {
-      _sharePanelGateOn = new URLSearchParams(window.location.search || '').get('snapshots') === '1';
-    }
-  } catch (_) { _sharePanelGateOn = false; }
-  if (_sharePanelGateOn) {
+  let __rvShareRow = null;
+  {
     const shareRow = document.createElement('div');
     shareRow.className = 'rv-share';
     shareRow.setAttribute('data-rv', 'share');
@@ -1536,16 +1554,209 @@
     });
 
     btnImport.addEventListener('click', function () {
-      __shareImportFromUrl((urlInput.value || '').trim());
+      const url = (urlInput.value || '').trim();
+      if (!url) { setShareStatus('paste a URL above first', 'error'); return; }
+      // Phase A guardrail — same logic as the file-import confirm above.
+      const b = window.__rvBridge;
+      const liveCount = (function () {
+        try { return (b && b.info && b.info().brains) | 0; } catch (_) { return 0; }
+      })();
+      const ok = window.confirm(
+        'Import archive from URL?\n\n' +
+        url + '\n\n' +
+        'This will REPLACE your current archive (' + liveCount + ' brain' +
+        (liveCount === 1 ? '' : 's') + ').\n\nProceed?'
+      );
+      if (!ok) return;
+      __shareImportFromUrl(url);
     });
 
     // Mount the community gallery. Each entry's button routes back
     // through the same fetch+import flow as the "📎 Import from URL"
-    // button so the UX is consistent.
+    // button so the UX is consistent. The gallery handler also goes
+    // through confirm() because the placeholder will eventually become
+    // real third-party URLs.
     import('./share/gallery.js').then(({ mountGalleryPanel }) => {
-      mountGalleryPanel(galleryMount, (url) => __shareImportFromUrl(url));
+      mountGalleryPanel(galleryMount, (url) => {
+        const b = window.__rvBridge;
+        const liveCount = (function () {
+          try { return (b && b.info && b.info().brains) | 0; } catch (_) { return 0; }
+        })();
+        const ok = window.confirm(
+          'Import this community archive?\n\n' + url + '\n\n' +
+          'This will REPLACE your current archive (' + liveCount + ' brain' +
+          (liveCount === 1 ? '' : 's') + ').\n\nProceed?'
+        );
+        if (!ok) return;
+        __shareImportFromUrl(url);
+      });
     }).catch((e) => {
       console.warn('[rv-panel] share gallery mount failed', e);
     });
+    __rvShareRow = shareRow;
   }
+
+  // === Phase A — UI discoverability pass: 🧪 Experiments disclosure ===
+  //
+  // Consolidates the RuLake-inspired feature toggles into one collapsible
+  // section. The previously-flag-gated rows (snapshots, share, crosstab)
+  // now live here and are gated by checkboxes inside the disclosure. URL
+  // flags are preserved as PRESETS that pre-toggle the corresponding
+  // checkbox at boot, but they no longer gate whether the UI exists.
+  //
+  // We MOVE existing DOM nodes (consistency, federation, crosstab,
+  // snapshots, share) into the disclosure body via appendChild, which
+  // preserves every existing event listener and querySelector reference.
+  // Refactoring all that wiring would be a much bigger change; the move-
+  // not-rebuild approach is the smallest possible diff that achieves the
+  // discoverability goal.
+  //
+  // Default state: see the "Default state per feature" table in
+  // docs/plan/ui-discoverability-pass.md.
+  (function buildExperimentsPanel() {
+    const usp = (function () {
+      try { return new URLSearchParams(window.location.search || ''); } catch (_) { return null; }
+    })();
+    const flag = (k) => usp && usp.get(k) !== null;
+    const flagEq = (k, v) => usp && usp.get(k) === v;
+
+    const details = document.createElement('details');
+    details.className = 'rv-experiments';
+    details.setAttribute('data-rv', 'experiments');
+    details.innerHTML = [
+      '<summary class="rv-experiments-summary">🧪 Experiments <span class="rv-experiments-hint">(RuLake-inspired toggles)</span></summary>',
+      '<div class="rv-experiments-body" data-rv="experiments-body">',
+      '  <div class="rv-experiments-row" data-rv="exp-observability-row">',
+      '    <label class="rv-experiments-toggle">',
+      '      <input type="checkbox" data-rv="exp-observability" checked />',
+      '      <span class="rv-experiments-emoji">⏱</span>',
+      '      <span class="rv-experiments-label">Per-stage timings panel</span>',
+      '    </label>',
+      '    <span class="rv-experiments-hint-inline">flame-graph-lite for every generation</span>',
+      '    <span data-eli15="where-the-time-goes" role="button" tabindex="0" aria-label="Learn: where the time goes"></span>',
+      '  </div>',
+      '  <div class="rv-experiments-row" data-rv="exp-snapshots-row">',
+      '    <label class="rv-experiments-toggle">',
+      '      <input type="checkbox" data-rv="exp-snapshots" />',
+      '      <span class="rv-experiments-emoji">📦</span>',
+      '      <span class="rv-experiments-label">Save &amp; share archives</span>',
+      '    </label>',
+      '    <span class="rv-experiments-hint-inline">export, import, share via URL</span>',
+      '    <span data-eli15="warm-restart" role="button" tabindex="0" aria-label="Learn: warm-restart bundles"></span>',
+      '    <div class="rv-experiments-subbody" data-rv="exp-snapshots-subbody" hidden></div>',
+      '  </div>',
+      '  <div class="rv-experiments-row" data-rv="exp-crosstab-row">',
+      '    <label class="rv-experiments-toggle">',
+      '      <input type="checkbox" data-rv="exp-crosstab" />',
+      '      <span class="rv-experiments-emoji">🔗</span>',
+      '      <span class="rv-experiments-label">Cross-tab live training</span>',
+      '    </label>',
+      '    <span class="rv-experiments-hint-inline">two tabs share an archive via BroadcastChannel</span>',
+      '    <span data-eli15="cross-tab-federation" role="button" tabindex="0" aria-label="Learn: cross-tab live training"></span>',
+      '    <div class="rv-experiments-subbody" data-rv="exp-crosstab-subbody" hidden></div>',
+      '  </div>',
+      '  <div class="rv-experiments-row" data-rv="exp-federation-row"></div>',
+      '  <div class="rv-experiments-row" data-rv="exp-consistency-row"></div>',
+      '  <div class="rv-experiments-row rv-experiments-row-disabled" data-rv="exp-quantization-row" title="Library-only — not wired into archiveBrain yet. See the chapter for details.">',
+      '    <label class="rv-experiments-toggle rv-experiments-toggle-disabled">',
+      '      <input type="checkbox" disabled />',
+      '      <span class="rv-experiments-emoji">📐</span>',
+      '      <span class="rv-experiments-label">1-bit quantized archive</span>',
+      '      <span class="rv-experiments-badge">library-only</span>',
+      '    </label>',
+      '    <span class="rv-experiments-hint-inline">module ships, integration is a future slice</span>',
+      '    <span data-eli15="quantization" role="button" tabindex="0" aria-label="Learn: 1-bit quantization"></span>',
+      '  </div>',
+      '</div>',
+    ].join('');
+    root.appendChild(details);
+
+    const expBody = details.querySelector('[data-rv="experiments-body"]');
+    const expSnapshotsRow = details.querySelector('[data-rv="exp-snapshots-row"]');
+    const expSnapshotsCb = details.querySelector('[data-rv="exp-snapshots"]');
+    const expSnapshotsSub = details.querySelector('[data-rv="exp-snapshots-subbody"]');
+    const expCrosstabRow = details.querySelector('[data-rv="exp-crosstab-row"]');
+    const expCrosstabCb = details.querySelector('[data-rv="exp-crosstab"]');
+    const expCrosstabSub = details.querySelector('[data-rv="exp-crosstab-subbody"]');
+    const expFedRow = details.querySelector('[data-rv="exp-federation-row"]');
+    const expConsRow = details.querySelector('[data-rv="exp-consistency-row"]');
+    const expObsCb = details.querySelector('[data-rv="exp-observability"]');
+
+    // Move existing DOM nodes into the disclosure. Listeners attached
+    // earlier survive the appendChild move — that's the whole reason we
+    // refactored as "wrap, don't rebuild."
+    const consistencyEl = root.querySelector('[data-rv="consistency"]');
+    const federationEl = root.querySelector('[data-rv="federation"]');
+    const crosstabEl = root.querySelector('[data-rv="crosstab"]');
+    if (federationEl && expFedRow) {
+      // Unset the federation toggle's prior placement; re-parent under exp.
+      expFedRow.appendChild(federationEl);
+    }
+    if (consistencyEl && expConsRow) {
+      expConsRow.appendChild(consistencyEl);
+    }
+    if (crosstabEl && expCrosstabSub) {
+      // The pill itself moves into the snapshots-style subbody, hidden
+      // until the experiments checkbox flips it on.
+      crosstabEl.hidden = false; // we control via subbody.hidden now
+      expCrosstabSub.appendChild(crosstabEl);
+    }
+    if (__rvSnapshotsRow && expSnapshotsSub) {
+      expSnapshotsSub.appendChild(__rvSnapshotsRow);
+    }
+    if (__rvShareRow && expSnapshotsSub) {
+      expSnapshotsSub.appendChild(__rvShareRow);
+    }
+
+    // Snapshots toggle — show/hide the controls (which include both the
+    // file-based Export/Import row and the URL share row).
+    function applySnapshotsState(on) {
+      if (!expSnapshotsSub) return;
+      expSnapshotsSub.hidden = !on;
+    }
+    expSnapshotsCb.addEventListener('change', () => applySnapshotsState(expSnapshotsCb.checked));
+    if (_snapshotsFlagOn) {
+      expSnapshotsCb.checked = true;
+      applySnapshotsState(true);
+    }
+
+    // Crosstab toggle — flip both the bridge state AND the pill visibility.
+    function applyCrosstabState(on) {
+      if (expCrosstabSub) expCrosstabSub.hidden = !on;
+      try {
+        const b = window.__rvBridge;
+        if (b && typeof b.setCrosstabEnabled === 'function') b.setCrosstabEnabled(!!on);
+      } catch (e) { console.warn('[rv-experiments] setCrosstabEnabled failed', e); }
+    }
+    expCrosstabCb.addEventListener('change', () => applyCrosstabState(expCrosstabCb.checked));
+    // ?crosstab=1 preset — but the bridge may not be ready yet. The
+    // existing __applyUrlCrosstabFlag in main.js polls for bridge
+    // readiness; here we just sync the checkbox state. The bridge's
+    // setCrosstabEnabled will then be called once it's ready.
+    if (flagEq('crosstab', '1')) {
+      expCrosstabCb.checked = true;
+      // Apply with a short delay to give the bridge time to load. If the
+      // bridge isn't ready, applyCrosstabState's try/catch swallows it
+      // and main.js's poll will pick up the slack.
+      setTimeout(() => applyCrosstabState(true), 100);
+    }
+
+    // Observability toggle — show/hide the obs panel. The panel itself is
+    // mounted by the existing 3A code below; we just toggle its CSS.
+    function applyObsState(on) {
+      const obs = root.querySelector('.rv-obs-panel');
+      if (obs) obs.hidden = !on;
+    }
+    expObsCb.addEventListener('change', () => applyObsState(expObsCb.checked));
+    // Apply after a tick so the obs panel is mounted by then.
+    setTimeout(() => applyObsState(expObsCb.checked), 250);
+
+    // Default-collapsed: leave details closed unless any feature is
+    // pre-toggled by a URL flag, in which case open it so the user can
+    // see what their share-link enabled.
+    if (flag('snapshots') || flag('crosstab') || flag('federation') ||
+        flag('consistency') || flag('archive')) {
+      details.open = true;
+    }
+  })();
 })();
