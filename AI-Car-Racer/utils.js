@@ -188,6 +188,9 @@ function phaseToLayout(phase){
                     <div class='brain-saves-row'>
                         <button class='controlButton brain-saves-fresh' onclick='brainStartFresh();' title='Wipe ALL trained state (archive + saved best + fast lap) and reload — true gen-0 start. Named saves are preserved.'>🌱 Start with empty brain</button>
                     </div>
+                    <div class='brain-saves-row'>
+                        <button class='controlButton' onclick='clearAllFastLaps();' title='Wipe every per-track fast-lap record across all tracks. Named brain saves are NOT affected.'>🗑 Clear all fast laps</button>
+                    </div>
                 </div>
             </details>
             `;

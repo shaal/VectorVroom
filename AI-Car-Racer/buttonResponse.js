@@ -240,12 +240,65 @@ async function brainStartFresh(){
 }
 // =========================================================================
 function resetFastLap(){
+    // Phase A: scope the reset to the CURRENT track only. The legacy
+    // global `localStorage.fastLap` key was retired at boot; the new
+    // per-track keys are vv_fastlap_<trackHash>. Use the bridge helper
+    // exposed by main.js to look up the current track's key.
+    try {
+        if (window.__vvFastLap && typeof window.__vvFastLap.trackKey === 'function') {
+            const k = window.__vvFastLap.trackKey();
+            if (k) localStorage.removeItem(k);
+            // Re-sync the global cache so the UI reflects the cleared state.
+            if (typeof window.__vvFastLap.syncFromStore === 'function') {
+                window.__vvFastLap.syncFromStore();
+                return;
+            }
+        }
+    } catch (_) {}
+    // Fallback for the case where the bridge helper isn't loaded yet
+    // (e.g., during very early boot). Match the pre-Phase-A behaviour
+    // of clearing the in-memory cache.
     fastLap = '--';
+    if (typeof lastLap !== 'undefined') lastLap = null;
 }
 function destroyBrain(){
     localStorage.removeItem("bestBrain");
+    // Phase A: legacy fastLap key is already retired at boot; this
+    // removal is a no-op now but kept so any pre-Phase-A revert leaves
+    // a clean slate. resetFastLap() handles the per-track keys.
     localStorage.removeItem("fastLap");
-    fastLap="--";
+    resetFastLap();
+}
+
+// Phase A: bulk clear of every per-track fastLap. Wired from the
+// 🧠 Brain saves disclosure (utils.js) for the destructive bulk option,
+// distinct from resetFastLap() which only clears the current track.
+function clearAllFastLaps(){
+    var keys = [];
+    try {
+        for (var i = 0; i < localStorage.length; i++){
+            var k = localStorage.key(i);
+            if (k && window.__vvFastLap && k.indexOf(window.__vvFastLap.prefix) === 0){
+                keys.push(k);
+            }
+        }
+    } catch (_) {}
+    if (keys.length === 0){
+        window.alert('No fast-lap records to clear.');
+        return;
+    }
+    if (!window.confirm('Clear ALL ' + keys.length + ' track fast-lap record' +
+                        (keys.length === 1 ? '' : 's') +
+                        '? This cannot be undone.\n\nNamed brain saves are NOT affected.')){
+        return;
+    }
+    for (var j = 0; j < keys.length; j++) localStorage.removeItem(keys[j]);
+    // Resync display.
+    try {
+        if (window.__vvFastLap && typeof window.__vvFastLap.syncFromStore === 'function'){
+            window.__vvFastLap.syncFromStore();
+        }
+    } catch (_) {}
 }
 function submitTrack(){
     road.getTrack();

@@ -93,7 +93,140 @@ var invincible=false;
 var traction=0.5;
 
 var frameCount = 0;                // mirrors worker's frameCount via snapshots
+
+// === Phase A — track-aware fast lap =====================================
+// Three pieces of state, all globals because main.js is a classic script
+// and other classic-script files (buttonResponse.js, brainExport.js) read
+// `fastLap` directly. We KEEP `fastLap` as a global cache of the *current
+// track's* best lap so existing callers continue to work; we just resync
+// it whenever the active track changes (see _syncFastLapForCurrentTrack).
+//
+// Storage shape: localStorage.vv_fastlap_<trackHash> = JSON of
+// { timeS, recordedAt, generation }. trackHash is xxHash32 of the 512-d
+// CNN track embedding (window.currentTrackVec) — same Phase 0 hash util
+// that content-addresses brains; Phase A re-uses it under the alias
+// hashVec for naming honesty.
+//
+// `lastLap` is in-memory only: it tracks the most recent *completed* lap
+// in this session, regardless of whether it was a record. Persisting
+// "last" would conflate it with "fastest"; the value of last-lap is
+// real-time signal during a run, not historical.
+//
+// `allTimeBest` is a derived cache: min over every vv_fastlap_* entry.
+// Recomputed on track change and on new-record. Cheap (small N).
 var fastLap = '--';
+var lastLap = null;
+var allTimeBest = null;
+const FASTLAP_PREFIX = 'vv_fastlap_';
+
+// Async-load the hash util once. main.js is a classic script; archive/hash.js
+// is an ES module — dynamic import() bridges them. Until it resolves,
+// _trackHash() returns null and the fast-lap logic falls back to '--' (no
+// regression vs. pre-Phase-A: the legacy global was '--' on first load too).
+let __hashVec = null;
+import('./archive/hash.js').then((m) => { __hashVec = m.hashVec || m.hashBrain; })
+    .catch((e) => { console.warn('[fastlap] hash util load failed', e); });
+
+// Track-hash cache so we don't re-xxHash the 512-dim vec on every render.
+let __trackHashCache = { vec: null, hash: null };
+function _trackHash() {
+    const v = window.currentTrackVec;
+    if (!v || !v.length || !__hashVec) return null;
+    if (__trackHashCache.vec === v) return __trackHashCache.hash;
+    try {
+        const h = __hashVec(v);
+        __trackHashCache = { vec: v, hash: h };
+        return h;
+    } catch (e) {
+        console.warn('[fastlap] hash failed', e);
+        return null;
+    }
+}
+function _trackKey() {
+    const h = _trackHash();
+    return h ? (FASTLAP_PREFIX + h) : null;
+}
+function _readFastLapForCurrentTrack() {
+    const key = _trackKey();
+    if (!key) return '--';
+    try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return '--';
+        const obj = JSON.parse(raw);
+        return (typeof obj.timeS === 'number') ? obj.timeS : '--';
+    } catch (_) { return '--'; }
+}
+function _writeFastLapForCurrentTrack(timeS, generation) {
+    const key = _trackKey();
+    if (!key) return false;
+    try {
+        localStorage.setItem(key, JSON.stringify({
+            timeS: timeS,
+            recordedAt: new Date().toISOString(),
+            generation: (generation | 0),
+        }));
+        return true;
+    } catch (e) {
+        console.warn('[fastlap] write failed', e);
+        return false;
+    }
+}
+function _computeAllTimeBest() {
+    let best = Infinity;
+    try {
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (!k || k.indexOf(FASTLAP_PREFIX) !== 0) continue;
+            try {
+                const obj = JSON.parse(localStorage.getItem(k));
+                if (obj && typeof obj.timeS === 'number' && obj.timeS < best) best = obj.timeS;
+            } catch (_) {}
+        }
+    } catch (_) {}
+    return Number.isFinite(best) ? best : null;
+}
+// Re-sync the global cache from localStorage. Called on boot (after the
+// hash util loads), on track change, on reset, and after a new-record write.
+function _syncFastLapForCurrentTrack() {
+    fastLap = _readFastLapForCurrentTrack();
+    allTimeBest = _computeAllTimeBest();
+}
+// Exposed on window so buttonResponse.js (classic script, separate file)
+// can call them without a module bridge. Kept namespaced under __vvFastLap
+// so we don't pollute the global namespace beyond `fastLap` itself.
+window.__vvFastLap = {
+    syncFromStore: _syncFastLapForCurrentTrack,
+    write: _writeFastLapForCurrentTrack,
+    read: _readFastLapForCurrentTrack,
+    trackKey: _trackKey,
+    allTimeBest: _computeAllTimeBest,
+    setLastLap: function (t) { lastLap = (typeof t === 'number') ? t : null; },
+    getLastLap: function () { return lastLap; },
+    prefix: FASTLAP_PREFIX,
+};
+
+// Legacy retirement: silently drop the pre-Phase-A track-confused
+// localStorage.fastLap key. The old value was attributed to no specific
+// track, so migrating it would be misleading; clean cut is honest.
+try { localStorage.removeItem('fastLap'); } catch (_) {}
+
+// Polling boot-sync: when the hash util eventually loads AND
+// currentTrackVec eventually becomes available, sync the cache so the
+// timer renders the right number on the very first paint that has both.
+// Bounded retries; gives up silently if neither materializes (display
+// stays '--' which is the correct "no record on this track yet" state).
+(function _bootSyncFastLap() {
+    let tries = 0;
+    const id = setInterval(() => {
+        if (__hashVec && window.currentTrackVec) {
+            _syncFastLapForCurrentTrack();
+            clearInterval(id);
+        } else if (++tries > 60) {
+            clearInterval(id);
+        }
+    }, 250);
+})();
+// =========================================================================
 
 // Sim-speed multiplier. Worker owns the AI-car accumulator; main owns a
 // parallel accumulator for the 2 player cars only. They drift slightly under
@@ -145,9 +278,10 @@ if (localStorage.getItem("traction")){
 if (localStorage.getItem("maxSpeed")){
     maxSpeed=JSON.parse(localStorage.getItem("maxSpeed"));
 }
-if (localStorage.getItem("fastLap")){
-    fastLap = JSON.parse(localStorage.getItem("fastLap"));
-}
+// Phase A: legacy `fastLap` localStorage key retired in the boot block
+// above; per-track values now live under vv_fastlap_<trackHash>. The
+// initial hydration from those keys happens in _bootSyncFastLap() once
+// both the hash util and currentTrackVec are available.
 if (localStorage.getItem("conservativeInit")){
     const v = parseFloat(localStorage.getItem("conservativeInit"));
     if (Number.isFinite(v)) conservativeInit = Math.max(0, Math.min(1, v));
@@ -1126,9 +1260,21 @@ function performNextBatch(genData){
     _times.save = performance.now() - _tSave;
     if (genData.laps > 0 && genData.lapTimes && genData.lapTimes.length){
         const minLap = Math.min.apply(null, genData.lapTimes);
+        // Phase A: lastLap is "the most recent completed lap", not the
+        // batch's fastest. Multi-lap batches still update lastLap to the
+        // last entry for an honest "what just happened?" signal.
+        const lastEntry = genData.lapTimes[genData.lapTimes.length - 1];
+        if (typeof lastEntry === 'number' && Number.isFinite(lastEntry)) {
+            lastLap = lastEntry;
+        }
         if (fastLap === '--' || minLap < fastLap){
+            // Per-track write. _writeFastLapForCurrentTrack is a no-op if
+            // currentTrackVec/hash aren't ready yet; the in-memory
+            // `fastLap` cache still updates so the UI reflects the new
+            // record even if the persist is deferred to the next sync.
             fastLap = minLap;
-            localStorage.setItem('fastLap', JSON.stringify(fastLap));
+            _writeFastLapForCurrentTrack(minLap, generation);
+            allTimeBest = _computeAllTimeBest();
         }
     }
 
@@ -1233,7 +1379,25 @@ function animate(){
         const wallSecs = ((performance.now() - wallStart)/1000).toFixed(2);
         timer.innerHTML = "<p>Sim Time: " + simSecs + "s " +
             "<span style='opacity:.65;font-size:.85em'>(wall " + wallSecs + "s &middot; " + simSpeed + "&times;)</span></p>";
-        timer.innerHTML += "<p>Fast Lap: " + (typeof fastLap === 'number' ? fastLap.toFixed(2) : fastLap) + "</p>";
+        // Phase A: track-aware fast-lap render. Three lines:
+        //   • Fast Lap: 12.34s (this track)
+        //   • Last:     14.10s
+        //   • all-time best: 9.10s
+        // The "(this track)" tag is load-bearing — without it a returning
+        // user could assume the displayed value is global. allTimeBest is
+        // hidden when only one track has ever been raced (best === current).
+        const _fastStr = (typeof fastLap === 'number' ? fastLap.toFixed(2) + 's' : fastLap);
+        const _lastStr = (typeof lastLap === 'number' ? lastLap.toFixed(2) + 's' : '—');
+        timer.innerHTML += "<p>Fast Lap: " + _fastStr +
+            " <span style='opacity:.55;font-size:.85em'>(this track)</span></p>";
+        timer.innerHTML += "<p style='opacity:.85'>Last: " + _lastStr + "</p>";
+        if (typeof allTimeBest === 'number' &&
+            (typeof fastLap !== 'number' || allTimeBest < fastLap)) {
+            // Only show the subscript when a different track holds the
+            // record — saves a row of noise for single-track users.
+            timer.innerHTML += "<p style='opacity:.55;font-size:.82em;margin-top:-4px'>" +
+                "all-time best: " + allTimeBest.toFixed(2) + "s</p>";
+        }
         ctx.save();
 
         if(!pause){

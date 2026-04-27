@@ -37,6 +37,24 @@ edits to `main.js` and `style.css`.
 | ✅ | B.2 | Brain-saves UI block in utils.js (`<details id='brainSaves'>` + dropdown + 4 buttons) | Claude | PR #2 | 2026-04-24 |
 | ✅ | B.3 | Smoke harness `tests/brain-saves-smoke.html` (6/6 PASS) + agent-browser validate | Claude | PR #2 | 2026-04-24 |
 
+**Follow-up: track-aware fast lap (FL.* below) shipped on the same branch (PR #2):**
+
+| Status | ID | Task | Owner | PR/SHA | Done date |
+|:--:|:--:|------|-------|--------|-----------|
+| ✅ | FL.1 | `hashVec` alias in `archive/hash.js`; per-track plumbing in `main.js` (state, helpers, boot-sync, legacy retirement) | Claude | PR #2 | 2026-04-24 |
+| ✅ | FL.2 | Track-scope `resetFastLap`; `clearAllFastLaps` in `buttonResponse.js`; `🗑 Clear all fast laps` button wired in 🧠 Brain saves disclosure; new timer render layout (`Fast Lap` + `Last` + `all-time best` subscript) | Claude | PR #2 | 2026-04-24 |
+| ✅ | FL.3 | Smoke harness `tests/fastlap-track-aware-smoke.html` (7/7 PASS) + agent-browser validate | Claude | PR #2 | 2026-04-24 |
+
+The FL.* row makes Fast Lap track-aware — the global `localStorage.fastLap`
+became `localStorage.vv_fastlap_<trackHash>` per track (hash via `hashVec`,
+xxHash32 of the 512-d CNN track embedding). New panel layout: "Fast Lap:
+12.34s (this track)" / "Last: 14.10s" / "all-time best: 9.10s" (subscript
+suppressed when current track holds the all-time record). `Reset Fast Lap`
+clears CURRENT track only; the bulk option lives in Brain saves as
+`🗑 Clear all fast laps` with a confirm() dialog. Legacy `fastLap`
+localStorage key silently retired at boot — the old value was
+track-confused, clean cut is honest.
+
 The B.* row delivers a multi-slot named-save system on top of the existing
 single-slot Save Best+Restart / Restore Old Brain pair. Storage: localStorage
 keys `vv_brainsave_<name>`. Load reuses the existing seeding pathway
