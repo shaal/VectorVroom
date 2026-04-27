@@ -2217,3 +2217,68 @@ label {
     font-weight: 600;
     letter-spacing: 0.02em;
 }
+
+/* === Phase A — Brain saves (named-slot persistence) === */
+/* Mounted directly below the legacy Save Best + Restart actions, so the
+ * single-slot legacy buttons and the multi-slot named saves are
+ * visually adjacent. Native <details>/<summary> for the disclosure. */
+.brain-saves {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: rgba(20, 28, 48, 0.55);
+    border: 1px solid rgba(120, 140, 200, 0.18);
+    border-radius: 6px;
+}
+.brain-saves > summary {
+    cursor: pointer;
+    font-weight: 600;
+    color: #cbd8ff;
+    user-select: none;
+    list-style: none;
+    padding: 2px 0;
+}
+.brain-saves > summary::-webkit-details-marker { display: none; }
+.brain-saves > summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 120ms ease-out;
+}
+.brain-saves[open] > summary::before { transform: rotate(90deg); }
+.brain-saves-hint {
+    font-weight: 400;
+    color: #8a98be;
+    font-size: 0.85em;
+    margin-left: 6px;
+}
+.brain-saves-body {
+    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.brain-saves-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: stretch;
+}
+.brain-saves-select {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 4px 8px;
+    background: rgba(10, 16, 32, 0.85);
+    color: #e6ebfa;
+    border: 1px solid rgba(120, 140, 200, 0.32);
+    border-radius: 4px;
+    font: inherit;
+}
+.brain-saves-fresh {
+    /* Make Start Fresh visually distinct so users don't confuse it with
+     * the cheaper Reset Brain. Soft amber tint = "destructive but
+     * not catastrophic." Confirm dialog still gates execution. */
+    background: rgba(180, 110, 60, 0.20) !important;
+    border-color: rgba(200, 130, 75, 0.45) !important;
+    color: #f0d6b6 !important;
+}
+.brain-saves-fresh:hover { background: rgba(180, 110, 60, 0.32) !important; }

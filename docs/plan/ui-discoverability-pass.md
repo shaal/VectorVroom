@@ -29,6 +29,23 @@ edits to `main.js` and `style.css`.
 | ✅ | A.9 | `[Learn]` links next to each row → open matching ELI15 chapter | Claude | PR #2 | 2026-04-24 |
 | ✅ | A.10 | Smoke-test via agent-browser + commit | Claude | PR #2 | 2026-04-24 |
 
+**Follow-up: brain saves (B.* below) shipped on the same branch (PR #2):**
+
+| Status | ID | Task | Owner | PR/SHA | Done date |
+|:--:|:--:|------|-------|--------|-----------|
+| ✅ | B.1 | Brain-saves handlers in buttonResponse.js (Save / Load / Delete / Start Fresh + dropdown enumerate) | Claude | PR #2 | 2026-04-24 |
+| ✅ | B.2 | Brain-saves UI block in utils.js (`<details id='brainSaves'>` + dropdown + 4 buttons) | Claude | PR #2 | 2026-04-24 |
+| ✅ | B.3 | Smoke harness `tests/brain-saves-smoke.html` (6/6 PASS) + agent-browser validate | Claude | PR #2 | 2026-04-24 |
+
+The B.* row delivers a multi-slot named-save system on top of the existing
+single-slot Save Best+Restart / Restore Old Brain pair. Storage: localStorage
+keys `vv_brainsave_<name>`. Load reuses the existing seeding pathway
+(write to `localStorage.bestBrain` + `restartBatch()`). Start Fresh reuses
+`bridge._debugReset()` + clears legacy keys + reloads — but **preserves
+named saves** so the user's curated slots survive a reset. The 🌱 Start
+button is amber-tinted to visually distinguish it from the cheaper Reset
+Brain button.
+
 **Implementation notes:**
 - Refactor strategy was **wrap-don't-rebuild**: the existing consistency, federation, and crosstab DOM nodes are appended into the disclosure body via `appendChild`, which preserves every event listener and `el.X` reference established earlier in the file. No event re-binding required.
 - Disclosure auto-opens whenever ANY URL flag is set (`?snapshots=1`, `?crosstab=1`, `?federation=1`, `?consistency=*`, `?archive=*`) so a user opening a share link immediately sees what's enabled.

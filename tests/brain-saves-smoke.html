@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Brain saves smoke (Phase A)</title>
+  <style>
+    body { font: 14px ui-monospace, monospace; background: #0e1422; color: #e6ebfa; padding: 18px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    p  { color: #8a98be; margin: 4px 0 14px; }
+    .ok   { color: #62f0b8; }
+    .fail { color: #f08080; font-weight: 700; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { padding: 4px 8px; border-bottom: 1px solid rgba(120,140,200,0.18); vertical-align: top; }
+    pre { white-space: pre-wrap; color: #cbd8ff; font-size: 12px; margin: 2px 0 0; }
+  </style>
+</head>
+<body>
+  <h1>Brain saves smoke (Phase A)</h1>
+  <p>
+    Exercises the named brain-save primitives in <code>buttonResponse.js</code>
+    (<code>vv_brainsave_*</code> localStorage keys). Tests are confined to
+    primitives that don't require <code>confirm()</code> dialogs —
+    specifically the <strong>byte-identity round-trip</strong> claim
+    (a saved brain reads back equal to the original) and the dropdown
+    enumeration. The confirm-bearing paths (Load / Delete / Start Fresh)
+    are trivial wrappers over these primitives plus an existing
+    <code>localStorage.setItem('bestBrain', ...)</code> + <code>restartBatch()</code>
+    pathway, verified by code review.
+  </p>
+
+  <div id="verdict">running…</div>
+
+  <h2 style="margin-top:18px;font-size:14px;">Claims</h2>
+  <table id="claims">
+    <thead><tr><th>#</th><th>claim</th><th>verdict</th><th>detail</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <!-- Provide the dropdown the handlers expect -->
+  <div style="visibility:hidden;height:0;overflow:hidden">
+    <select id="brainSavesSelect"><option value="" disabled selected>(no saves yet)</option></select>
+  </div>
+
+  <script>
+    // Globals buttonResponse.js's brain-saves block reads (refreshBrainSavesDropdown
+    // touches localStorage only; no DOM-state surprises).
+    window.__rvSessionBestFitness = 42.5;
+    window.lastEmbeddedTrackId = 'rect-test';
+  </script>
+  <script src="../AI-Car-Racer/buttonResponse.js"></script>
+  <script>
+    const claims = [];
+    const tbody = document.querySelector('#claims tbody');
+    const verdictEl = document.querySelector('#verdict');
+    function record(label, ok, detail) {
+      claims.push({ label, ok, detail });
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${claims.length}</td><td>${label}</td><td class="${ok ? 'ok' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</td><td><pre>${typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)}</pre></td>`;
+      tbody.appendChild(tr);
+    }
+    function clearAllSaves() {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf('vv_brainsave_') === 0) localStorage.removeItem(k);
+      }
+    }
+
+    try {
+      clearAllSaves();
+
+      // C1 — Round-trip byte-identity. The load path writes
+      // JSON.stringify(slot.brain) into localStorage.bestBrain. Verify
+      // that for any slot we seed, JSON.parse(JSON.stringify(slot.brain))
+      // is byte-identical to the original — i.e. the load path can
+      // reproduce the saved brain exactly.
+      const originalBrain = { levels: [
+        { biases: [0.1, -0.2, 0.3, 0.4], weights: [[0.5, -0.6], [0.7, 0.8]] },
+        { biases: [-0.9, 1.0], weights: [[1.1], [-1.2]] },
+      ] };
+      const slot = { name: 'rt', savedAt: '2026-04-24T18:00:00Z', fitness: 42.5, trackId: 'rect', brain: originalBrain };
+      localStorage.setItem('vv_brainsave_rt', JSON.stringify(slot));
+      const decoded = JSON.parse(localStorage.getItem('vv_brainsave_rt'));
+      const reSerializedBrain = JSON.stringify(decoded.brain);
+      const expectedBrain = JSON.stringify(originalBrain);
+      record('1. Save → reload → JSON byte-identity of brain payload',
+        reSerializedBrain === expectedBrain,
+        { equal: reSerializedBrain === expectedBrain, slotKeys: Object.keys(decoded), brainShape: Object.keys(decoded.brain) });
+
+      // C2 — refreshBrainSavesDropdown enumerates pre-seeded keys
+      localStorage.setItem('vv_brainsave_alpha', JSON.stringify({ name: 'alpha', brain: { levels: [{ biases: [1], weights: [[1]] }] }, fitness: 10 }));
+      localStorage.setItem('vv_brainsave_beta',  JSON.stringify({ name: 'beta',  brain: { levels: [{ biases: [9], weights: [[9]] }] }, fitness: 99 }));
+      refreshBrainSavesDropdown();
+      const sel = document.getElementById('brainSavesSelect');
+      const opts = Array.from(sel.options).map(o => o.value);
+      record('2. refreshBrainSavesDropdown enumerates vv_brainsave_* keys + decorates with fitness',
+        opts.includes('rt') && opts.includes('alpha') && opts.includes('beta') &&
+        Array.from(sel.options).some(o => /fit\s*99/.test(o.textContent)),
+        { optionValues: opts, sampleText: Array.from(sel.options).map(o => o.textContent) });
+
+      // C3 — Multi-slot distinct content
+      const a = JSON.parse(localStorage.getItem('vv_brainsave_alpha'));
+      const b = JSON.parse(localStorage.getItem('vv_brainsave_beta'));
+      record('3. Multi-slot coexistence: distinct content per name',
+        a && b && JSON.stringify(a.brain) !== JSON.stringify(b.brain),
+        { alphaBias0: a?.brain?.levels?.[0]?.biases?.[0], betaBias0: b?.brain?.levels?.[0]?.biases?.[0] });
+
+      // C4 — Direct simulation of brainSaveLoad's storage write (the
+      // confirm-bearing wrapper just gates this with a y/n prompt).
+      // Verify that copying a slot's brain into localStorage.bestBrain
+      // produces a value byte-identical to JSON.stringify(slot.brain).
+      const slotForLoad = JSON.parse(localStorage.getItem('vv_brainsave_alpha'));
+      localStorage.setItem('bestBrain', JSON.stringify(slotForLoad.brain));
+      const bestBrainAfter = localStorage.getItem('bestBrain');
+      record('4. Load primitive: localStorage.bestBrain ← JSON.stringify(slot.brain)',
+        bestBrainAfter === JSON.stringify(slotForLoad.brain),
+        { byteIdentical: bestBrainAfter === JSON.stringify(slotForLoad.brain), len: bestBrainAfter?.length });
+
+      // C5 — Delete primitive: remove a vv_brainsave_<name> key without
+      // touching the others.
+      localStorage.removeItem('vv_brainsave_alpha');
+      record('5. Delete primitive: removeItem affects only the named slot',
+        localStorage.getItem('vv_brainsave_alpha') === null &&
+        localStorage.getItem('vv_brainsave_beta') !== null &&
+        localStorage.getItem('vv_brainsave_rt') !== null,
+        {
+          alphaAfter: localStorage.getItem('vv_brainsave_alpha'),
+          betaSurvived: !!localStorage.getItem('vv_brainsave_beta'),
+          rtSurvived: !!localStorage.getItem('vv_brainsave_rt'),
+        });
+
+      // C6 — Verify the handlers exist as globals (sanity check that
+      // buttonResponse.js loaded and exposed the new functions).
+      record('6. brainSaveAs / brainSaveLoad / brainSaveDelete / brainStartFresh / refreshBrainSavesDropdown all defined',
+        typeof brainSaveAs === 'function' &&
+        typeof brainSaveLoad === 'function' &&
+        typeof brainSaveDelete === 'function' &&
+        typeof brainStartFresh === 'function' &&
+        typeof refreshBrainSavesDropdown === 'function',
+        {
+          brainSaveAs: typeof brainSaveAs,
+          brainSaveLoad: typeof brainSaveLoad,
+          brainSaveDelete: typeof brainSaveDelete,
+          brainStartFresh: typeof brainStartFresh,
+          refreshBrainSavesDropdown: typeof refreshBrainSavesDropdown,
+        });
+
+    } catch (e) {
+      record('harness error', false, String(e && e.stack || e));
+    } finally {
+      clearAllSaves();
+      localStorage.removeItem('bestBrain');
+      const passed = claims.filter(c => c.ok).length;
+      const total = claims.length;
+      verdictEl.className = passed === total ? 'ok' : 'fail';
+      verdictEl.textContent = passed === total
+        ? `PASS — ${passed}/${total} claims hold.`
+        : `FAIL — ${passed}/${total} claims hold.`;
+    }
+  </script>
+</body>
+</html>

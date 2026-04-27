@@ -172,6 +172,24 @@ function phaseToLayout(phase){
                     <button class='controlButton' onclick='restoreOldBrain();'>Restore Old Brain</button>
                 </div>
             </details>
+            <details id='brainSaves' class='brain-saves' open>
+                <summary>🧠 Brain saves <span class='brain-saves-hint'>(named slots)</span></summary>
+                <div class='brain-saves-body'>
+                    <div class='brain-saves-row'>
+                        <select id='brainSavesSelect' class='brain-saves-select' aria-label='Saved brain slots'>
+                            <option value='' disabled selected>(no saves yet)</option>
+                        </select>
+                    </div>
+                    <div class='brain-saves-row'>
+                        <button class='controlButton' onclick='brainSaveAs();' title='Save the current best brain under a name you choose'>💾 Save current as…</button>
+                        <button class='controlButton' onclick='brainSaveLoad();' title='Replace the current best brain with the selected saved one and restart the batch'>📂 Load</button>
+                        <button class='controlButton' onclick='brainSaveDelete();' title='Delete the selected saved brain'>🗑 Delete</button>
+                    </div>
+                    <div class='brain-saves-row'>
+                        <button class='controlButton brain-saves-fresh' onclick='brainStartFresh();' title='Wipe ALL trained state (archive + saved best + fast lap) and reload — true gen-0 start. Named saves are preserved.'>🌱 Start with empty brain</button>
+                    </div>
+                </div>
+            </details>
             `;
             bottomText.innerHTML = `
                 <h1>Train your model!</h1>
@@ -189,12 +207,22 @@ function phaseToLayout(phase){
             try {
                 const brainShareEl = document.getElementById('brainShareSection');
                 const moreActionsEl = document.getElementById('moreActions');
+                const brainSavesEl = document.getElementById('brainSaves');
                 const rvPanelEl = document.getElementById('rv-panel');
                 if (rvPanelEl && rvPanelEl.parentNode) {
                     if (brainShareEl) rvPanelEl.parentNode.insertBefore(brainShareEl, rvPanelEl.nextSibling);
                     if (moreActionsEl && brainShareEl) brainShareEl.parentNode.insertBefore(moreActionsEl, brainShareEl.nextSibling);
                     else if (moreActionsEl) rvPanelEl.parentNode.insertBefore(moreActionsEl, rvPanelEl.nextSibling);
+                    // Brain saves sits directly under moreActions so the
+                    // legacy single-slot Save Best+Restart button and the
+                    // new named-slot row are visually adjacent.
+                    if (brainSavesEl && moreActionsEl) moreActionsEl.parentNode.insertBefore(brainSavesEl, moreActionsEl.nextSibling);
                 }
+            } catch (_) {}
+            // Populate the brain-saves dropdown from localStorage now that
+            // the <select> exists in the DOM.
+            try {
+                if (typeof refreshBrainSavesDropdown === 'function') refreshBrainSavesDropdown();
             } catch (_) {}
             showInputCanvas();
             showGraphCanvas();
