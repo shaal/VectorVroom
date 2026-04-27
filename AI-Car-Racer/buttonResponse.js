@@ -87,6 +87,158 @@ function restoreOldBrain(){
     localStorage.setItem("bestBrain", localStorage.getItem("oldBestBrain"));
     restartBatch();
 }
+
+// === Phase A — named brain saves (multi-slot localStorage) =================
+//
+// Mirrors the single-slot save()/restoreOldBrain() pair above but with
+// arbitrary user-named slots, keyed under `vv_brainsave_<name>`. Each slot
+// stores the same shape as serializeBrain(bestCar.brain) plus light meta
+// (fitness, savedAt, optional trackId/generation) for the dropdown label.
+//
+// Load reuses the existing seeding pathway: write to localStorage.bestBrain
+// + restartBatch(), exactly like restoreOldBrain. Start-fresh wipes every
+// piece of trained state — IDB archive via bridge._debugReset(), the
+// localStorage prior, the lap timer — and reloads.
+const BRAIN_SAVE_PREFIX = "vv_brainsave_";
+
+function _brainSavesList(){
+    var out = [];
+    for (var i = 0; i < localStorage.length; i++){
+        var k = localStorage.key(i);
+        if (k && k.indexOf(BRAIN_SAVE_PREFIX) === 0){
+            out.push(k.slice(BRAIN_SAVE_PREFIX.length));
+        }
+    }
+    out.sort();
+    return out;
+}
+function refreshBrainSavesDropdown(selectedName){
+    var sel = document.getElementById("brainSavesSelect");
+    if (!sel) return;
+    var names = _brainSavesList();
+    sel.innerHTML = "";
+    if (names.length === 0){
+        var opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "(no saves yet)";
+        opt.disabled = true;
+        opt.selected = true;
+        sel.appendChild(opt);
+        return;
+    }
+    for (var i = 0; i < names.length; i++){
+        var n = names[i];
+        var opt2 = document.createElement("option");
+        opt2.value = n;
+        // Decorate the label with fitness if we can read it cheaply.
+        var label = n;
+        try {
+            var raw = localStorage.getItem(BRAIN_SAVE_PREFIX + n);
+            if (raw){
+                var slot = JSON.parse(raw);
+                if (slot && typeof slot.fitness === "number"){
+                    label += "  (fit " + slot.fitness.toFixed(1) + ")";
+                }
+            }
+        } catch (_) {}
+        opt2.textContent = label;
+        if (selectedName && n === selectedName) opt2.selected = true;
+        sel.appendChild(opt2);
+    }
+}
+function brainSaveAs(){
+    if (typeof bestCar === "undefined" || !bestCar || !bestCar.brain){
+        window.alert("No best brain to save yet — train at least one generation first.");
+        return;
+    }
+    // Default name: timestamp-fitness, e.g. "2026-04-24-1830-fit42". The user
+    // can rename freely; only the prompt response is used as the key.
+    var fit = Number(window.__rvSessionBestFitness) || 0;
+    var ts = new Date().toISOString().replace(/[:T]/g, "-").slice(0, 16);
+    var defaultName = ts + "-fit" + fit.toFixed(0);
+    var name = (window.prompt("Name this saved brain:", defaultName) || "").trim();
+    if (!name) return;
+    if (localStorage.getItem(BRAIN_SAVE_PREFIX + name)){
+        if (!window.confirm('"' + name + '" already exists. Overwrite?')) return;
+    }
+    var slot = {
+        name: name,
+        savedAt: new Date().toISOString(),
+        fitness: fit,
+        // Optional context — used only for dropdown labels and inspection.
+        // Best-effort; missing fields don't break anything.
+        trackId: (window.lastEmbeddedTrackId || null),
+        // serializeBrain is a global from main.js; its output is the shape
+        // localStorage.bestBrain expects, so Load is a one-line copy.
+        brain: serializeBrain(bestCar.brain),
+    };
+    localStorage.setItem(BRAIN_SAVE_PREFIX + name, JSON.stringify(slot));
+    refreshBrainSavesDropdown(name);
+}
+function brainSaveLoad(){
+    var sel = document.getElementById("brainSavesSelect");
+    var name = sel && sel.value;
+    if (!name){ window.alert("Pick a saved brain from the dropdown first."); return; }
+    var raw = localStorage.getItem(BRAIN_SAVE_PREFIX + name);
+    if (!raw){ window.alert('Saved brain "' + name + '" not found.'); refreshBrainSavesDropdown(); return; }
+    var slot;
+    try { slot = JSON.parse(raw); } catch (_) {
+        window.alert('Saved brain "' + name + '" is corrupted.');
+        return;
+    }
+    if (!slot || !slot.brain){
+        window.alert('Saved brain "' + name + '" is empty.');
+        return;
+    }
+    var ok = window.confirm(
+        'Load "' + name + '"?\n\n' +
+        'This will REPLACE the current best brain with the saved one and ' +
+        'restart the batch.\n\nProceed?'
+    );
+    if (!ok) return;
+    // Mirror restoreOldBrain: write to bestBrain, restart. The seeding
+    // loop in main.js reads localStorage.bestBrain when the batch begins.
+    localStorage.setItem("bestBrain", JSON.stringify(slot.brain));
+    if (typeof restartBatch === "function") restartBatch();
+}
+function brainSaveDelete(){
+    var sel = document.getElementById("brainSavesSelect");
+    var name = sel && sel.value;
+    if (!name) return;
+    if (!window.confirm('Delete saved brain "' + name + '"? This cannot be undone.')) return;
+    localStorage.removeItem(BRAIN_SAVE_PREFIX + name);
+    refreshBrainSavesDropdown();
+}
+async function brainStartFresh(){
+    var ok = window.confirm(
+        "Start with an empty brain?\n\n" +
+        "This will WIPE everything trained so far:\n" +
+        " • the live archive (all archived brains, tracks, dynamics)\n" +
+        " • the saved best brain + fast lap\n" +
+        " • the lineage DAG\n" +
+        "\n" +
+        "Your named brain saves are NOT deleted (use Delete for those).\n" +
+        "The page will reload. Proceed?"
+    );
+    if (!ok) return;
+    // Wipe IDB + bridge in-memory state via bridge._debugReset(). The
+    // bridge surfaces this on window for the verifier console; we use the
+    // same hook here.
+    try {
+        if (window.__rvBridge && typeof window.__rvBridge._debugReset === "function"){
+            await window.__rvBridge._debugReset();
+        }
+    } catch (e) { console.warn("[brain-saves] _debugReset failed", e); }
+    // Wipe legacy localStorage trained state. Named saves
+    // (vv_brainsave_*) are deliberately preserved so a fresh-start
+    // doesn't lose the user's curated slots.
+    var legacyKeys = ["bestBrain", "oldBestBrain", "fastLap", "progress", "rvAnnotations"];
+    for (var i = 0; i < legacyKeys.length; i++){
+        try { localStorage.removeItem(legacyKeys[i]); } catch (_) {}
+    }
+    location.reload();
+}
+// =========================================================================
 function resetFastLap(){
     fastLap = '--';
 }
