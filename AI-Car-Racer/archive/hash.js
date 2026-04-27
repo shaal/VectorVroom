@@ -79,3 +79,9 @@ export function hashBrain(flat, seed = 0) {
   const h = xxHash32Bytes(bytes, seed);
   return h.toString(16).padStart(8, '0');
 }
+
+// Symmetric alias: the same xxHash32-over-Float32Array function is used to
+// content-address brains (Phase 1D) AND tracks (Phase A fastlap-track-aware).
+// "hashBrain" reads naturally for the F5 dedup site; "hashVec" reads naturally
+// at the track-fastlap site. Same code, two domain-honest names.
+export const hashVec = hashBrain;

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fast-lap track-aware smoke (Phase A)</title>
+  <style>
+    body { font: 14px ui-monospace, monospace; background: #0e1422; color: #e6ebfa; padding: 18px; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    p  { color: #8a98be; margin: 4px 0 14px; }
+    .ok   { color: #62f0b8; }
+    .fail { color: #f08080; font-weight: 700; }
+    table { border-collapse: collapse; width: 100%; }
+    td, th { padding: 4px 8px; border-bottom: 1px solid rgba(120,140,200,0.18); vertical-align: top; }
+    pre { white-space: pre-wrap; color: #cbd8ff; font-size: 12px; margin: 2px 0 0; }
+  </style>
+</head>
+<body>
+  <h1>Fast-lap track-aware smoke (Phase A)</h1>
+  <p>
+    Exercises the per-track fast-lap storage primitives. Imports
+    <code>archive/hash.js</code> directly to verify hash determinism,
+    then drives <code>localStorage</code> with the
+    <code>vv_fastlap_&lt;trackHash&gt;</code> shape used by
+    <code>main.js</code>. Also confirms the legacy <code>fastLap</code>
+    key retirement leaves the per-track keys alone.
+  </p>
+
+  <div id="verdict">running…</div>
+
+  <h2 style="margin-top:18px;font-size:14px;">Claims</h2>
+  <table id="claims">
+    <thead><tr><th>#</th><th>claim</th><th>verdict</th><th>detail</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <script type="module">
+    import { hashVec, hashBrain } from '../AI-Car-Racer/archive/hash.js';
+
+    const claims = [];
+    const tbody = document.querySelector('#claims tbody');
+    const verdictEl = document.querySelector('#verdict');
+    function record(label, ok, detail) {
+      claims.push({ label, ok, detail });
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${claims.length}</td><td>${label}</td><td class="${ok ? 'ok' : 'fail'}">${ok ? 'PASS' : 'FAIL'}</td><td><pre>${typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2)}</pre></td>`;
+      tbody.appendChild(tr);
+    }
+
+    const PREFIX = 'vv_fastlap_';
+    function clearAll() {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && (k.indexOf(PREFIX) === 0 || k === 'fastLap')) localStorage.removeItem(k);
+      }
+    }
+    function makeTrackVec(seed) {
+      // Mimic the 512-d Float32 CNN embedding shape; deterministic per seed.
+      const v = new Float32Array(512);
+      let x = seed | 0;
+      for (let i = 0; i < 512; i++) {
+        x = (Math.imul(x, 1664525) + 1013904223) | 0;
+        v[i] = (x / 0x7fffffff);
+      }
+      return v;
+    }
+
+    try {
+      clearAll();
+
+      // C1 — hashVec is the same function as hashBrain (alias check)
+      record('1. hashVec is exported as an alias of hashBrain (same fn or same output)',
+        hashVec === hashBrain || (
+          hashVec(new Float32Array([1,2,3])) === hashBrain(new Float32Array([1,2,3]))
+        ),
+        { sameRef: hashVec === hashBrain });
+
+      // C2 — Determinism: same vec → same hash, twice
+      const v1 = makeTrackVec(42);
+      const v1again = makeTrackVec(42); // same seed → same content
+      const h1 = hashVec(v1);
+      const h1again = hashVec(v1again);
+      record('2. hashVec deterministic: identical input → byte-identical hash',
+        h1 === h1again && /^[0-9a-f]{8}$/.test(h1),
+        { hash: h1, equal: h1 === h1again, len: h1.length });
+
+      // C3 — Different vecs → different hashes (collision-free in practice)
+      const v2 = makeTrackVec(99);
+      const h2 = hashVec(v2);
+      record('3. Distinct vecs produce distinct hashes',
+        h1 !== h2,
+        { h1, h2 });
+
+      // C4 — Per-track segregation: writing a record under track-A
+      // doesn't surface under track-B's key, and vice versa.
+      const keyA = PREFIX + h1;
+      const keyB = PREFIX + h2;
+      localStorage.setItem(keyA, JSON.stringify({ timeS: 12.34, recordedAt: '2026-04-24T00:00:00Z', generation: 5 }));
+      localStorage.setItem(keyB, JSON.stringify({ timeS:  8.76, recordedAt: '2026-04-24T00:00:00Z', generation: 9 }));
+      const readA = JSON.parse(localStorage.getItem(keyA));
+      const readB = JSON.parse(localStorage.getItem(keyB));
+      record('4. Per-track segregation: each track\'s record reads back independently',
+        readA.timeS === 12.34 && readB.timeS === 8.76,
+        { trackA_time: readA.timeS, trackB_time: readB.timeS });
+
+      // C5 — All-time-best math: min over all vv_fastlap_* entries
+      let allBest = Infinity;
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf(PREFIX) === 0) {
+          const t = JSON.parse(localStorage.getItem(k)).timeS;
+          if (t < allBest) allBest = t;
+        }
+      }
+      record('5. all-time-best = min over per-track entries',
+        allBest === 8.76,
+        { allBest, expected: 8.76 });
+
+      // C6 — Legacy retirement: pre-existing localStorage.fastLap should be
+      // removable without disturbing per-track keys.
+      localStorage.setItem('fastLap', '17.5'); // simulate pre-upgrade state
+      // The retirement code in main.js does: localStorage.removeItem('fastLap')
+      localStorage.removeItem('fastLap');
+      record('6. Legacy fastLap key retirement leaves per-track records intact',
+        localStorage.getItem('fastLap') === null &&
+        localStorage.getItem(keyA) !== null &&
+        localStorage.getItem(keyB) !== null,
+        {
+          legacyAfter: localStorage.getItem('fastLap'),
+          trackAStillThere: !!localStorage.getItem(keyA),
+          trackBStillThere: !!localStorage.getItem(keyB),
+        });
+
+      // C7 — Clear-all primitive: remove every vv_fastlap_* key, leave others.
+      localStorage.setItem('vv_brainsave_unrelated', '{"keep":true}');
+      const toRemove = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.indexOf(PREFIX) === 0) toRemove.push(k);
+      }
+      toRemove.forEach(k => localStorage.removeItem(k));
+      record('7. Clear-all primitive removes vv_fastlap_* but spares vv_brainsave_*',
+        localStorage.getItem(keyA) === null &&
+        localStorage.getItem(keyB) === null &&
+        localStorage.getItem('vv_brainsave_unrelated') !== null,
+        {
+          trackARemoved: localStorage.getItem(keyA) === null,
+          trackBRemoved: localStorage.getItem(keyB) === null,
+          brainSaveSpared: !!localStorage.getItem('vv_brainsave_unrelated'),
+        });
+
+    } catch (e) {
+      record('harness error', false, String(e && e.stack || e));
+    } finally {
+      clearAll();
+      localStorage.removeItem('vv_brainsave_unrelated');
+      const passed = claims.filter(c => c.ok).length;
+      const total = claims.length;
+      verdictEl.className = passed === total ? 'ok' : 'fail';
+      verdictEl.textContent = passed === total
+        ? `PASS — ${passed}/${total} claims hold.`
+        : `FAIL — ${passed}/${total} claims hold.`;
+    }
+  </script>
+</body>
+</html>
